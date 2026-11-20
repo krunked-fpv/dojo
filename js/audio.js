@@ -4,7 +4,10 @@ const E2 = 82.41;
 const F2 = 87.31;
 const Fs2 = 92.50;
 const G2 = 98.00;
+const Gs2 = 103.83;
+const Ab2 = 103.83;
 const A2 = 110.00;
+const Bb2 = 116.54;
 const B1 = 61.74;
 const B2 = 123.47;
 const C2 = 65.41;
@@ -12,36 +15,46 @@ const D2 = 73.42;
 const Ds2 = 77.78;
 
 const C3 = 130.81;
+const Cs3 = 138.59;
 const D3 = 146.83;
 const Ds3 = 155.56;
 const E3 = 164.81;
 const F3 = 174.61;
 const Fs3 = 185.00;
 const G3 = 196.00;
+const Gs3 = 207.65;
 const A3 = 220.00;
+const Bb3 = 233.08;
 const B3 = 246.94;
 
 const C4 = 261.63;
+const Cs4 = 277.18;
 const D4 = 293.66;
 const Ds4 = 311.13;
 const E4 = 329.63;
 const F4 = 349.23;
 const Fs4 = 369.99;
 const G4 = 392.00;
+const Gs4 = 415.30;
 const A4 = 440.00;
 const Bb4 = 466.16;
 const B4 = 493.88;
 
 const C5 = 523.25;
+const Cs5 = 554.37;
 const D5 = 587.33;
 const Ds5 = 622.25;
 const E5 = 659.25;
 const F5 = 698.46;
 const Fs5 = 739.99;
 const G5 = 783.99;
+const Gs5 = 830.61;
 const A5 = 880.00;
+const Bb5 = 932.33;
 const B5 = 987.77;
 const C6 = 1046.50;
+const D6 = 1174.66;
+const E6 = 1318.51;
 
 export const THEMES = {
   title: {
@@ -165,6 +178,243 @@ export const THEMES = {
     ],
     leadGain: 0.064,
     arpGain: 0.032,
+    bassGain: 0.108,
+    drumGain: 0.052,
+  },
+  forest: {
+    // Warm gentle woodland flute/pulse groove (G Major / E Minor pastoral)
+    stepSec: 0.175,
+    leadWave: 'pulse25',
+    arpWave: 'triangle',
+    melody: [
+      B4, -1, D5, 0, E5, -1, G5, 0,
+      Fs5, -1, D5, B4, A4, -1, 0, 0,
+      G4, -1, B4, 0, D5, -1, B4, 0,
+      C5, B4, A4, G4, E4, -1, 0, 0,
+      E5, -1, D5, C5, B4, -1, D5, 0,
+      C5, -1, A4, B4, G4, -1, 0, 0,
+      A4, B4, C5, D5, E5, -1, Fs5, 0,
+      D5, -1, B4, A4, G4, -1, 0, 0,
+    ],
+    arp: [
+      G4, 0, D4, 0, B3, 0, D4, 0,
+      A4, 0, Fs4, 0, D4, 0, Fs4, 0,
+      E4, 0, B3, 0, G3, 0, B3, 0,
+      C4, 0, E4, 0, G4, 0, E4, 0,
+    ],
+    bass: [
+      G3, 0, D3, 0, E3, 0, B2, 0,
+      D3, 0, A2, 0, D3, 0, A2, 0,
+      G3, 0, D3, 0, B2, 0, G2, 0,
+      C3, 0, G3, 0, E3, 0, B2, 0,
+      C3, 0, G3, 0, G2, 0, D3, 0,
+      A2, 0, E3, 0, G2, 0, D3, 0,
+      C3, 0, A2, 0, D3, 0, Fs3, 0,
+      G3, 0, D3, 0, G2, 0, D3, 0,
+    ],
+    drums: [
+      'K', 0, 0, 'h', 0, 0, 'h', 0,
+      'K', 0, 0, 'h', 'S', 0, 'h', 0,
+    ],
+    leadGain: 0.052,
+    arpGain: 0.028,
+    bassGain: 0.088,
+    drumGain: 0.036,
+  },
+  cave: {
+    // Mysterious echoing crystal minor arpeggio (D Minor)
+    stepSec: 0.180,
+    leadWave: 'pulse12',
+    arpWave: 'triangle',
+    melody: [
+      D5, -1, -1, 0, F5, -1, E5, 0,
+      A4, -1, -1, 0, C5, -1, Bb4, 0,
+      A4, -1, G4, 0, F4, -1, E4, 0,
+      D4, -1, F4, A4, Cs5, -1, 0, 0,
+      D5, -1, A4, 0, F5, -1, D5, 0,
+      E5, -1, C5, 0, Bb4, -1, G4, 0,
+      A4, -1, Cs5, 0, E5, -1, A5, 0,
+      F5, -1, E5, Cs5, D5, -1, 0, 0,
+    ],
+    arp: [
+      D4, 0, A4, 0, F4, 0, A4, 0,
+      C4, 0, G4, 0, E4, 0, G4, 0,
+      Bb3, 0, F4, 0, D4, 0, F4, 0,
+      A3, 0, E4, 0, Cs4, 0, E4, 0,
+    ],
+    bass: [
+      D3, 0, 0, 0, A2, 0, 0, 0,
+      C3, 0, 0, 0, G2, 0, 0, 0,
+      Bb2, 0, 0, 0, F2, 0, 0, 0,
+      A2, 0, 0, 0, E2, 0, A2, 0,
+      D3, 0, A2, 0, D3, 0, F3, 0,
+      C3, 0, G2, 0, Bb2, 0, F2, 0,
+      A2, 0, E3, 0, A2, 0, Cs3, 0,
+      D3, 0, A2, 0, D2, 0, 0, 0,
+    ],
+    drums: [
+      'K', 0, 0, 0, 0, 0, 'h', 0,
+      0, 0, 'h', 0, 'S', 0, 0, 0,
+    ],
+    leadGain: 0.048,
+    arpGain: 0.034,
+    bassGain: 0.084,
+    drumGain: 0.028,
+  },
+  water: {
+    // Breezy sunlit lagoon bounce (C Major / F Major)
+    stepSec: 0.160,
+    leadWave: 'pulse25',
+    melody: [
+      E5, 0, G5, 0, C6, -1, B5, G5,
+      A5, 0, G5, E5, D5, -1, 0, 0,
+      F5, 0, A5, 0, G5, -1, E5, C5,
+      D5, E5, F5, G5, E5, -1, 0, 0,
+      G5, 0, E5, C5, A4, 0, C5, D5,
+      E5, 0, G5, E5, D5, -1, 0, 0,
+      C5, 0, D5, E5, F5, 0, G5, A5,
+      G5, -1, D5, B4, C5, -1, 0, 0,
+    ],
+    arp: [
+      C4, 0, E4, G4, C4, 0, E4, G4,
+      F4, 0, A4, C5, G4, 0, B4, D5,
+      A4, 0, C5, E5, F4, 0, A4, C5,
+      G4, 0, B4, D5, C4, 0, E4, G4,
+    ],
+    bass: [
+      C3, 0, G2, C3, C3, 0, E3, 0,
+      F3, 0, C3, 0, G2, 0, D3, 0,
+      F3, 0, C3, F3, C3, 0, G2, 0,
+      G2, 0, D3, 0, C3, 0, G2, 0,
+      C3, 0, E3, 0, A2, 0, E3, 0,
+      C3, 0, G2, 0, G2, 0, D3, 0,
+      A2, 0, E3, 0, F2, 0, C3, 0,
+      G2, 0, D3, G2, C3, 0, G2, 0,
+    ],
+    drums: [
+      'K', 0, 'h', 0, 'S', 0, 'h', 'h',
+      'K', 0, 'h', 'K', 'S', 0, 'h', 0,
+    ],
+    leadGain: 0.054,
+    arpGain: 0.032,
+    bassGain: 0.090,
+    drumGain: 0.042,
+  },
+  volcano: {
+    // Driving fiery bass & heroic minor brassy pulse (A Minor / E Phrygian)
+    stepSec: 0.148,
+    leadWave: 'pulse25',
+    melody: [
+      A4, -1, 0, A4, C5, -1, E5, 0,
+      F5, -1, E5, D5, E5, -1, B4, 0,
+      A4, -1, C5, D5, E5, -1, A5, 0,
+      Gs5, -1, E5, B4, E5, -1, 0, 0,
+      F5, -1, D5, B4, E5, -1, C5, A4,
+      D5, -1, B4, Gs4, A4, -1, E4, 0,
+      F4, -1, A4, C5, E5, -1, D5, C5,
+      B4, -1, Gs4, E4, A4, -1, 0, 0,
+    ],
+    arp: [
+      A3, -1, E4, 0, A3, -1, E4, 0,
+      D4, -1, F4, 0, E4, -1, Gs4, 0,
+      A3, -1, E4, 0, C4, -1, E4, 0,
+      E4, -1, B4, 0, Gs4, -1, E4, 0,
+    ],
+    bass: [
+      A2, 0, A3, 0, E2, 0, A2, 0,
+      F2, 0, F3, 0, E2, 0, B2, 0,
+      A2, 0, A3, 0, C3, 0, E3, 0,
+      E2, 0, E3, 0, Gs2, 0, B2, 0,
+      D2, 0, D3, 0, C2, 0, C3, 0,
+      B1, 0, B2, 0, A2, 0, E3, 0,
+      F2, 0, C3, 0, E2, 0, B2, 0,
+      E2, 0, Gs2, B2, A2, 0, E2, 0,
+    ],
+    drums: [
+      'K', 0, 'h', 0, 'S', 0, 'h', 0,
+      'K', 'K', 'h', 0, 'S', 0, 'h', 'S',
+    ],
+    leadGain: 0.060,
+    arpGain: 0.034,
+    bassGain: 0.104,
+    drumGain: 0.048,
+  },
+  peak: {
+    // Ethereal crystalline starlit bell-pulse waltz (3/4 feel: 48 steps, A Major / F# Minor)
+    stepSec: 0.185,
+    leadWave: 'pulse12',
+    arpWave: 'triangle',
+    melody: [
+      Cs5, -1, E5, A5, -1, Gs5,
+      Fs5, -1, E5, Cs5, -1, 0,
+      D5, -1, Fs5, E5, -1, Cs5,
+      B4, -1, -1, 0, 0, 0,
+      A4, -1, Cs5, E5, -1, A5,
+      Gs5, -1, Fs5, E5, -1, Cs5,
+      D5, -1, B4, Cs5, -1, Gs4,
+      A4, -1, -1, 0, 0, 0,
+    ],
+    arp: [
+      A4, 0, E4, Cs5, 0, E4,
+      Fs4, 0, Cs4, A4, 0, Cs4,
+      D4, 0, A4, E4, 0, B4,
+      E4, 0, B4, Gs4, 0, B4,
+    ],
+    bass: [
+      A2, 0, E3, A3, E3, 0,
+      Fs2, 0, Cs3, Fs3, Cs3, 0,
+      D3, 0, A3, E3, 0, B3,
+      E2, 0, B2, E3, B2, 0,
+      A2, 0, E3, Cs3, 0, A3,
+      E3, 0, B3, Cs3, 0, Gs3,
+      D3, 0, A3, E3, 0, B2,
+      A2, 0, E3, A2, 0, 0,
+    ],
+    drums: [
+      'K', 0, 'h', 0, 'h', 0,
+      'K', 0, 'h', 'S', 0, 'h',
+    ],
+    leadGain: 0.050,
+    arpGain: 0.032,
+    bassGain: 0.084,
+    drumGain: 0.024,
+  },
+  shrine: {
+    // Epic guardian showdown theme (D Minor heroic battle, 128 steps)
+    stepSec: 0.136,
+    leadWave: 'pulse25',
+    melody: [
+      D5, -1, 0, D5, F5, -1, A5, 0, Bb5, -1, -1, 0, A5, -1, G5, 0,
+      F5, -1, E5, D5, Cs5, -1, E5, 0, A5, -1, -1, 0, E5, -1, 0, 0,
+      D5, -1, F5, 0, A5, -1, D6, 0, C6, -1, Bb5, 0, A5, -1, G5, 0,
+      F5, -1, G5, 0, E5, -1, Cs5, 0, D5, -1, -1, 0, A4, -1, 0, 0,
+      Bb4, -1, D5, 0, F5, -1, Bb5, 0, A5, -1, G5, 0, F5, -1, E5, 0,
+      G5, -1, E5, 0, C5, -1, G4, 0, A4, -1, Cs5, 0, E5, -1, A5, 0,
+      D6, -1, C6, 0, Bb5, -1, A5, 0, G5, -1, F5, 0, E5, -1, D5, 0,
+      Cs5, -1, E5, 0, A5, -1, Cs5, 0, D5, -1, -1, 0, 0, 0, 0, 0,
+    ],
+    arp: [
+      D4, -1, 0, 0, A4, -1, 0, 0, Bb4, -1, 0, 0, G4, -1, 0, 0,
+      F4, -1, 0, 0, E4, -1, 0, 0, A4, -1, 0, 0, Cs4, -1, 0, 0,
+      D4, -1, 0, 0, F4, -1, 0, 0, C5, -1, 0, 0, G4, -1, 0, 0,
+      A4, -1, 0, 0, E4, -1, 0, 0, D4, -1, 0, 0, A3, -1, 0, 0,
+    ],
+    bass: [
+      D2, 0, D3, 0, D2, 0, A2, 0, Bb2, 0, Bb3, 0, G2, 0, G3, 0,
+      F2, 0, F3, 0, A2, 0, A3, 0, A2, 0, E3, 0, Cs3, 0, A2, 0,
+      D2, 0, D3, 0, F2, 0, F3, 0, C2, 0, C3, 0, G2, 0, G3, 0,
+      A2, 0, A3, 0, A2, 0, E2, 0, D2, 0, D3, 0, A2, 0, D3, 0,
+      Bb2, 0, Bb3, 0, F2, 0, F3, 0, F2, 0, C3, 0, D3, 0, A2, 0,
+      C2, 0, C3, 0, G2, 0, C3, 0, A2, 0, A3, 0, E3, 0, A2, 0,
+      Bb2, 0, Bb3, 0, G2, 0, G3, 0, E2, 0, E3, 0, D2, 0, D3, 0,
+      A2, 0, E3, 0, A2, 0, Cs3, 0, D2, 0, A2, 0, D3, 0, 0, 0,
+    ],
+    drums: [
+      'K', 0, 'h', 0, 'S', 0, 'h', 0,
+      'K', 0, 'K', 'h', 'S', 0, 'h', 'S',
+    ],
+    leadGain: 0.064,
+    arpGain: 0.036,
     bassGain: 0.108,
     drumGain: 0.052,
   },
@@ -717,7 +967,7 @@ export class AudioEngine {
         const arpHold = this._countHoldSteps(theme.arp, arpIdx);
         this.triggerVoice({
           freq: arpFreq,
-          wave: 'pulse25',
+          wave: theme.arpWave || 'pulse25',
           startTime: this.nextStepTime,
           duration: stepDur * Math.max(0.65, arpHold - 0.18),
           attack: 0.004,
@@ -1070,6 +1320,83 @@ export class AudioEngine {
         });
         break;
 
+      case 'ice':
+        this.playNoise({
+          duration: 0.24,
+          gain: 0.11,
+          filterType: 'bandpass',
+          startFreq: 1150,
+          endFreq: 680,
+          q: 1.8,
+        });
+        [880, 1174.66, 1318.51, 1567.98].forEach((f, i) => {
+          this.triggerVoice({
+            freq: f,
+            endFreq: f * 1.03,
+            wave: i % 2 === 0 ? 'pulse12' : 'sine',
+            duration: 0.11,
+            gain: 0.082,
+            delay: i * 0.042,
+          });
+        });
+        break;
+
+      case 'ghost':
+        this.triggerVoice({
+          freq: 370,
+          midFreq: 493.88,
+          endFreq: 233.08,
+          wave: 'sine',
+          duration: 0.28,
+          gain: 0.12,
+        });
+        this.triggerVoice({
+          freq: 554.37,
+          midFreq: 440,
+          endFreq: 311.13,
+          wave: 'pulse12',
+          duration: 0.26,
+          gain: 0.072,
+          delay: 0.05,
+        });
+        this.playNoise({
+          duration: 0.24,
+          gain: 0.09,
+          filterType: 'bandpass',
+          startFreq: 640,
+          endFreq: 240,
+          q: 1.9,
+          delay: 0.02,
+        });
+        break;
+
+      case 'dragon':
+        this.triggerVoice({
+          freq: 146.83,
+          midFreq: 293.66,
+          endFreq: 440,
+          wave: 'pulse25',
+          duration: 0.26,
+          gain: 0.105,
+        });
+        this.triggerVoice({
+          freq: 220,
+          endFreq: 587.33,
+          wave: 'triangle',
+          duration: 0.24,
+          gain: 0.13,
+          delay: 0.04,
+        });
+        this.playNoise({
+          duration: 0.22,
+          gain: 0.14,
+          filterType: 'lowpass',
+          startFreq: 880,
+          endFreq: 220,
+          q: 0.85,
+        });
+        break;
+
       case 'wind':
         this.playNoise({
           duration: 0.22,
@@ -1090,6 +1417,14 @@ export class AudioEngine {
 
       case 'heal':
         this.playHealChime();
+        break;
+
+      case 'buff':
+        this.playBuffChime();
+        break;
+
+      case 'shield':
+        this.playShieldChime();
         break;
 
       default:
@@ -1313,6 +1648,157 @@ export class AudioEngine {
       wave: 'sine',
       duration: 0.06,
       gain: 0.075,
+    });
+  }
+
+  playWindup(type = 'normal') {
+    const highSweep = type === 'psychic' || type === 'ice' || type === 'electric' || type === 'ghost';
+    const startFreq = highSweep ? 320 : 190;
+    const endFreq = highSweep ? 680 : 390;
+    this.triggerVoice({
+      freq: startFreq,
+      endFreq,
+      wave: type === 'ghost' ? 'sine' : 'triangle',
+      duration: 0.15,
+      attack: 0.015,
+      decay: 0.04,
+      sustain: 0.45,
+      gain: 0.075,
+    });
+  }
+
+  playHitStop() {
+    this.triggerVoice({
+      freq: 92,
+      endFreq: 28,
+      wave: 'sine',
+      duration: 0.085,
+      attack: 0.002,
+      decay: 0.03,
+      sustain: 0.2,
+      gain: 0.22,
+    });
+    this.playNoise({
+      duration: 0.045,
+      gain: 0.14,
+      filterType: 'lowpass',
+      startFreq: 420,
+      endFreq: 90,
+      q: 0.7,
+      attack: 0.002,
+    });
+  }
+
+  playBuffChime() {
+    const notes = [523.25, 659.25, 783.99, 1046.5];
+    notes.forEach((f, i) => {
+      this.triggerVoice({
+        freq: f,
+        wave: 'pulse25',
+        duration: i === notes.length - 1 ? 0.22 : 0.085,
+        gain: 0.08,
+        delay: i * 0.055,
+      });
+      this.triggerVoice({
+        freq: f * 0.5,
+        wave: 'triangle',
+        duration: 0.14,
+        gain: 0.06,
+        delay: i * 0.055,
+      });
+    });
+  }
+
+  playShieldChime() {
+    const notes = [587.33, 880.0, 1174.66];
+    notes.forEach((f, i) => {
+      this.triggerVoice({
+        freq: f,
+        wave: 'sine',
+        duration: 0.24,
+        attack: 0.008,
+        sustain: 0.5,
+        gain: 0.105,
+        delay: i * 0.06,
+      });
+      this.triggerVoice({
+        freq: f * 0.5,
+        wave: 'triangle',
+        duration: 0.2,
+        gain: 0.06,
+        delay: i * 0.06,
+      });
+    });
+  }
+
+  playShinySparkle() {
+    const notes = [659.25, 783.99, 987.77, 1318.51, 1567.98];
+    notes.forEach((f, i) => {
+      this.triggerVoice({
+        freq: f,
+        wave: i % 2 === 0 ? 'pulse12' : 'sine',
+        duration: 0.14,
+        attack: 0.004,
+        sustain: 0.45,
+        gain: 0.085,
+        delay: i * 0.058,
+      });
+    });
+  }
+
+  playEvolutionStart() {
+    const pulse = [293.66, 349.23, 440.0, 523.25, 659.25, 783.99];
+    pulse.forEach((f, i) => {
+      this.triggerVoice({
+        freq: f,
+        endFreq: f * 1.04,
+        wave: 'pulse25',
+        duration: 0.14,
+        attack: 0.01,
+        sustain: 0.55,
+        gain: 0.08,
+        delay: i * 0.11,
+      });
+      this.triggerVoice({
+        freq: f * 0.5,
+        wave: 'triangle',
+        duration: 0.16,
+        gain: 0.07,
+        delay: i * 0.11,
+      });
+    });
+  }
+
+  playEvolutionFanfare() {
+    const lead = [523.25, 659.25, 783.99, 1046.5, 987.77, 1046.5, 1318.51];
+    const timings = [0, 0.09, 0.18, 0.27, 0.40, 0.49, 0.60];
+    const durs = [0.09, 0.09, 0.09, 0.13, 0.09, 0.11, 0.50];
+    lead.forEach((f, i) => {
+      this.triggerVoice({
+        freq: f,
+        wave: 'pulse25',
+        duration: durs[i],
+        attack: 0.006,
+        sustain: 0.58,
+        gain: 0.095,
+        delay: timings[i],
+      });
+      this.triggerVoice({
+        freq: f * 0.5,
+        wave: 'triangle',
+        duration: durs[i],
+        gain: 0.085,
+        delay: timings[i],
+      });
+    });
+    [261.63, 392.0, 523.25].forEach((f) => {
+      this.triggerVoice({
+        freq: f,
+        wave: 'sine',
+        duration: 0.52,
+        gain: 0.08,
+        delay: 0.60,
+      });
     });
   }
 }
