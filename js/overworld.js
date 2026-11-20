@@ -1,32 +1,29 @@
+import { GAME_META, TRAINERS } from './config.js';
 import {
   CHESTS,
-  GAME_META,
+  FIELD_QUESTS,
+  LANDMARKS,
+  NPCS,
   SHRINES,
   SIGNPOSTS,
   TILE,
-  TRAINERS,
   WORLD_COLS,
   WORLD_MAP,
   WORLD_ROWS,
+  findNearestSafePosition,
   getBiomeAt,
-} from './config.js';
-
-const SOLID_TILES = new Set([
-  TILE.TREE,
-  TILE.WATER,
-  TILE.CAVE_WALL,
-  TILE.WALL,
-  TILE.ROOF,
-  TILE.SIGN,
-  TILE.SHRINE,
-  TILE.CHEST,
-]);
+  isTileWalkableAt,
+} from './world-data.js';
 
 const ENCOUNTER_TILE_BIOME = {
   [TILE.TALL_GRASS]: 'forest',
   [TILE.CAVE_FLOOR]: 'cave',
   [TILE.SHALLOW_WATER]: 'water',
+  [TILE.VOLCANO_FLOOR]: 'volcano',
+  [TILE.SNOW_GRASS]: 'peak',
 };
+
+const QUEST_BY_ID = new Map(FIELD_QUESTS.map((q) => [q.id, q]));
 
 const DIR_VEC = {
   up: { dx: 0, dy: -1 },
@@ -146,8 +143,10 @@ export class OverworldEngine {
 
     this.particles = [];
     this.rustleTile = null;
+    this.rarePatches = [];
+    this.rarePatchSpawnCooldown = 1.0;
 
-    this.ambientMotes = Array.from({ length: 18 }, (_, i) => ({
+    this.ambientMotes = Array.from({ length: 22 }, (_, i) => ({
       seed: i * 1.73,
       xFrac: ((i * 37) % 100) / 100,
       yFrac: ((i * 61) % 100) / 100,
@@ -187,6 +186,15 @@ export class OverworldEngine {
     this.syncViewportSize();
     const profile = this.getProfile();
     if (!profile) return;
+
+    if (!this.isTileWalkable(profile.pos.x, profile.pos.y)) {
+      const safe = findNearestSafePosition(profile.pos.x, profile.pos.y, profile.pos.dir);
+      profile.pos.x = safe.x;
+      profile.pos.y = safe.y;
+      profile.pos.dir = safe.dir;
+      this.onStepSaved?.(safe.x, safe.y, safe.dir, false);
+    }
+
     this.moving = false;
     this.moveStartX = profile.pos.x;
     this.moveStartY = profile.pos.y;
@@ -196,6 +204,8 @@ export class OverworldEngine {
     this.stepsSinceBattle = 4;
     this.encounterTileStreak = 0;
     this.particles = [];
+    this.rarePatchSpawnCooldown = 0;
+    this.refreshRarePatches(profile, 0);
 
     const biome = getBiomeAt(profile.pos.x, profile.pos.y);
     this.currentBiomeId = biome.id;
@@ -215,9 +225,61 @@ export class OverworldEngine {
   }
 
   isTileWalkable(x, y) {
-    if (x < 0 || y < 0 || x >= WORLD_COLS || y >= WORLD_ROWS) return false;
-    const tile = WORLD_MAP[y][x];
-    return !SOLID_TILES.has(tile);
+    return isTileWalkableAt(x, y);
+  }
+
+  refreshRarePatches(profile, dt = 0) {
+    if (!profile) return;
+    for (let i = this.rarePatches.length - 1; i >= 0; i--) {
+      const patch = this.rarePatches[i];
+      patch.ttl -= dt;
+      const dist = Math.abs(patch.x - profile.pos.x) + Math.abs(patch.y - profile.pos.y);
+      if (patch.ttl <= 0 || dist > 18) {
+        this.rarePatches.splice(i, 1);
+      }
+    }
+
+    if (dt > 0) {
+      this.rarePatchSpawnCooldown -= dt;
+    }
+    if (this.rarePatches.length >= 2 || this.rarePatchSpawnCooldown > 0) return;
+
+    const px = profile.pos.x;
+    const py = profile.pos.y;
+    const candidates = [];
+    const occupied = new Set(this.rarePatches.map((p) => `${p.x},${p.y}`));
+
+    for (let dy = -7; dy <= 7; dy++) {
+      for (let dx = -9; dx <= 9; dx++) {
+        const cx = px + dx;
+        const cy = py + dy;
+        const dist = Math.abs(dx) + Math.abs(dy);
+        if (dist < 2 || dist > 12) continue;
+        if (occupied.has(`${cx},${cy}`) || !this.isTileWalkable(cx, cy)) continue;
+        const tile = WORLD_MAP[cy]?.[cx];
+        const biomeId = ENCOUNTER_TILE_BIOME[tile];
+        if (biomeId) {
+          candidates.push({ x: cx, y: cy, biomeId });
+        }
+      }
+    }
+
+    if (candidates.length > 0) {
+      const slots = Math.min(2 - this.rarePatches.length, candidates.length);
+      for (let i = 0; i < slots; i++) {
+        const pickIdx = Math.floor(Math.random() * candidates.length);
+        const [chosen] = candidates.splice(pickIdx, 1);
+        this.rarePatches.push({
+          x: chosen.x,
+          y: chosen.y,
+          biomeId: chosen.biomeId,
+          ttl: 18 + Math.random() * 6,
+        });
+      }
+      this.rarePatchSpawnCooldown = 4.0;
+    } else {
+      this.rarePatchSpawnCooldown = 2.0;
+    }
   }
 
   getInteractiveTarget() {
@@ -254,6 +316,22 @@ export class OverworldEngine {
     }
     if (tile === TILE.HEAL) {
       return { type: 'heal', key, label: '💖 Healing Fountain', data: null };
+    }
+    if (NPCS[key]) {
+      return {
+        type: 'npc',
+        key,
+        label: `💬 Talk: ${NPCS[key].name}`,
+        data: NPCS[key],
+      };
+    }
+    if (LANDMARKS[key]) {
+      return {
+        type: 'landmark',
+        key,
+        label: `${LANDMARKS[key].icon} ${LANDMARKS[key].name}`,
+        data: LANDMARKS[key],
+      };
     }
     return null;
   }
@@ -297,7 +375,6 @@ export class OverworldEngine {
   }
 
   update(dt, heldDir) {
-    // Update particles even if paused slightly
     for (let i = this.particles.length - 1; i >= 0; i--) {
       const p = this.particles[i];
       p.life += dt;
@@ -318,6 +395,8 @@ export class OverworldEngine {
     if (!this.active || this.paused) return;
     const profile = this.getProfile();
     if (!profile) return;
+
+    this.refreshRarePatches(profile, dt);
 
     if (this.moving) {
       this.moveProgress += dt / this.moveDuration;
@@ -387,9 +466,23 @@ export class OverworldEngine {
     const encounterBiome = ENCOUNTER_TILE_BIOME[tile];
     if (encounterBiome) {
       this.rustleTile = { x, y, timer: 0.25 };
+
+      const rareIdx = this.rarePatches.findIndex((p) => p.x === x && p.y === y);
+      if (rareIdx !== -1) {
+        this.rarePatches.splice(rareIdx, 1);
+        this.spawnParticles(x, y, '#facc15', 14, true);
+        this.spawnParticles(x, y, '#ffffff', 8, true);
+        this.stepsSinceBattle = 0;
+        this.encounterTileStreak = 0;
+        this.onWildEncounter?.(encounterBiome, { isRarePatch: true });
+        return;
+      }
+
       if (tile === TILE.TALL_GRASS) this.spawnParticles(x, y, '#4ade80', 6);
       else if (tile === TILE.CAVE_FLOOR) this.spawnParticles(x, y, '#c084fc', 6);
       else if (tile === TILE.SHALLOW_WATER) this.spawnParticles(x, y, '#7dd3fc', 7);
+      else if (tile === TILE.VOLCANO_FLOOR) this.spawnParticles(x, y, '#fb923c', 7, true);
+      else if (tile === TILE.SNOW_GRASS) this.spawnParticles(x, y, '#a5f3fc', 7, true);
 
       this.stepsSinceBattle += 1;
       this.encounterTileStreak += 1;
@@ -398,7 +491,7 @@ export class OverworldEngine {
         if (guaranteed || Math.random() < 0.21) {
           this.stepsSinceBattle = 0;
           this.encounterTileStreak = 0;
-          this.onWildEncounter?.(encounterBiome);
+          this.onWildEncounter?.(encounterBiome, { isRarePatch: false });
         }
       }
     } else {
@@ -445,11 +538,28 @@ export class OverworldEngine {
       }
     }
 
-    // Subtle drifting cloud shadows over outdoor biome regions
+    // Draw glowing rare-spawn patches on encounter tiles
+    for (const patch of this.rarePatches) {
+      if (patch.x < startCol || patch.x > endCol || patch.y < startRow || patch.y > endRow) continue;
+      this.drawRarePatchOverlay(ctx, patch.x * this.tileSize - camX, patch.y * this.tileSize - camY, nowMs);
+    }
+
+    // Draw environmental landmarks
+    for (const [key, landmark] of Object.entries(LANDMARKS)) {
+      const [lx, ly] = key.split(',').map(Number);
+      if (lx < startCol || lx > endCol || ly < startRow || ly > endRow) continue;
+      this.drawLandmark(ctx, lx * this.tileSize - camX, ly * this.tileSize - camY, landmark, nowMs);
+    }
+
+    // Subtle drifting atmosphere shadows over outdoor biome regions
     const biomeId = this.currentBiomeId || getBiomeAt(profile.pos.x, profile.pos.y).id;
     if (biomeId !== 'cave') {
       ctx.save();
-      ctx.fillStyle = 'rgba(15, 23, 42, 0.085)';
+      ctx.fillStyle = biomeId === 'volcano'
+        ? 'rgba(251, 146, 60, 0.055)'
+        : biomeId === 'peak'
+          ? 'rgba(103, 232, 249, 0.065)'
+          : 'rgba(15, 23, 42, 0.085)';
       for (let c = 0; c < 3; c++) {
         const span = this.viewW + 180;
         const cx = ((nowMs * (0.011 + c * 0.004) + c * 190 - camX * 0.35) % span + span) % span - 90;
@@ -461,19 +571,57 @@ export class OverworldEngine {
       ctx.restore();
     }
 
-    // Draw player
-    const playerScreenX = Math.round(px * this.tileSize - camX);
-    const playerScreenY = Math.round(py * this.tileSize - camY);
-    this.drawPlayer(ctx, playerScreenX, playerScreenY, profile.trainerId, profile.pos.dir, nowMs);
+    // Collect visible NPCs + player for clean Y-sorted rendering
+    const actors = [];
+    for (const [key, npc] of Object.entries(NPCS)) {
+      const [nx, ny] = key.split(',').map(Number);
+      if (nx < startCol - 1 || nx > endCol + 1 || ny < startRow - 1 || ny > endRow + 1) continue;
+      actors.push({
+        kind: 'npc',
+        sortY: ny,
+        sx: nx * this.tileSize - camX,
+        sy: ny * this.tileSize - camY,
+        npc,
+      });
+    }
+    actors.push({
+      kind: 'player',
+      sortY: py,
+      sx: Math.round(px * this.tileSize - camX),
+      sy: Math.round(py * this.tileSize - camY),
+    });
+    actors.sort((a, b) => a.sortY - b.sortY);
 
-    // Draw ambient biome motes (fireflies, cave crystal sparkles, sea mist)
+    for (const actor of actors) {
+      if (actor.kind === 'player') {
+        this.drawPlayer(ctx, actor.sx, actor.sy, profile.trainerId, profile.pos.dir, nowMs);
+      } else {
+        this.drawNpc(ctx, actor.sx, actor.sy, actor.npc, nowMs, profile);
+      }
+    }
+
+    // Draw ambient biome motes (fireflies, cave crystals, sea mist, volcanic embers, peak snowflakes)
     ctx.save();
-    for (const mote of this.ambientMotes) {
-      const mx = Math.round(((mote.xFrac * this.viewW + Math.sin(nowMs * 0.0012 * mote.speed + mote.seed) * 14) % this.viewW + this.viewW) % this.viewW);
-      const my = Math.round(((mote.yFrac * this.viewH - nowMs * 0.006 * mote.speed) % this.viewH + this.viewH) % this.viewH);
-      const twinkle = 0.28 + 0.45 * (0.5 + 0.5 * Math.sin(nowMs * 0.004 * mote.speed + mote.seed * 2));
+    for (let i = 0; i < this.ambientMotes.length; i++) {
+      const mote = this.ambientMotes[i];
+      const driftDown = biomeId === 'peak';
+      const ySpeed = driftDown ? 0.011 : 0.006;
+      const yDir = driftDown ? 1 : -1;
+      const mx = Math.round(((mote.xFrac * this.viewW + Math.sin(nowMs * 0.0012 * mote.speed + mote.seed) * 16) % this.viewW + this.viewW) % this.viewW);
+      const my = Math.round(((mote.yFrac * this.viewH + yDir * nowMs * ySpeed * mote.speed) % this.viewH + this.viewH) % this.viewH);
+      const twinkle = 0.28 + 0.5 * (0.5 + 0.5 * Math.sin(nowMs * 0.004 * mote.speed + mote.seed * 2));
       ctx.globalAlpha = twinkle;
-      ctx.fillStyle = biomeId === 'cave' ? '#e879f9' : biomeId === 'water' ? '#e0f2fe' : '#fef08a';
+      if (biomeId === 'cave') {
+        ctx.fillStyle = '#e879f9';
+      } else if (biomeId === 'water') {
+        ctx.fillStyle = '#e0f2fe';
+      } else if (biomeId === 'volcano') {
+        ctx.fillStyle = i % 2 === 0 ? '#fb923c' : '#fde047';
+      } else if (biomeId === 'peak') {
+        ctx.fillStyle = i % 3 === 0 ? '#a5f3fc' : i % 3 === 1 ? '#e0f2fe' : '#c084fc';
+      } else {
+        ctx.fillStyle = '#fef08a';
+      }
       ctx.fillRect(mx, my, mote.size, mote.size);
     }
     ctx.restore();
@@ -490,18 +638,18 @@ export class OverworldEngine {
     ctx.globalAlpha = 1;
   }
 
-  drawTile(ctx, tx, ty, sx, sy, nowMs, profile) {
-    const tile = WORLD_MAP[ty][tx];
-    const ts = this.tileSize;
-    const h = hash2d(tx, ty);
-    const inCave = tx >= 19 && ty <= 17;
-
-    // Base ground
-    if (tile === TILE.CAVE_WALL || tile === TILE.CAVE_FLOOR || tile === TILE.CAVE_PATH) {
-      ctx.fillStyle = '#2b2640';
+  drawBaseGround(ctx, sx, sy, ts, h, tileBiomeId) {
+    if (tileBiomeId === 'cave') {
+      ctx.fillStyle = '#4c4566';
       ctx.fillRect(sx, sy, ts, ts);
-    } else if (tile === TILE.SAND || tile === TILE.SHALLOW_WATER || tile === TILE.WATER || tile === TILE.BRIDGE) {
-      ctx.fillStyle = '#f3d999';
+    } else if (tileBiomeId === 'volcano') {
+      ctx.fillStyle = '#574645';
+      ctx.fillRect(sx, sy, ts, ts);
+    } else if (tileBiomeId === 'peak') {
+      ctx.fillStyle = '#e2e8f0';
+      ctx.fillRect(sx, sy, ts, ts);
+    } else if (tileBiomeId === 'water') {
+      ctx.fillStyle = '#fde68a';
       ctx.fillRect(sx, sy, ts, ts);
     } else {
       ctx.fillStyle = h > 0.5 ? '#5ec269' : '#57ba62';
@@ -511,6 +659,30 @@ export class OverworldEngine {
         ctx.fillRect(sx + 6, sy + 10, 3, 2);
         ctx.fillRect(sx + 20, sy + 22, 3, 2);
       }
+    }
+  }
+
+  drawTile(ctx, tx, ty, sx, sy, nowMs, profile) {
+    const tile = WORLD_MAP[ty][tx];
+    const ts = this.tileSize;
+    const h = hash2d(tx, ty);
+    const tileBiomeId = getBiomeAt(tx, ty).id;
+
+    // Base ground layer
+    if (tile === TILE.CAVE_WALL || tile === TILE.CAVE_FLOOR || tile === TILE.CAVE_PATH) {
+      ctx.fillStyle = '#2b2640';
+      ctx.fillRect(sx, sy, ts, ts);
+    } else if (tile === TILE.SAND || tile === TILE.SHALLOW_WATER || tile === TILE.WATER || tile === TILE.BRIDGE) {
+      ctx.fillStyle = tileBiomeId === 'volcano' ? '#3b1f1e' : '#f3d999';
+      ctx.fillRect(sx, sy, ts, ts);
+    } else if (tile === TILE.LAVA || tile === TILE.VOLCANO_FLOOR || tile === TILE.VOLCANO_PATH) {
+      ctx.fillStyle = '#3b1f1e';
+      ctx.fillRect(sx, sy, ts, ts);
+    } else if (tile === TILE.ICE_WALL || tile === TILE.SNOW_GRASS || tile === TILE.SNOW_PATH) {
+      ctx.fillStyle = '#dbeafe';
+      ctx.fillRect(sx, sy, ts, ts);
+    } else {
+      this.drawBaseGround(ctx, sx, sy, ts, h, tileBiomeId);
     }
 
     switch (tile) {
@@ -563,7 +735,6 @@ export class OverworldEngine {
         ctx.fillRect(sx + 4 + wave, sy + 9, 10, 3);
         ctx.fillRect(sx + 15 - wave, sy + 22, 11, 3);
 
-        // Animated shoreline foam edges next to non-water tiles
         ctx.fillStyle = 'rgba(224, 242, 254, 0.78)';
         const foamOffset = Math.round((Math.sin(nowMs * 0.005 + tx + ty) + 1) * 1.2);
         if (ty > 0 && WORLD_MAP[ty - 1][tx] !== TILE.WATER) {
@@ -603,29 +774,31 @@ export class OverworldEngine {
       }
 
       case TILE.BRIDGE: {
-        ctx.fillStyle = '#0284c7';
+        const overLava = tileBiomeId === 'volcano';
+        ctx.fillStyle = overLava ? '#dc2626' : '#0284c7';
         ctx.fillRect(sx, sy, ts, ts);
-        ctx.fillStyle = '#92400e';
+        ctx.fillStyle = overLava ? '#44403c' : '#92400e';
         ctx.fillRect(sx, sy + 2, ts, ts - 4);
-        ctx.fillStyle = '#b45309';
+        ctx.fillStyle = overLava ? '#57534e' : '#b45309';
         for (let px = 2; px < ts; px += 8) {
           ctx.fillRect(sx + px, sy + 4, 6, ts - 8);
         }
-        ctx.fillStyle = '#fde68a';
+        ctx.fillStyle = overLava ? '#fb923c' : '#fde68a';
         ctx.fillRect(sx, sy + 2, ts, 2);
         ctx.fillRect(sx, sy + ts - 4, ts, 2);
         break;
       }
 
       case TILE.CAVE_WALL: {
-        ctx.fillStyle = '#3f385c';
+        const isVolcanoRim = tileBiomeId === 'volcano';
+        ctx.fillStyle = isVolcanoRim ? '#451a1a' : '#3f385c';
         ctx.fillRect(sx, sy, ts, ts);
-        ctx.fillStyle = '#5b5280';
+        ctx.fillStyle = isVolcanoRim ? '#6b2c26' : '#5b5280';
         ctx.fillRect(sx + 2, sy + 2, ts - 4, 10);
-        ctx.fillStyle = '#1e1a2e';
+        ctx.fillStyle = isVolcanoRim ? '#230d0d' : '#1e1a2e';
         ctx.fillRect(sx, sy + ts - 4, ts, 4);
         if (h > 0.72) {
-          ctx.fillStyle = '#a855f7';
+          ctx.fillStyle = isVolcanoRim ? '#f97316' : '#a855f7';
           ctx.fillRect(sx + 12, sy + 10, 5, 7);
         }
         break;
@@ -654,6 +827,132 @@ export class OverworldEngine {
         break;
       }
 
+      case TILE.LAVA: {
+        ctx.fillStyle = '#b91c1c';
+        ctx.fillRect(sx, sy, ts, ts);
+        const flow = Math.sin(nowMs * 0.0038 + tx * 0.9 + ty * 0.7) * 3;
+        const glow = 0.7 + 0.3 * Math.sin(nowMs * 0.005 + tx + ty * 1.3);
+        ctx.fillStyle = '#ea580c';
+        ctx.fillRect(sx + 3 + flow * 0.5, sy + 5, 13, 6);
+        ctx.fillRect(sx + 13 - flow * 0.5, sy + 19, 14, 6);
+        ctx.globalAlpha = glow;
+        ctx.fillStyle = '#fb923c';
+        ctx.fillRect(sx + 5 + flow, sy + 7, 9, 3);
+        ctx.fillRect(sx + 15 - flow, sy + 21, 9, 3);
+        ctx.fillStyle = '#fde047';
+        ctx.fillRect(sx + 8 + flow, sy + 8, 4, 2);
+        ctx.globalAlpha = 1;
+        break;
+      }
+
+      case TILE.VOLCANO_FLOOR: {
+        ctx.fillStyle = h > 0.5 ? '#4a2521' : '#3d1e1b';
+        ctx.fillRect(sx, sy, ts, ts);
+        ctx.fillStyle = '#291513';
+        ctx.fillRect(sx + 3, sy + 4, 7, 4);
+        ctx.fillRect(sx + 18, sy + 20, 8, 4);
+        const emberPulse = 0.45 + 0.5 * Math.sin(nowMs * 0.006 + tx * 1.4 + ty);
+        ctx.globalAlpha = emberPulse;
+        ctx.fillStyle = h > 0.4 ? '#f97316' : '#fb923c';
+        ctx.fillRect(sx + 8, sy + 12, 4, 4);
+        ctx.fillRect(sx + 21, sy + 7, 4, 4);
+        ctx.fillStyle = '#fde047';
+        ctx.fillRect(sx + 9, sy + 13, 2, 2);
+        ctx.globalAlpha = 1;
+        break;
+      }
+
+      case TILE.VOLCANO_PATH: {
+        ctx.fillStyle = '#5c4947';
+        ctx.fillRect(sx, sy, ts, ts);
+        ctx.fillStyle = '#735b58';
+        if (h > 0.4) ctx.fillRect(sx + 5, sy + 6, 7, 4);
+        if (h < 0.7) ctx.fillRect(sx + 18, sy + 19, 7, 4);
+        break;
+      }
+
+      case TILE.ICE_WALL: {
+        ctx.fillStyle = '#0e7490';
+        ctx.fillRect(sx, sy, ts, ts);
+        ctx.fillStyle = '#22d3ee';
+        ctx.fillRect(sx + 2, sy + 2, ts - 4, 14);
+        ctx.fillStyle = '#a5f3fc';
+        ctx.fillRect(sx + 4, sy + 3, 12, 6);
+        ctx.fillRect(sx + 18, sy + 8, 8, 5);
+        ctx.fillStyle = '#ecfeff';
+        ctx.fillRect(sx + 6, sy + 4, 6, 2);
+        ctx.fillStyle = '#164e63';
+        ctx.fillRect(sx, sy + ts - 4, ts, 4);
+        break;
+      }
+
+      case TILE.SNOW_GRASS: {
+        ctx.fillStyle = '#bae6fd';
+        ctx.fillRect(sx + 1, sy + 1, ts - 2, ts - 2);
+        const sway = Math.sin(nowMs * 0.004 + tx * 0.8 + ty * 0.6) * 1.5;
+        const rustle = this.rustleTile && this.rustleTile.x === tx && this.rustleTile.y === ty ? 3.0 : 0;
+        ctx.fillStyle = '#38bdf8';
+        for (let i = 0; i < 4; i++) {
+          const bx = sx + 4 + i * 7;
+          ctx.fillRect(bx + sway + (i % 2 ? rustle : -rustle), sy + 6, 4, 9);
+          ctx.fillRect(bx - sway * 0.7, sy + 18, 4, 9);
+        }
+        ctx.fillStyle = '#f8fafc';
+        ctx.fillRect(sx + 5, sy + 5, 3, 3);
+        ctx.fillRect(sx + 21, sy + 17, 3, 3);
+        break;
+      }
+
+      case TILE.SNOW_PATH: {
+        ctx.fillStyle = '#f1f5f9';
+        ctx.fillRect(sx, sy, ts, ts);
+        ctx.fillStyle = '#cbd5e1';
+        if (h > 0.45) ctx.fillRect(sx + 7, sy + 8, 6, 3);
+        if (h < 0.65) ctx.fillRect(sx + 18, sy + 21, 6, 3);
+        break;
+      }
+
+      case TILE.RUNE_TRAIL: {
+        this.drawBaseGround(ctx, sx, sy, ts, h, tileBiomeId);
+        ctx.fillStyle = '#334155';
+        ctx.fillRect(sx + 3, sy + 3, ts - 6, ts - 6);
+        ctx.fillStyle = '#475569';
+        ctx.fillRect(sx + 5, sy + 5, ts - 10, ts - 10);
+        const runePulse = 0.58 + 0.42 * Math.sin(nowMs * 0.0055 + (tx + ty) * 0.65);
+        ctx.globalAlpha = runePulse;
+        ctx.fillStyle = tileBiomeId === 'volcano' ? '#fb923c' : '#38bdf8';
+        ctx.fillRect(sx + 11, sy + 14, 10, 4);
+        ctx.fillRect(sx + 14, sy + 11, 4, 10);
+        ctx.fillStyle = '#fef08a';
+        ctx.fillRect(sx + 14, sy + 14, 4, 4);
+        ctx.globalAlpha = 1;
+        break;
+      }
+
+      case TILE.LANTERN: {
+        this.drawBaseGround(ctx, sx, sy, ts, h, tileBiomeId);
+        const haloPulse = 0.24 + 0.12 * Math.sin(nowMs * 0.005 + tx * 0.9 + ty);
+        ctx.save();
+        ctx.fillStyle = `rgba(250, 204, 21, ${haloPulse.toFixed(3)})`;
+        ctx.beginPath();
+        ctx.arc(sx + 16, sy + 13, 14, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+        // Stone base & iron post
+        ctx.fillStyle = '#334155';
+        ctx.fillRect(sx + 11, sy + 24, 10, 6);
+        ctx.fillStyle = '#475569';
+        ctx.fillRect(sx + 14, sy + 15, 4, 11);
+        // Lantern cap & glowing glass
+        ctx.fillStyle = '#1e293b';
+        ctx.fillRect(sx + 10, sy + 6, 12, 3);
+        ctx.fillStyle = '#f59e0b';
+        ctx.fillRect(sx + 11, sy + 9, 10, 7);
+        ctx.fillStyle = '#fef08a';
+        ctx.fillRect(sx + 13, sy + 10, 6, 5);
+        break;
+      }
+
       case TILE.ROOF: {
         ctx.fillStyle = tx < 9 ? '#a855f7' : '#ef4444';
         ctx.fillRect(sx, sy, ts, ts);
@@ -669,7 +968,6 @@ export class OverworldEngine {
         ctx.fillRect(sx, sy, ts, ts);
         ctx.fillStyle = '#cbd5e1';
         ctx.fillRect(sx, sy + ts - 4, ts, 4);
-        // Window or door
         if (tx === 4 || tx === 13) {
           ctx.fillStyle = '#78350f';
           ctx.fillRect(sx + 9, sy + 8, 14, 24);
@@ -698,13 +996,7 @@ export class OverworldEngine {
       }
 
       case TILE.SIGN: {
-        if (inCave) {
-          ctx.fillStyle = '#4c4566';
-          ctx.fillRect(sx, sy, ts, ts);
-        } else if (ty >= 18) {
-          ctx.fillStyle = '#fde68a';
-          ctx.fillRect(sx, sy, ts, ts);
-        }
+        this.drawBaseGround(ctx, sx, sy, ts, h, tileBiomeId);
         ctx.fillStyle = '#78350f';
         ctx.fillRect(sx + 14, sy + 18, 4, 11);
         ctx.fillStyle = '#b45309';
@@ -716,8 +1008,12 @@ export class OverworldEngine {
       }
 
       case TILE.HEAL: {
-        ctx.fillStyle = '#e7c68b';
-        ctx.fillRect(sx, sy, ts, ts);
+        if (tileBiomeId === 'village') {
+          ctx.fillStyle = '#e7c68b';
+          ctx.fillRect(sx, sy, ts, ts);
+        } else {
+          this.drawBaseGround(ctx, sx, sy, ts, h, tileBiomeId);
+        }
         const glow = 0.72 + Math.sin(nowMs * 0.006) * 0.25;
         ctx.fillStyle = '#06b6d4';
         ctx.beginPath();
@@ -738,13 +1034,7 @@ export class OverworldEngine {
       case TILE.SHRINE: {
         const shrine = SHRINES[`${tx},${ty}`];
         const cleared = shrine && profile.shrinesCleared.includes(shrine.id);
-        if (inCave) {
-          ctx.fillStyle = '#4c4566';
-          ctx.fillRect(sx, sy, ts, ts);
-        } else if (ty >= 18) {
-          ctx.fillStyle = '#fde68a';
-          ctx.fillRect(sx, sy, ts, ts);
-        }
+        this.drawBaseGround(ctx, sx, sy, ts, h, tileBiomeId);
         ctx.fillStyle = '#475569';
         ctx.fillRect(sx + 4, sy + 18, 24, 12);
         ctx.fillStyle = '#94a3b8';
@@ -756,7 +1046,11 @@ export class OverworldEngine {
             ? '#4ade80'
             : shrine?.biome === 'cave'
               ? '#c084fc'
-              : '#38bdf8';
+              : shrine?.biome === 'volcano'
+                ? '#fb7185'
+                : shrine?.biome === 'peak'
+                  ? '#67e8f9'
+                  : '#38bdf8';
         ctx.beginPath();
         ctx.arc(sx + 16, sy + 9 + bob, 6, 0, Math.PI * 2);
         ctx.fill();
@@ -768,13 +1062,7 @@ export class OverworldEngine {
       case TILE.CHEST: {
         const chest = CHESTS[`${tx},${ty}`];
         const opened = chest && profile.chestsOpened.includes(chest.id);
-        if (inCave) {
-          ctx.fillStyle = '#4c4566';
-          ctx.fillRect(sx, sy, ts, ts);
-        } else if (ty >= 18) {
-          ctx.fillStyle = '#fde68a';
-          ctx.fillRect(sx, sy, ts, ts);
-        }
+        this.drawBaseGround(ctx, sx, sy, ts, h, tileBiomeId);
         ctx.fillStyle = opened ? '#64748b' : '#b45309';
         ctx.fillRect(sx + 6, sy + 10, 20, 16);
         ctx.fillStyle = opened ? '#94a3b8' : '#f59e0b';
@@ -786,6 +1074,156 @@ export class OverworldEngine {
 
       default:
         break;
+    }
+  }
+
+  drawRarePatchOverlay(ctx, sx, sy, nowMs) {
+    const ts = this.tileSize;
+    const pulse = 0.55 + 0.45 * Math.sin(nowMs * 0.01);
+    ctx.save();
+    ctx.strokeStyle = `rgba(250, 204, 21, ${(0.5 + pulse * 0.45).toFixed(2)})`;
+    ctx.lineWidth = 2;
+    ctx.strokeRect(sx + 2, sy + 2, ts - 4, ts - 4);
+
+    // Shimmering gold star sparkles dancing over the rustling patch
+    for (let i = 0; i < 3; i++) {
+      const phase = nowMs * 0.007 + i * 2.1;
+      const rx = sx + 8 + ((i * 8 + Math.sin(phase) * 4) % 18);
+      const ry = sy + 16 - Math.abs(Math.cos(phase * 1.1)) * 12;
+      ctx.fillStyle = i === 1 ? '#ffffff' : '#fef08a';
+      ctx.fillRect(Math.round(rx), Math.round(ry), 3, 3);
+    }
+    ctx.restore();
+  }
+
+  drawLandmark(ctx, sx, sy, landmark, nowMs) {
+    const glow = 0.55 + 0.45 * Math.sin(nowMs * 0.005);
+    ctx.save();
+    if (landmark.id === 'landmark_telescope') {
+      ctx.fillStyle = 'rgba(0,0,0,0.22)';
+      ctx.beginPath();
+      ctx.ellipse(sx + 16, sy + 27, 10, 4, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#475569';
+      ctx.fillRect(sx + 11, sy + 18, 3, 9);
+      ctx.fillRect(sx + 18, sy + 18, 3, 9);
+      ctx.fillStyle = '#f59e0b';
+      ctx.fillRect(sx + 9, sy + 10, 14, 5);
+      ctx.fillStyle = '#fde047';
+      ctx.fillRect(sx + 21, sy + 8, 5, 5);
+      ctx.globalAlpha = glow;
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(sx + 24, sy + 6, 3, 3);
+    } else if (landmark.id === 'landmark_great_tree') {
+      ctx.globalAlpha = 0.4 + glow * 0.45;
+      ctx.strokeStyle = '#fde047';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.arc(sx + 16, sy + 14, 13, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.fillStyle = '#fef08a';
+      ctx.fillRect(sx + 7, sy + 7, 3, 3);
+      ctx.fillRect(sx + 22, sy + 10, 3, 3);
+    } else if (landmark.id === 'landmark_caldera_cairn') {
+      ctx.fillStyle = 'rgba(0,0,0,0.3)';
+      ctx.beginPath();
+      ctx.ellipse(sx + 16, sy + 27, 10, 4, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#292524';
+      ctx.fillRect(sx + 7, sy + 20, 18, 6);
+      ctx.fillStyle = '#44403c';
+      ctx.fillRect(sx + 10, sy + 14, 12, 6);
+      ctx.fillStyle = '#57534e';
+      ctx.fillRect(sx + 12, sy + 9, 8, 5);
+      ctx.globalAlpha = glow;
+      ctx.fillStyle = '#fb923c';
+      ctx.fillRect(sx + 14, sy + 11, 4, 4);
+    } else if (landmark.id === 'landmark_coral_arch') {
+      ctx.fillStyle = '#f472b6';
+      ctx.fillRect(sx + 5, sy + 10, 5, 16);
+      ctx.fillRect(sx + 22, sy + 10, 5, 16);
+      ctx.fillRect(sx + 7, sy + 6, 18, 6);
+      ctx.fillStyle = '#fbcfe8';
+      ctx.fillRect(sx + 10, sy + 8, 12, 2);
+      ctx.globalAlpha = glow;
+      ctx.fillStyle = '#67e8f9';
+      ctx.fillRect(sx + 14, sy + 14, 4, 4);
+    } else if (landmark.id === 'landmark_aurora_spire') {
+      ctx.fillStyle = 'rgba(15, 23, 42, 0.28)';
+      ctx.beginPath();
+      ctx.ellipse(sx + 16, sy + 27, 10, 4, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#4f46e5';
+      ctx.fillRect(sx + 11, sy + 12, 10, 15);
+      ctx.fillStyle = '#67e8f9';
+      ctx.fillRect(sx + 13, sy + 6, 6, 16);
+      ctx.globalAlpha = glow;
+      ctx.fillStyle = '#e0f2fe';
+      ctx.fillRect(sx + 15, sy + 3, 2, 8);
+    }
+    ctx.restore();
+  }
+
+  drawNpc(ctx, sx, sy, npc, nowMs, profile) {
+    const palette = npc.palette || {};
+    const bob = Math.sin(nowMs * 0.004 + sx * 0.1) * 0.8;
+
+    // Warm shadow + subtle glow ring
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.28)';
+    ctx.beginPath();
+    ctx.ellipse(sx + 16, sy + 28, 9, 4, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    const y = Math.round(sy - bob);
+
+    // Legs
+    ctx.fillStyle = '#1e293b';
+    ctx.fillRect(sx + 10, y + 23, 5, 5);
+    ctx.fillRect(sx + 17, y + 23, 5, 5);
+
+    // Outfit
+    ctx.fillStyle = palette.outfitPrimary || '#38bdf8';
+    ctx.fillRect(sx + 9, y + 14, 14, 10);
+    ctx.fillStyle = palette.outfitSecondary || '#facc15';
+    ctx.fillRect(sx + 13, y + 15, 6, 7);
+
+    // Head & Hair
+    ctx.fillStyle = palette.hair || '#475569';
+    ctx.fillRect(sx + 9, y + 4, 14, 11);
+
+    // Face
+    ctx.fillStyle = palette.skin || '#fde2c8';
+    ctx.fillRect(sx + 10, y + 8, 12, 7);
+    ctx.fillStyle = '#0f172a';
+    ctx.fillRect(sx + 12, y + 10, 2, 3);
+    ctx.fillRect(sx + 18, y + 10, 2, 3);
+
+    // Hat / Trim
+    if (palette.hat) {
+      ctx.fillStyle = palette.hat;
+      ctx.fillRect(sx + 8, y + 2, 16, 5);
+      ctx.fillStyle = palette.outfitSecondary || '#fef08a';
+      ctx.fillRect(sx + 10, y + 5, 12, 2);
+    }
+
+    // Floating quest / unvisited indicator
+    const quest = QUEST_BY_ID.get(npc.questId);
+    const questDone = Boolean(quest && (profile?.questsCompleted || []).includes(quest.id));
+    const questReady = Boolean(quest && !questDone && quest.check?.(profile));
+    const unvisited = !(profile?.npcsTalked || []).includes(npc.id);
+
+    if (questReady || (unvisited && !questDone)) {
+      const floatY = y - 8 + Math.sin(nowMs * 0.008) * (questReady ? 2.4 : 1.3);
+      ctx.save();
+      ctx.fillStyle = questReady ? '#facc15' : '#fef08a';
+      ctx.fillRect(sx + 11, Math.round(floatY), 10, 9);
+      ctx.strokeStyle = '#78350f';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(sx + 11, Math.round(floatY), 10, 9);
+      ctx.fillStyle = '#78350f';
+      ctx.fillRect(sx + 15, Math.round(floatY) + 2, 2, 4);
+      ctx.fillRect(sx + 15, Math.round(floatY) + 7, 2, 1);
+      ctx.restore();
     }
   }
 
