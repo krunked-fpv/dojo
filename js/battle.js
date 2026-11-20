@@ -137,7 +137,7 @@ export class BattleEngine {
     this.state = BATTLE_STATES.INACTIVE;
     this.sessionId = 0;
     this.turnToken = 0;
-    this.lastActionAt = 0;
+    this.lastActionAt = -ACTION_COOLDOWN_MS;
     this.selectedMoveIndex = 0;
 
     this.enemy = null;
@@ -404,7 +404,7 @@ export class BattleEngine {
 
     const sid = ++this.sessionId;
     this.turnToken = 0;
-    this.lastActionAt = 0;
+    this.lastActionAt = -ACTION_COOLDOWN_MS;
     this.selectedMoveIndex = 0;
     this.enemy = enemy;
     this.biomeId = isShrine ? 'shrine' : biomeId;
