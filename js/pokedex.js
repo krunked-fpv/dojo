@@ -1,11 +1,77 @@
-import { BADGES, BIOMES, MOVES, SPECIES, TYPES } from './config.js';
+import {
+  BADGES,
+  BIOMES,
+  EVOLUTION_ITEMS,
+  EVOLUTIONS,
+  FIELD_QUESTS,
+  MOVES,
+  SHRINES,
+  SPECIES,
+  TYPES,
+  getBiomeDiscoveryStats,
+  getCompassGuidance,
+} from './config.js';
 import { attachPokemonSprite } from './pokemon.js';
 
+const BIOME_ORDER = ['village', 'forest', 'cave', 'water', 'volcano', 'peak'];
+
+function formatEvolutionCondition(rule) {
+  if (!rule) return '';
+  const parts = [];
+  if (rule.item) {
+    const gem = EVOLUTION_ITEMS?.[rule.item];
+    parts.push(`${gem?.icon || '💎'} ${gem?.name || rule.item}`);
+  }
+  if (rule.minLevel) {
+    parts.push(`Lv.${rule.minLevel}`);
+  }
+  return parts.join(' or ');
+}
+
+function formatRewardsList(rewards = {}) {
+  const chips = [];
+  if (rewards.potions) chips.push(`🍓 ${rewards.potions} Potion${rewards.potions > 1 ? 's' : ''}`);
+  if (rewards.greatBalls) chips.push(`🔵 ${rewards.greatBalls} Great Ball${rewards.greatBalls > 1 ? 's' : ''}`);
+  if (rewards.gems && typeof rewards.gems === 'object') {
+    for (const [gemId, count] of Object.entries(rewards.gems)) {
+      if (count > 0) {
+        const gem = EVOLUTION_ITEMS?.[gemId];
+        chips.push(`${gem?.icon || '💎'} ${count} ${gem?.name || gemId}`);
+      }
+    }
+  }
+  return chips;
+}
+
+function formatCompassArrow(guidance, profile) {
+  if (!guidance) return '🧭 Explore';
+  if (guidance.distance === 0) return '✨ Here';
+  if (typeof guidance.arrowDir === 'string' && /[↑↓←→↗↘↙↖]/.test(guidance.arrowDir) && /[A-Za-z]/.test(guidance.arrowDir)) {
+    return guidance.arrowDir;
+  }
+  if (Number.isFinite(guidance.targetX) && Number.isFinite(guidance.targetY) && profile?.pos) {
+    const dx = guidance.targetX - profile.pos.x;
+    const dy = guidance.targetY - profile.pos.y;
+    if (Math.abs(dx) + Math.abs(dy) <= 1) return '✨ Here';
+    const angle = Math.atan2(dy, dx) * (180 / Math.PI);
+    if (angle >= -22.5 && angle < 22.5) return '→ East';
+    if (angle >= 22.5 && angle < 67.5) return '↘ SE';
+    if (angle >= 67.5 && angle < 112.5) return '↓ South';
+    if (angle >= 112.5 && angle < 157.5) return '↙ SW';
+    if (angle >= 157.5 || angle < -157.5) return '← West';
+    if (angle >= -157.5 && angle < -112.5) return '↖ NW';
+    if (angle >= -112.5 && angle < -67.5) return '↑ North';
+    return '↗ NE';
+  }
+  return guidance.arrowDir || '🧭 Explore';
+}
+
 export class PokedexUI {
-  constructor({ storage, audio, onTeamChanged, onClose }) {
+  constructor({ storage, audio, onTeamChanged, onBadgesUnlocked, onClose }) {
     this.storage = storage;
     this.audio = audio;
     this.onTeamChanged = onTeamChanged;
+    this.onBadgesUnlocked = onBadgesUnlocked;
     this.onClose = onClose;
 
     this.modalEl = document.getElementById('pokedex-modal');
@@ -16,11 +82,13 @@ export class PokedexUI {
       dex: document.getElementById('pokedex-tab-dex'),
       team: document.getElementById('pokedex-tab-team'),
       badges: document.getElementById('pokedex-tab-badges'),
+      guide: document.getElementById('pokedex-tab-guide'),
     };
 
     this.activeTab = 'dex';
     this.selectedSpeciesId = null;
     this.swapBoxIndex = null;
+    this.evoBanner = null;
 
     this.bindUI();
   }
@@ -42,6 +110,7 @@ export class PokedexUI {
         this.audio.playMenuBlip(680);
         this.activeTab = tab;
         this.swapBoxIndex = null;
+        this.evoBanner = null;
         this.render();
       });
     });
@@ -54,6 +123,7 @@ export class PokedexUI {
   open(tab = 'dex') {
     this.activeTab = tab;
     this.swapBoxIndex = null;
+    this.evoBanner = null;
     if (this.modalEl) {
       this.modalEl.hidden = false;
     }
@@ -62,6 +132,7 @@ export class PokedexUI {
 
   close() {
     const wasOpen = this.isOpen();
+    this.evoBanner = null;
     if (this.modalEl) {
       this.modalEl.hidden = true;
     }
@@ -85,9 +156,68 @@ export class PokedexUI {
       this.renderDex(profile);
     } else if (this.activeTab === 'team') {
       this.renderTeam(profile);
+    } else if (this.activeTab === 'guide') {
+      this.renderGuide(profile);
     } else {
       this.renderBadges(profile);
     }
+  }
+
+  buildEvolutionChainEl(selected, selSeen) {
+    const box = document.createElement('div');
+    box.className = 'dex-evo-chain';
+
+    if (!selSeen) {
+      box.innerHTML = '<span>🧬 Meet or catch this Pokémon to reveal its evolution chain!</span>';
+      return box;
+    }
+
+    const fromRules = [];
+    for (const [fromIdStr, rules] of Object.entries(EVOLUTIONS || {})) {
+      const fromId = Number(fromIdStr);
+      for (const rule of rules || []) {
+        if (rule.to === selected.id) {
+          fromRules.push({ fromId, rule });
+        }
+      }
+    }
+    const toRules = EVOLUTIONS?.[selected.id] || [];
+
+    if (fromRules.length === 0 && toRules.length === 0) {
+      box.innerHTML = '<span>🧬 Stand-alone Pokémon (No Evolution)</span>';
+      return box;
+    }
+
+    const label = document.createElement('span');
+    label.className = 'dex-evo-label';
+    label.textContent = '🧬 Evolution Family:';
+    box.appendChild(label);
+
+    const makeChip = (prefix, speciesId, condText) => {
+      const sp = SPECIES[speciesId];
+      if (!sp) return null;
+      const chip = document.createElement('button');
+      chip.type = 'button';
+      chip.className = 'dex-evo-chip';
+      chip.textContent = `${prefix} ${sp.name}${condText ? ` (${condText})` : ''}`;
+      chip.addEventListener('click', () => {
+        this.audio.playMenuBlip(700);
+        this.selectedSpeciesId = sp.id;
+        this.render();
+      });
+      return chip;
+    };
+
+    for (const { fromId, rule } of fromRules) {
+      const chip = makeChip('Evolves from', fromId, formatEvolutionCondition(rule));
+      if (chip) box.appendChild(chip);
+    }
+    for (const rule of toRules) {
+      const chip = makeChip('Evolves into', rule.to, formatEvolutionCondition(rule));
+      if (chip) box.appendChild(chip);
+    }
+
+    return box;
   }
 
   renderDex(profile) {
@@ -95,7 +225,7 @@ export class PokedexUI {
     const caughtCount = Object.keys(profile.pokedex.caught).length;
     const seenCount = profile.pokedex.seen.length;
 
-    if (!this.selectedSpeciesId) {
+    if (!this.selectedSpeciesId || !SPECIES[this.selectedSpeciesId]) {
       this.selectedSpeciesId = allSpecies[0].id;
     }
 
@@ -108,6 +238,7 @@ export class PokedexUI {
       <span>📖 Caught: <strong>${caughtCount}/${allSpecies.length}</strong></span>
       <span>👀 Seen: <strong>${seenCount}/${allSpecies.length}</strong></span>
       <span>🏆 Wins: <strong>${profile.stats.battlesWon}</strong></span>
+      <span>✨ Shimmers: <strong>${profile.stats.shiniesFound || 0}</strong></span>
     `;
     wrap.appendChild(header);
 
@@ -117,7 +248,7 @@ export class PokedexUI {
     for (const sp of allSpecies) {
       const isCaught = Boolean(profile.pokedex.caught[sp.id]);
       const isSeen = isCaught || profile.pokedex.seen.includes(sp.id);
-      const typeInfo = TYPES[sp.type];
+      const typeInfo = TYPES[sp.type] || TYPES.normal;
 
       const card = document.createElement('button');
       card.type = 'button';
@@ -173,11 +304,10 @@ export class PokedexUI {
     }
     wrap.appendChild(grid);
 
-    // Detail inspector drawer
     const selected = SPECIES[this.selectedSpeciesId] || allSpecies[0];
     const selCaught = profile.pokedex.caught[selected.id] || 0;
     const selSeen = selCaught > 0 || profile.pokedex.seen.includes(selected.id);
-    const selType = TYPES[selected.type];
+    const selType = TYPES[selected.type] || TYPES.normal;
     const habitat = selected.biome === 'starter'
       ? 'Professor Lab Trio'
       : BIOMES[selected.biome]?.name || 'Starlight Island';
@@ -210,6 +340,7 @@ export class PokedexUI {
         <span>⚔️ ${moveTags}</span>
       </div>
     `;
+    info.appendChild(this.buildEvolutionChainEl(selected, selSeen));
     detail.appendChild(info);
     wrap.appendChild(detail);
 
@@ -217,18 +348,125 @@ export class PokedexUI {
     this.bodyEl.appendChild(wrap);
   }
 
+  getMonEvolutionOptions(mon, bagGems = {}) {
+    const levelEvo = typeof mon.getPendingLevelEvolution === 'function' ? mon.getPendingLevelEvolution() : null;
+    const itemEvos = typeof mon.getAvailableItemEvolutions === 'function'
+      ? mon.getAvailableItemEvolutions(bagGems)
+      : [];
+
+    const ready = [];
+    const hints = [];
+
+    if (levelEvo) {
+      const targetName = levelEvo.toSpecies?.name || SPECIES[levelEvo.toId]?.name || 'Evolution';
+      ready.push({
+        toId: levelEvo.toId,
+        targetName,
+        item: null,
+        label: `✨ Evolve → ${targetName}!`,
+      });
+    }
+
+    for (const opt of itemEvos) {
+      if (levelEvo && opt.toId === levelEvo.toId) continue;
+      const targetName = opt.toSpecies?.name || SPECIES[opt.toId]?.name || 'Evolution';
+      if (opt.canUse) {
+        ready.push({
+          toId: opt.toId,
+          targetName,
+          item: opt.item,
+          label: `✨ ${opt.itemInfo?.icon || '💎'} Evolve → ${targetName}!`,
+        });
+      } else {
+        hints.push(`${opt.itemInfo?.icon || '💎'} Evolves with ${opt.itemInfo?.name || opt.item}`);
+      }
+    }
+
+    if (!levelEvo) {
+      const rules = EVOLUTIONS?.[mon.speciesId] || [];
+      for (const rule of rules) {
+        if (!rule.item && rule.minLevel && mon.level < rule.minLevel) {
+          const targetName = SPECIES[rule.to]?.name || 'Evolution';
+          hints.push(`⬆️ Evolves to ${targetName} at Lv.${rule.minLevel}`);
+          break;
+        }
+      }
+    }
+
+    return { ready, hints };
+  }
+
+  triggerInModalEvolution(mon, option) {
+    if (typeof this.storage.evolvePokemon !== 'function') return;
+    const oldName = mon.name;
+    const res = this.storage.evolvePokemon(mon.uid, option.toId, option.item || null);
+    const evo = res?.evolution || res;
+    if (!evo) return;
+
+    if (typeof this.audio?.playEvolutionFanfare === 'function') {
+      this.audio.playEvolutionFanfare();
+    } else {
+      this.audio?.playLevelUp?.();
+    }
+
+    this.evoBanner = {
+      oldName: evo.oldName || oldName,
+      newName: evo.newName || option.targetName,
+      unlockedMoves: Array.isArray(evo.unlockedMoves) ? evo.unlockedMoves : [],
+      isShiny: Boolean(mon.isShiny),
+    };
+
+    this.onTeamChanged?.();
+    if (res?.newBadges?.length) {
+      this.onBadgesUnlocked?.(res.newBadges);
+    }
+    this.render();
+  }
+
   renderTeam(profile) {
     const wrap = document.createElement('div');
     wrap.className = 'team-layout';
 
+    const gems = profile.bag?.gems || {};
+    const gemItems = Object.values(EVOLUTION_ITEMS || {});
+    const gemBadgesHtml = gemItems.map((gem) => (
+      `<span class="gem-chip" title="${gem.name}: ${gem.description}">${gem.icon} <strong>${gems[gem.id] || 0}</strong></span>`
+    )).join('');
+
     const bagBar = document.createElement('div');
     bagBar.className = 'dex-summary-bar';
     bagBar.innerHTML = `
-      <span>🎒 Berry Potions: <strong>${profile.bag.potions}</strong></span>
+      <span>🍓 Potions: <strong>${profile.bag.potions}</strong></span>
       <span>🔵 Great Balls: <strong>${profile.bag.greatBalls}</strong></span>
       <span>🔴 Poké Balls: <strong>∞</strong></span>
+      <span class="gem-bag-strip">💎 Gems: ${gemBadgesHtml || 'None'}</span>
     `;
     wrap.appendChild(bagBar);
+
+    if (this.evoBanner) {
+      const banner = document.createElement('div');
+      banner.className = 'evo-celebration-banner';
+      const moveNames = this.evoBanner.unlockedMoves
+        .map((mId) => MOVES[mId]?.name || mId)
+        .filter(Boolean);
+      const copy = document.createElement('div');
+      copy.innerHTML = `
+        <div class="evo-celebration-eyebrow">🌟 STARLIGHT EVOLUTION COMPLETE!</div>
+        <strong>${this.evoBanner.isShiny ? '✨ ' : ''}${this.evoBanner.oldName} evolved into ${this.evoBanner.newName}!</strong>
+        ${moveNames.length ? `<p>Unlocked moves: ${moveNames.join(' • ')}</p>` : '<p>Stats surged higher for new island adventures!</p>'}
+      `;
+      const dismissBtn = document.createElement('button');
+      dismissBtn.type = 'button';
+      dismissBtn.className = 'mini-btn';
+      dismissBtn.textContent = 'Awesome!';
+      dismissBtn.addEventListener('click', () => {
+        this.evoBanner = null;
+        this.render();
+      });
+      banner.appendChild(copy);
+      banner.appendChild(dismissBtn);
+      wrap.appendChild(banner);
+    }
 
     if (this.swapBoxIndex !== null) {
       const notice = document.createElement('div');
@@ -256,34 +494,63 @@ export class PokedexUI {
     teamGrid.className = 'team-grid';
 
     profile.team.forEach((mon, idx) => {
-      const typeInfo = TYPES[mon.type];
+      const typeInfo = TYPES[mon.type] || TYPES.normal;
       const hpPct = Math.round((mon.hp / Math.max(1, mon.maxHp)) * 100);
       const xpPct = Math.min(100, Math.round((mon.xp / Math.max(1, mon.xpToNext)) * 100));
 
       const card = document.createElement('div');
-      card.className = `team-card ${idx === 0 ? 'is-lead' : ''}`;
+      card.className = `team-card ${idx === 0 ? 'is-lead' : ''} ${mon.isShiny ? 'is-shiny-card' : ''}`;
 
       const top = document.createElement('div');
       top.className = 'team-card-top';
 
       const img = document.createElement('img');
-      attachPokemonSprite(img, mon.speciesId, { back: false, timeoutMs: 1800 });
+      attachPokemonSprite(img, mon, { back: false, shiny: Boolean(mon.isShiny), timeoutMs: 1800 });
       top.appendChild(img);
 
       const meta = document.createElement('div');
       meta.className = 'team-card-meta';
+      const shinyTag = mon.isShiny ? '<span class="shiny-badge">✨ Shimmer</span>' : '';
       meta.innerHTML = `
         <div class="team-card-title">
           <strong>${mon.name}</strong>
           <span class="team-lv">Lv.${mon.level}</span>
         </div>
-        <span class="type-pill" style="background:${typeInfo.bg};border-color:${typeInfo.color}">${typeInfo.icon} ${typeInfo.label}</span>
+        <div class="team-pill-row">
+          <span class="type-pill" style="background:${typeInfo.bg};border-color:${typeInfo.color}">${typeInfo.icon} ${typeInfo.label}</span>
+          ${shinyTag}
+        </div>
         <div class="team-bar-row">HP ${mon.hp}/${mon.maxHp}</div>
         <div class="hp-track"><div class="hp-fill ${hpPct <= 22 ? 'is-low' : hpPct <= 50 ? 'is-mid' : ''}" style="width:${hpPct}%"></div></div>
         <div class="xp-track"><div class="xp-fill" style="width:${xpPct}%"></div></div>
       `;
       top.appendChild(meta);
       card.appendChild(top);
+
+      const { ready: evoReady, hints: evoHints } = this.getMonEvolutionOptions(mon, gems);
+      if (evoReady.length > 0 && this.swapBoxIndex === null) {
+        const evoRow = document.createElement('div');
+        evoRow.className = 'evo-btn-row';
+        for (const opt of evoReady) {
+          const evoBtn = document.createElement('button');
+          evoBtn.type = 'button';
+          evoBtn.className = 'evolve-btn';
+          evoBtn.textContent = opt.label;
+          evoBtn.addEventListener('click', () => this.triggerInModalEvolution(mon, opt));
+          evoRow.appendChild(evoBtn);
+        }
+        card.appendChild(evoRow);
+      } else if (evoHints.length > 0) {
+        const hintRow = document.createElement('div');
+        hintRow.className = 'evo-hint-row';
+        for (const text of evoHints) {
+          const pill = document.createElement('span');
+          pill.className = 'evo-hint-pill';
+          pill.textContent = text;
+          hintRow.appendChild(pill);
+        }
+        card.appendChild(hintRow);
+      }
 
       const actions = document.createElement('div');
       actions.className = 'team-card-actions';
@@ -344,7 +611,6 @@ export class PokedexUI {
     });
     wrap.appendChild(teamGrid);
 
-    // Reserve Box section
     const boxTitle = document.createElement('h3');
     boxTitle.className = 'section-heading';
     boxTitle.textContent = `Reserve Box (${profile.box.length})`;
@@ -360,11 +626,11 @@ export class PokedexUI {
       boxGrid.className = 'box-grid';
       profile.box.forEach((mon, boxIdx) => {
         const card = document.createElement('div');
-        card.className = `box-card ${this.swapBoxIndex === boxIdx ? 'is-selected' : ''}`;
+        card.className = `box-card ${this.swapBoxIndex === boxIdx ? 'is-selected' : ''} ${mon.isShiny ? 'is-shiny-card' : ''}`;
         const img = document.createElement('img');
-        attachPokemonSprite(img, mon.speciesId, { back: false, timeoutMs: 1800 });
+        attachPokemonSprite(img, mon, { back: false, shiny: Boolean(mon.isShiny), timeoutMs: 1800 });
         const label = document.createElement('div');
-        label.innerHTML = `<strong>${mon.name}</strong><small>Lv.${mon.level}</small>`;
+        label.innerHTML = `<strong>${mon.isShiny ? '✨ ' : ''}${mon.name}</strong><small>Lv.${mon.level}</small>`;
         const swapBtn = document.createElement('button');
         swapBtn.type = 'button';
         swapBtn.className = 'mini-btn';
@@ -386,15 +652,161 @@ export class PokedexUI {
     this.bodyEl.appendChild(wrap);
   }
 
+  renderGuide(profile) {
+    const wrap = document.createElement('div');
+    wrap.className = 'guide-layout';
+
+    const totalSpecies = Object.keys(SPECIES).length;
+    const caughtCount = Object.keys(profile.pokedex.caught).length;
+    const totalShrines = Object.keys(SHRINES).length;
+    const quests = Array.isArray(FIELD_QUESTS) ? FIELD_QUESTS : Object.values(FIELD_QUESTS || {});
+    const doneQuests = quests.filter((q) => profile.questsCompleted?.includes(q.id)).length;
+
+    const guidance = typeof getCompassGuidance === 'function' ? getCompassGuidance(profile, SPECIES) : null;
+    const dirText = formatCompassArrow(guidance, profile);
+    const targetBiome = guidance?.targetBiomeId ? BIOMES[guidance.targetBiomeId] : null;
+
+    const compassCard = document.createElement('div');
+    compassCard.className = 'guide-compass-card';
+    compassCard.innerHTML = `
+      <div class="guide-compass-head">
+        <span class="guide-compass-badge">${guidance?.icon || '🧭'} STARLIGHT COMPASS OBJECTIVE</span>
+        <span class="guide-compass-dir">${dirText}${Number.isFinite(guidance?.distance) && guidance.distance > 0 ? ` • ${guidance.distance} tiles` : ''}</span>
+      </div>
+      <h3 class="guide-compass-title">${guidance?.title || 'Explore Starlight Island & Discover All 6 Biomes!'}</h3>
+      <div class="guide-compass-stats">
+        ${targetBiome ? `<span>📍 Destination: <strong>${targetBiome.icon} ${targetBiome.name}</strong></span>` : ''}
+        <span>📖 Dex: <strong>${caughtCount}/${totalSpecies}</strong></span>
+        <span>⛩️ Shrines: <strong>${profile.shrinesCleared.length}/${totalShrines}</strong></span>
+        <span>📜 Quests: <strong>${doneQuests}/${quests.length}</strong></span>
+      </div>
+    `;
+    wrap.appendChild(compassCard);
+
+    const biomesHeading = document.createElement('h3');
+    biomesHeading.className = 'section-heading';
+    biomesHeading.textContent = 'Island Regions & Discovery';
+    wrap.appendChild(biomesHeading);
+
+    const biomeGrid = document.createElement('div');
+    biomeGrid.className = 'guide-grid';
+
+    const seenBiomeIds = new Set();
+    const orderedBiomes = [];
+    for (const id of BIOME_ORDER) {
+      if (BIOMES[id]) {
+        orderedBiomes.push(BIOMES[id]);
+        seenBiomeIds.add(id);
+      }
+    }
+    for (const b of Object.values(BIOMES)) {
+      if (!seenBiomeIds.has(b.id)) orderedBiomes.push(b);
+    }
+
+    for (const biome of orderedBiomes) {
+      const stats = typeof getBiomeDiscoveryStats === 'function'
+        ? getBiomeDiscoveryStats(profile, biome.id)
+        : null;
+      const shrine = Object.values(SHRINES).find((s) => s.biome === biome.id) || null;
+      const visited = Boolean(profile.biomesVisited?.includes(biome.id) || biome.id === 'village');
+      const lvRange = Array.isArray(biome.levelRange) ? `Lv.${biome.levelRange[0]}–${biome.levelRange[1]}` : 'Safe Zone';
+      const totalBiomeSp = stats?.totalSpecies ?? biome.encounters?.length ?? 0;
+      const caughtBiome = stats?.caught ?? 0;
+      const seenBiome = stats?.seen ?? 0;
+      const pct = totalBiomeSp > 0 ? Math.min(100, Math.round((caughtBiome / totalBiomeSp) * 100)) : 100;
+
+      const card = document.createElement('div');
+      card.className = `biome-progress-card ${stats?.shrineCleared ? 'is-cleared' : visited ? 'is-visited' : ''}`;
+
+      const statusLabel = stats?.shrineCleared
+        ? '✓ Shrine Cleared'
+        : visited
+          ? 'Visited'
+          : 'Unexplored';
+
+      const dexRow = totalBiomeSp > 0
+        ? `<span>📖 Caught ${caughtBiome}/${totalBiomeSp} (Seen ${seenBiome})</span>`
+        : '<span>💖 Healing Fountain &amp; Lab</span>';
+      const chestRow = stats && stats.chestsTotal > 0
+        ? `<span>📦 Chests ${stats.chestsOpened}/${stats.chestsTotal}</span>`
+        : '';
+      const shrineRow = shrine
+        ? `<span>⛩️ ${shrine.name}: ${stats?.shrineCleared ? 'Cleared ✓' : `Guardian Lv.${shrine.level}`}</span>`
+        : '';
+
+      card.innerHTML = `
+        <div class="biome-card-head">
+          <strong>${biome.icon} ${biome.name}</strong>
+          <span class="biome-lv-pill">${lvRange}</span>
+        </div>
+        <div class="biome-card-meta">
+          <span class="biome-status-tag ${stats?.shrineCleared ? 'is-cleared' : ''}">${statusLabel}</span>
+          ${dexRow}
+          ${chestRow}
+          ${shrineRow}
+        </div>
+        ${totalBiomeSp > 0 ? `<div class="biome-progress-track"><div class="biome-progress-fill" style="width:${pct}%"></div></div>` : ''}
+      `;
+      biomeGrid.appendChild(card);
+    }
+    wrap.appendChild(biomeGrid);
+
+    const questHeading = document.createElement('h3');
+    questHeading.className = 'section-heading';
+    questHeading.textContent = `Field Quests (${doneQuests}/${quests.length})`;
+    wrap.appendChild(questHeading);
+
+    const questsList = document.createElement('div');
+    questsList.className = 'quests-list';
+
+    if (quests.length === 0) {
+      const empty = document.createElement('p');
+      empty.className = 'empty-note';
+      empty.textContent = 'Talk to Island Guides around Starlight Island to discover special quests!';
+      questsList.appendChild(empty);
+    } else {
+      for (const quest of quests) {
+        const done = Boolean(profile.questsCompleted?.includes(quest.id));
+        const ready = !done && Boolean(quest.check?.(profile));
+        const progress = typeof quest.progressText === 'function' ? quest.progressText(profile) : '';
+        const rewardChips = formatRewardsList(quest.rewards);
+
+        const qCard = document.createElement('div');
+        qCard.className = `quest-card ${done ? 'is-done' : ready ? 'is-ready' : ''}`;
+        const statusText = done ? '✓ Completed' : ready ? '★ Ready! Talk to NPC' : 'In Progress';
+
+        qCard.innerHTML = `
+          <div class="quest-card-head">
+            <strong>${done ? '✅' : ready ? '🌟' : '📜'} ${quest.title}</strong>
+            <span class="quest-status-pill">${statusText}</span>
+          </div>
+          <p class="quest-desc">${quest.description}</p>
+          <div class="quest-footer">
+            ${progress ? `<span class="quest-progress-text">${progress}</span>` : ''}
+            <div class="quest-reward-row">
+              ${rewardChips.map((c) => `<span class="quest-reward-chip">${c}</span>`).join('')}
+            </div>
+          </div>
+        `;
+        questsList.appendChild(qCard);
+      }
+    }
+    wrap.appendChild(questsList);
+
+    this.bodyEl.innerHTML = '';
+    this.bodyEl.appendChild(wrap);
+  }
+
   renderBadges(profile) {
     const wrap = document.createElement('div');
     wrap.className = 'badges-layout';
 
+    const totalShrines = Object.keys(SHRINES).length;
     const header = document.createElement('div');
     header.className = 'dex-summary-bar';
     header.innerHTML = `
       <span>🏅 Badges Earned: <strong>${profile.badges.length}/${BADGES.length}</strong></span>
-      <span>⛩️ Shrines Cleared: <strong>${profile.shrinesCleared.length}/3</strong></span>
+      <span>⛩️ Shrines Cleared: <strong>${profile.shrinesCleared.length}/${totalShrines}</strong></span>
     `;
     wrap.appendChild(header);
 

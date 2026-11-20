@@ -139,6 +139,11 @@ export class InputController {
     });
 
     window.addEventListener('blur', () => this.clearAll());
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', () => {
+        if (document.hidden) this.clearAll();
+      });
+    }
   }
 
   resolveDpadDirection(clientX, clientY) {
@@ -205,6 +210,7 @@ export class InputController {
 
       this.dpadEl.addEventListener('pointerup', releaseDpadPointer);
       this.dpadEl.addEventListener('pointercancel', releaseDpadPointer);
+      this.dpadEl.addEventListener('lostpointercapture', releaseDpadPointer);
       this.dpadEl.addEventListener('contextmenu', (e) => e.preventDefault());
     }
 
