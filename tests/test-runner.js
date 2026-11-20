@@ -1,7 +1,30 @@
 // Zero-Dependency Automated Test Suite for Pokémon: Starlight Island
 // Run manually via `await window.runGameTests()` in DevTools console or automatically via `?test=true`
 
-import { BADGES, MOVES, SPECIES, TYPE_CHART } from '../js/config.js';
+import {
+  BADGES,
+  BIOMES,
+  CHESTS,
+  EVOLUTION_ITEMS,
+  EVOLUTIONS,
+  FIELD_QUESTS,
+  GAME_META,
+  LANDMARKS,
+  MOVES,
+  NPCS,
+  SHRINES,
+  SPECIES,
+  TILE,
+  TYPES,
+  TYPE_CHART,
+  WORLD_COLS,
+  WORLD_MAP,
+  WORLD_ROWS,
+  getBiomeDiscoveryStats,
+  getCompassGuidance,
+  getSpriteUrls,
+  isTileWalkableAt,
+} from '../js/config.js';
 import {
   Pokemon,
   attachPokemonSprite,
@@ -10,8 +33,9 @@ import {
   createPokemon,
   generateSilhouetteDataUri,
   getTypeEffectiveness,
+  rollWildPokemon,
 } from '../js/pokemon.js';
-import { StorageManager } from '../js/storage.js';
+import { STORAGE_KEY, StorageManager, storage } from '../js/storage.js';
 import { AudioEngine, THEMES } from '../js/audio.js';
 import { BATTLE_STATES, BattleEngine } from '../js/battle.js';
 
@@ -472,7 +496,7 @@ function buildTestSuites() {
               engine.start({ enemy: createPokemon(25, 5), biomeId: 'forest' });
               assertEqual(engine.active, false, 'BattleEngine does not stay stuck active on empty team');
               assertEqual(endedWith?.outcome, 'escaped', 'BattleEngine invokes onBattleEnd cleanly');
-              assert(BADGES.length === 6 && Object.keys(SPECIES).length === 18, 'Config roster intact');
+              assert(BADGES.length === 8 && Object.keys(SPECIES).length === 54, 'Config roster intact');
             } finally {
               engine?.destroy();
               window.localStorage.removeItem(TEST_KEY);
@@ -754,6 +778,530 @@ function buildTestSuites() {
             } finally {
               engine.destroy();
               window.localStorage.removeItem(TEST_KEY);
+            }
+          },
+        },
+      ],
+    },
+    {
+      name: '11. v1 to v2 Lossless Save Migration & Safe Coordinate Recovery',
+      tests: [
+        {
+          name: 'Migrates v1 Violet & Ozias save payload losslessly and rescues stranded coordinates',
+          fn() {
+            assertEqual(STORAGE_KEY, 'starlight_pokemon_save_v1', 'STORAGE_KEY constant preserved');
+            const TEST_KEY = 'starlight_pokemon_test_v1_migration';
+            try {
+              const v1Payload = {
+                version: 1,
+                activeTrainerId: 'violet',
+                settings: {
+                  muted: true,
+                  crtEnabled: false,
+                  showTouchPad: 'show',
+                },
+                profiles: {
+                  violet: {
+                    trainerId: 'violet',
+                    starterId: 1,
+                    pos: { x: 0, y: 0, dir: 'up' }, // solid TREE tile
+                    team: [
+                      {
+                        uid: 'v-bulba-1',
+                        speciesId: 1,
+                        level: 7,
+                        xp: 42,
+                        hp: 29,
+                        caughtBiome: 'starter',
+                        movePp: { vine_whip: 19, tackle: 30 },
+                      },
+                    ],
+                    box: [
+                      {
+                        uid: 'v-pika-box',
+                        speciesId: 25,
+                        level: 6,
+                        xp: 12,
+                        hp: 25,
+                        caughtBiome: 'forest',
+                      },
+                    ],
+                    pokedex: { seen: [1, 10, 25], caught: { 1: 1, 25: 1 } },
+                    badges: ['meadow'],
+                    shrinesCleared: ['forest_shrine'],
+                    chestsOpened: ['forest_chest'],
+                    bag: { potions: 9, greatBalls: 7 },
+                    stats: { battlesWon: 4, totalCaught: 2, steps: 120 },
+                  },
+                  ozias: {
+                    trainerId: 'ozias',
+                    starterId: 4,
+                    pos: { x: 99, y: 99, dir: 'left' }, // out-of-bounds
+                    team: [
+                      {
+                        uid: 'o-char-1',
+                        speciesId: 4,
+                        level: 6,
+                        xp: 18,
+                        hp: 24,
+                        caughtBiome: 'starter',
+                      },
+                    ],
+                    box: [],
+                    pokedex: { seen: [4], caught: { 4: 1 } },
+                    badges: [],
+                    shrinesCleared: [],
+                    chestsOpened: [],
+                    bag: { potions: 5, greatBalls: 4 },
+                    stats: { battlesWon: 1, totalCaught: 1, steps: 33 },
+                  },
+                },
+              };
+
+              window.localStorage.setItem(TEST_KEY, JSON.stringify(v1Payload));
+              const migrated = new StorageManager(TEST_KEY);
+
+              assertEqual(migrated.state.version, 2, 'migrated save state version is 2');
+              assertEqual(migrated.getActiveTrainerId(), 'violet', 'activeTrainerId preserved');
+              assertEqual(migrated.getSettings().muted, true, 'muted preserved');
+              assertEqual(migrated.getSettings().crtEnabled, false, 'crtEnabled preserved');
+              assertEqual(migrated.getSettings().showTouchPad, 'show', 'showTouchPad preserved');
+              assertEqual(migrated.getSettings().battlePace, 'cinema', 'battlePace defaults to cinema');
+
+              const v = migrated.getProfile('violet');
+              assertEqual(v.team.length, 1, 'Violet team preserved');
+              assert(v.team[0] instanceof Pokemon, 'Violet team mon hydrated');
+              assertEqual(v.team[0].speciesId, 1, 'Violet starter species preserved');
+              assertEqual(v.team[0].level, 7, 'Violet starter level preserved');
+              assertEqual(v.team[0].xp, 42, 'Violet starter XP preserved');
+              assertEqual(v.team[0].hp, 29, 'Violet starter HP preserved');
+              assertEqual(v.box.length, 1, 'Violet box preserved');
+              assertEqual(v.box[0].speciesId, 25, 'Violet box species preserved');
+              assert(v.pokedex.caught[1] === 1 && v.pokedex.caught[25] === 1, 'Violet caught preserved');
+              assert(v.shrinesCleared.includes('forest_shrine'), 'Violet forest_shrine preserved');
+              assert(v.chestsOpened.includes('forest_chest'), 'Violet forest_chest preserved');
+              assert(v.badges.includes('meadow'), 'Violet meadow badge preserved');
+              assertEqual(v.bag.potions, 9, 'Violet potions preserved');
+              assertEqual(v.bag.greatBalls, 7, 'Violet greatBalls preserved');
+              assertEqual(v.bag.gems.fire_gem, 0, 'gems initialized to 0');
+              assertEqual(v.bag.gems.moon_gem, 0, 'moon_gem initialized to 0');
+              assert(Array.isArray(v.questsCompleted), 'questsCompleted initialized');
+              assertEqual(v.stats.evolutions, 0, 'stats.evolutions initialized');
+              assertEqual(v.stats.shiniesFound, 0, 'stats.shiniesFound initialized');
+              assertEqual(isTileWalkableAt(v.pos.x, v.pos.y), true, 'Violet stranded (0,0) relocated to walkable tile');
+
+              const o = migrated.getProfile('ozias');
+              assertEqual(o.team[0].speciesId, 4, 'Ozias team preserved');
+              assertEqual(o.team[0].xp, 18, 'Ozias XP preserved');
+              assertEqual(isTileWalkableAt(o.pos.x, o.pos.y), true, 'Ozias out-of-bounds (99,99) relocated safely');
+              assertEqual(o.pos.x, GAME_META.spawn.x, 'Ozias out-of-bounds falls back to spawn.x');
+              assertEqual(o.pos.y, GAME_META.spawn.y, 'Ozias out-of-bounds falls back to spawn.y');
+
+              migrated.save();
+              const rawSaved = JSON.parse(window.localStorage.getItem(TEST_KEY));
+              assertEqual(rawSaved.version, 2, 'persisted save writes version 2');
+            } finally {
+              window.localStorage.removeItem(TEST_KEY);
+            }
+          },
+        },
+      ],
+    },
+    {
+      name: '12. Evolution Chains, Evolution Gems & Expanded 54-Species Roster',
+      tests: [
+        {
+          name: 'All 10 TYPES have fallback SVGs, 54 SPECIES exist, and level & gem evolutions update Pokemon & Storage',
+          async fn() {
+            const typeIds = Object.keys(TYPES);
+            assertEqual(typeIds.length, 10, '10 elemental types exist');
+            for (const reqType of ['grass', 'fire', 'water', 'electric', 'rock', 'psychic', 'normal', 'ice', 'ghost', 'dragon']) {
+              assert(Boolean(TYPES[reqType]), `TYPES.${reqType} present`);
+              const resp = await fetch(`./assets/fallback/${reqType}.svg`);
+              assertEqual(resp.ok, true, `fallback SVG exists for ${reqType}`);
+            }
+
+            assertEqual(Object.keys(SPECIES).length, 54, '54 species defined');
+            assertEqual(Object.keys(EVOLUTION_ITEMS).length, 4, '4 evolution gems defined');
+            assertEqual(EVOLUTIONS[1][0].to, 2, 'Bulbasaur -> Ivysaur');
+            assertEqual(EVOLUTIONS[2][0].to, 3, 'Ivysaur -> Venusaur');
+            assertEqual(EVOLUTIONS[129][0].to, 130, 'Magikarp -> Gyarados');
+            assertEqual(EVOLUTIONS[25][0].to, 26, 'Pikachu -> Raichu');
+            const eeveeTargets = EVOLUTIONS[133].map((r) => r.to).sort((a, b) => a - b);
+            assertEqual(JSON.stringify(eeveeTargets), JSON.stringify([134, 135, 136]), 'Eevee -> Vaporeon/Jolteon/Flareon');
+
+            const bulbaLv9 = createPokemon(1, 9);
+            assertEqual(bulbaLv9.getPendingLevelEvolution(), null, 'Lv.9 Bulbasaur has no pending level evolution');
+            const bulbaLv10 = createPokemon(1, 10);
+            assertEqual(bulbaLv10.getPendingLevelEvolution()?.toId, 2, 'Lv.10 Bulbasaur pending Ivysaur');
+
+            const eevee = createPokemon(133, 8);
+            assertEqual(eevee.getPendingLevelEvolution(), null, 'Eevee has no level evolution');
+            const eeveeNoGems = eevee.getAvailableItemEvolutions({ water_gem: 0, thunder_gem: 0, fire_gem: 0 });
+            assertEqual(eeveeNoGems.length, 3, 'Eevee has 3 item evolution paths');
+            assertEqual(eeveeNoGems.every((o) => !o.canUse), true, 'cannot use gem evolution with 0 gems');
+            const eeveeWithWater = eevee.getAvailableItemEvolutions({ water_gem: 1 });
+            assertEqual(eeveeWithWater.find((o) => o.toId === 134)?.canUse, true, 'Vaporeon usable with water_gem');
+
+            const TEST_KEY = 'starlight_pokemon_test_evo_v1';
+            try {
+              window.localStorage.removeItem(TEST_KEY);
+              const store = new StorageManager(TEST_KEY);
+              store.selectTrainer('violet');
+              store.chooseStarter(1); // Bulbasaur
+              const profile = store.getActiveProfile();
+              const starter = profile.team[0];
+              starter.level = 10;
+              starter.recalculateStats();
+              const prevMaxHp = starter.maxHp;
+
+              const lvlEvoRes = store.evolvePokemon(starter.uid, 2);
+              assert(Boolean(lvlEvoRes?.evolution), 'evolvePokemon level evolution succeeded');
+              assertEqual(starter.speciesId, 2, 'starter evolved into Ivysaur');
+              assertGreater(starter.maxHp, prevMaxHp, 'evolved maxHp increased');
+              assert(Boolean(profile.pokedex.caught[2]), 'Ivysaur registered in Dex caught');
+              assertEqual(profile.stats.evolutions, 1, 'stats.evolutions incremented to 1');
+
+              // Gem evolution on Pikachu
+              const pika = createPokemon(25, 8);
+              store.recordCaught(pika);
+              store.addGem('thunder_gem', 1);
+              assertEqual(profile.bag.gems.thunder_gem, 1, 'thunder_gem added');
+              const gemEvoRes = store.evolvePokemon(pika.uid, 26, 'thunder_gem');
+              assert(Boolean(gemEvoRes?.evolution), 'gem evolution succeeded');
+              assertEqual(pika.speciesId, 26, 'Pikachu evolved into Raichu');
+              assertEqual(profile.bag.gems.thunder_gem, 0, 'thunder_gem consumed');
+              assert(Boolean(profile.pokedex.caught[26]), 'Raichu registered in Dex caught');
+              assertEqual(profile.stats.evolutions, 2, 'stats.evolutions incremented to 2');
+              assert(Object.keys(pika.movePp).length >= 3, 'Raichu movePp updated');
+            } finally {
+              window.localStorage.removeItem(TEST_KEY);
+            }
+          },
+        },
+      ],
+    },
+    {
+      name: '13. Buff/Shield Mechanics & Starlight Shimmer (Shiny)',
+      tests: [
+        {
+          name: 'Buff/shield moves modify stages, mitigate damage, reset cleanly, and shiny state persists',
+          async fn() {
+            const attacker = createPokemon(4, 10); // Charmander
+            const defender = createPokemon(7, 10); // Squirtle
+
+            const baseAtk = attacker.getEffectiveAtk();
+            const buffRes = calculateDamage(attacker, defender, MOVES.focus_roar);
+            assertEqual(buffRes.category, 'buff', 'focus_roar returns buff category');
+            assertEqual(buffRes.damage, 0, 'buff deals 0 damage');
+
+            attacker.applyStageBoost('atk', 1);
+            assertGreater(attacker.getEffectiveAtk(), baseAtk, 'ATK stage +1 raises effective ATK');
+            attacker.applyStageBoost('spd', 2);
+            assertGreater(attacker.getEffectiveSpd(), attacker.spd, 'SPD stage +2 raises effective SPD');
+
+            const unshieldedHit = calculateDamage(attacker, defender, MOVES.ember, {
+              forceHit: true,
+              forceCrit: false,
+              fixedVariance: 1.0,
+            });
+
+            const shieldRes = calculateDamage(defender, attacker, MOVES.shell_shield);
+            assertEqual(shieldRes.category, 'shield', 'shell_shield returns shield category');
+            assertEqual(shieldRes.grantShield, true, 'shell_shield grants shield');
+            assertGreater(shieldRes.heal, 0, 'shell_shield grants small heal');
+            defender.shieldTurns = 2;
+
+            const shieldedHit = calculateDamage(attacker, defender, MOVES.ember, {
+              forceHit: true,
+              forceCrit: false,
+              fixedVariance: 1.0,
+            });
+            assertGreater(unshieldedHit.damage, shieldedHit.damage, 'active shield mitigates incoming attack damage');
+
+            attacker.resetBattleState();
+            defender.resetBattleState();
+            assertEqual(attacker.battleStages.atk, 0, 'resetBattleState clears atk stage');
+            assertEqual(attacker.battleStages.spd, 0, 'resetBattleState clears spd stage');
+            assertEqual(attacker.getEffectiveAtk(), baseAtk, 'effective ATK returns to base');
+            assertEqual(defender.shieldTurns, 0, 'resetBattleState clears shieldTurns');
+
+            // Starlight Shimmer (Shiny)
+            const shiny = rollWildPokemon('forest', 6, { forceShiny: true });
+            assertEqual(shiny.isShiny, true, 'forceShiny creates shiny Pokémon');
+            const shinyUrls = getSpriteUrls(shiny.speciesId, true, true);
+            assert(shinyUrls.static.includes('shiny/'), 'shiny sprite URL includes shiny/');
+
+            const img = document.createElement('img');
+            await attachPokemonSprite(img, shiny, { back: false, timeoutMs: 60 });
+            assertEqual(img.classList.contains('is-shiny-sprite'), true, 'attachPokemonSprite marks .is-shiny-sprite');
+
+            const roundTrip = Pokemon.fromJSON(shiny.toJSON());
+            assertEqual(roundTrip.isShiny, true, 'isShiny survives toJSON/fromJSON');
+
+            const TEST_KEY = 'starlight_pokemon_test_shiny_v1';
+            try {
+              window.localStorage.removeItem(TEST_KEY);
+              const store = new StorageManager(TEST_KEY);
+              store.selectTrainer('ozias');
+              store.chooseStarter(7);
+              store.recordCaught(shiny);
+              const reloaded = new StorageManager(TEST_KEY);
+              const oz = reloaded.getProfile('ozias');
+              assertEqual(oz.stats.shiniesFound, 1, 'shiniesFound persisted');
+              assertEqual(oz.team[1].isShiny, true, 'caught shiny Pokemon persists across reload');
+            } finally {
+              window.localStorage.removeItem(TEST_KEY);
+            }
+          },
+        },
+      ],
+    },
+    {
+      name: '14. 6 Biomes, 5 Shrines, NPCs, Quests & Starlight Compass',
+      tests: [
+        {
+          name: '52x38 world map is BFS-reachable to all 6 biomes, 5 shrines, chests, NPCs, landmarks & quests work',
+          fn() {
+            assertEqual(WORLD_COLS, 52, 'WORLD_COLS === 52');
+            assertEqual(WORLD_ROWS, 38, 'WORLD_ROWS === 38');
+            assertEqual(WORLD_MAP.length, 38, 'WORLD_MAP has 38 rows');
+            for (let y = 0; y < WORLD_ROWS; y++) {
+              assertEqual(WORLD_MAP[y].length, 52, `row ${y} width === 52`);
+            }
+
+            const reqBiomes = ['village', 'forest', 'cave', 'water', 'volcano', 'peak'];
+            for (const bId of reqBiomes) {
+              assert(Boolean(BIOMES[bId]), `BIOMES.${bId} exists`);
+            }
+
+            const shrineList = Object.entries(SHRINES);
+            assertEqual(shrineList.length, 5, '5 shrines exist');
+            const chestList = Object.entries(CHESTS);
+            assertGreater(chestList.length, 6, '7+ chests exist');
+            assertGreater(Object.keys(NPCS).length, 5, '6+ NPCs exist');
+            assertGreater(Object.keys(LANDMARKS).length, 4, '5+ landmarks exist');
+
+            // BFS from spawn (8, 15)
+            const visited = new Set([`${GAME_META.spawn.x},${GAME_META.spawn.y}`]);
+            const queue = [[GAME_META.spawn.x, GAME_META.spawn.y]];
+            assertEqual(isTileWalkableAt(GAME_META.spawn.x, GAME_META.spawn.y), true, 'spawn is walkable');
+            for (let head = 0; head < queue.length; head++) {
+              const [cx, cy] = queue[head];
+              for (const [dx, dy] of [[0, 1], [1, 0], [0, -1], [-1, 0]]) {
+                const nx = cx + dx;
+                const ny = cy + dy;
+                const key = `${nx},${ny}`;
+                if (!visited.has(key) && isTileWalkableAt(nx, ny)) {
+                  visited.add(key);
+                  queue.push([nx, ny]);
+                }
+              }
+            }
+
+            const hasReachableAdj = (coordKey) => {
+              const [x, y] = coordKey.split(',').map(Number);
+              return [[0, 1], [1, 0], [0, -1], [-1, 0]].some(([dx, dy]) => visited.has(`${x + dx},${y + dy}`));
+            };
+
+            for (const [coordKey, shrine] of shrineList) {
+              const [sx, sy] = coordKey.split(',').map(Number);
+              assertEqual(WORLD_MAP[sy][sx], TILE.SHRINE, `shrine ${shrine.id} on TILE.SHRINE`);
+              assertEqual(hasReachableAdj(coordKey), true, `shrine ${shrine.id} reachable from spawn`);
+            }
+            for (const [coordKey, chest] of chestList) {
+              const [cx, cy] = coordKey.split(',').map(Number);
+              assertEqual(WORLD_MAP[cy][cx], TILE.CHEST, `chest ${chest.id} on TILE.CHEST`);
+              assertEqual(hasReachableAdj(coordKey), true, `chest ${chest.id} reachable from spawn`);
+            }
+            for (const [coordKey, npc] of Object.entries(NPCS)) {
+              assertEqual(hasReachableAdj(coordKey), true, `NPC ${npc.id} reachable from spawn`);
+            }
+            for (const [coordKey, lm] of Object.entries(LANDMARKS)) {
+              assertEqual(hasReachableAdj(coordKey), true, `Landmark ${lm.id} reachable from spawn`);
+            }
+
+            const TEST_KEY = 'starlight_pokemon_test_world_v1';
+            try {
+              window.localStorage.removeItem(TEST_KEY);
+              const store = new StorageManager(TEST_KEY);
+              store.selectTrainer('violet');
+              store.chooseStarter(1);
+              const profile = store.getActiveProfile();
+
+              const guidance = getCompassGuidance(profile, SPECIES);
+              assert(Boolean(guidance && guidance.title && guidance.arrowDir), 'getCompassGuidance returns non-empty guidance');
+              const stats = getBiomeDiscoveryStats(profile, 'volcano');
+              assertEqual(stats.biomeId, 'volcano', 'getBiomeDiscoveryStats returns volcano stats');
+
+              const quest = FIELD_QUESTS.find((q) => q.id === 'quest_willow_dex') || FIELD_QUESTS[0];
+              const qRes = store.completeQuest(quest.id, {
+                potions: 2,
+                greatBalls: 3,
+                gems: { moon_gem: 1 },
+              });
+              assertEqual(qRes.completed, true, 'completeQuest marks quest completed');
+              assert(profile.questsCompleted.includes(quest.id), 'quest recorded in questsCompleted');
+              assertEqual(profile.bag.gems.moon_gem, 1, 'quest awarded moon_gem');
+              assertEqual(profile.bag.greatBalls, 6, 'quest awarded greatBalls');
+              const dup = store.completeQuest(quest.id, { potions: 9 });
+              assertEqual(dup.alreadyCompleted, true, 'duplicate completeQuest blocked');
+
+              // Badge unlock via Volcano Shrine
+              const shrineBadges = store.markShrineCleared('volcano_shrine');
+              assert(shrineBadges.some((b) => b.id === 'magma'), 'Caldera Badge unlocked on volcano_shrine clear');
+            } finally {
+              window.localStorage.removeItem(TEST_KEY);
+            }
+          },
+        },
+      ],
+    },
+    {
+      name: '15. Context-Aware Touch Controls Auto-Hide, Battle Pace & Viewport Non-Overlap',
+      tests: [
+        {
+          name: 'Touch controls auto-hide in battle/modals, #hud-btn-pad toggles, battlePace cycles, and stage has zero overlap',
+          async fn() {
+            const app = window.__starlightApp;
+            assert(Boolean(app), 'GameApp mounted');
+
+            const prevRawSave = window.localStorage.getItem(STORAGE_KEY);
+            const wasBootHidden = app.bootScreenEl.hidden;
+            const wasStarterHidden = app.starterScreenEl.hidden;
+            const wasShellHidden = app.gameShellEl.hidden;
+            const wasOverworldActive = app.overworld.active;
+
+            try {
+              window.localStorage.removeItem(STORAGE_KEY);
+              storage.state = storage.load();
+              storage.selectTrainer('violet');
+              storage.chooseStarter(1);
+              // Give Violet Clefairy (ID 35, tall back-sprite) as lead so we verify Clefairy non-overlap
+              const clefairy = createPokemon(35, 8);
+              storage.getActiveProfile().team[0] = clefairy;
+
+              app.bootScreenEl.hidden = true;
+              app.starterScreenEl.hidden = true;
+              app.gameShellEl.hidden = false;
+              app.applyTrainerTheme('violet');
+              app.applySettings();
+              app.overworld.setActive(true);
+              app.overworld.syncFromProfile();
+
+              // Verify battlePace cycle via settings button
+              assertEqual(storage.getSettings().battlePace, 'cinema', 'initial battlePace is cinema');
+              const paceBtn = document.getElementById('setting-pace-btn');
+              assert(Boolean(paceBtn), '#setting-pace-btn present');
+              paceBtn.click();
+              assertEqual(storage.getSettings().battlePace, 'classic', 'pace cycles cinema -> classic');
+              paceBtn.click();
+              assertEqual(storage.getSettings().battlePace, 'fast', 'pace cycles classic -> fast');
+              paceBtn.click();
+              assertEqual(storage.getSettings().battlePace, 'cinema', 'pace cycles fast -> cinema');
+
+              // Verify modal-open hides .touch-controls
+              const touchControlsEl = document.querySelector('.touch-controls');
+              assert(Boolean(touchControlsEl), '.touch-controls element exists');
+              app.openPokedex('guide');
+              assertEqual(document.body.classList.contains('modal-open'), true, 'body.modal-open set when Pokédex opens');
+              assertEqual(window.getComputedStyle(touchControlsEl).display, 'none', '.touch-controls hidden during modal-open');
+              app.pokedex.close();
+              assertEqual(document.body.classList.contains('modal-open'), false, 'body.modal-open cleared on close');
+
+              // Verify input.clearAll() clears held direction on battle entry
+              app.input.pushDirection('right');
+              assertEqual(app.input.getDirection(), 'right', 'simulated held direction active before battle');
+
+              const enemy = createPokemon(25, 6);
+              const startPromise = app.battle.start({ enemy, biomeId: 'forest' });
+              app.syncControlVisibility();
+
+              assertEqual(document.body.classList.contains('in-battle'), true, 'body.in-battle set on battle entry');
+              assertEqual(app.input.getDirection(), null, 'input.clearAll() cleared held direction on battle entry');
+              assertEqual(window.getComputedStyle(touchControlsEl).display, 'none', '.touch-controls auto-hidden in battle');
+
+              // #hud-btn-pad manually toggles touch controls in battle
+              const padBtn = document.getElementById('hud-btn-pad');
+              padBtn.click();
+              assertEqual(document.body.classList.contains('manual-battle-pad'), true, 'manual-battle-pad toggled on via #hud-btn-pad');
+              assert(window.getComputedStyle(touchControlsEl).display !== 'none', '.touch-controls visible when manual-battle-pad active');
+              padBtn.click();
+              assertEqual(document.body.classList.contains('manual-battle-pad'), false, 'manual-battle-pad toggled off via #hud-btn-pad');
+              assertEqual(window.getComputedStyle(touchControlsEl).display, 'none', '.touch-controls hidden again');
+
+              // Wait for sprite setup + battle-stage container-query layout to settle
+              const fastTypeTimer = setInterval(() => app.battle.finishTypewriter(), 20);
+              try {
+                await startPromise;
+              } finally {
+                clearInterval(fastTypeTimer);
+              }
+              await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+
+              const enemyCardRect = document.querySelector('.status-card-enemy').getBoundingClientRect();
+              const playerSpriteRect = document.querySelector('.fighter-sprite-player').getBoundingClientRect();
+              const playerCardRect = document.querySelector('.status-card-player').getBoundingClientRect();
+              const enemySpriteRect = document.querySelector('.fighter-sprite-enemy').getBoundingClientRect();
+
+              assertGreater(enemyCardRect.width, 0, 'status-card-enemy rendered');
+              assertGreater(playerSpriteRect.height, 0, 'fighter-sprite-player (Clefairy) rendered');
+
+              const overlaps = (a, b) => !(
+                a.right <= b.left ||
+                a.left >= b.right ||
+                a.bottom <= b.top ||
+                a.top >= b.bottom
+              );
+
+              assertEqual(
+                overlaps(enemyCardRect, playerSpriteRect),
+                false,
+                `status-card-enemy (${Math.round(enemyCardRect.bottom)}b) must not overlap fighter-sprite-player (${Math.round(playerSpriteRect.top)}t)`,
+              );
+              assertEqual(
+                overlaps(playerCardRect, enemySpriteRect),
+                false,
+                `status-card-player (${Math.round(playerCardRect.top)}t) must not overlap fighter-sprite-enemy (${Math.round(enemySpriteRect.bottom)}b)`,
+              );
+
+              app.battle.stop({ outcome: 'escaped', faintedAll: false });
+              assertEqual(document.body.classList.contains('in-battle'), false, 'body.in-battle cleared on battle exit');
+            } finally {
+              if (app.battle.active) {
+                app.battle.stop({ outcome: 'escaped', faintedAll: false });
+              }
+              app.pokedex.close();
+              app.closeSettings();
+              if (prevRawSave === null) {
+                window.localStorage.removeItem(STORAGE_KEY);
+              } else {
+                window.localStorage.setItem(STORAGE_KEY, prevRawSave);
+              }
+              storage.state = storage.load();
+              app.manualBattlePad = false;
+              app.encounterTransitioning = false;
+              app.bootScreenEl.hidden = wasBootHidden;
+              app.starterScreenEl.hidden = wasStarterHidden;
+              app.gameShellEl.hidden = wasShellHidden;
+              app.overworld.setActive(wasOverworldActive);
+              if (!wasOverworldActive) {
+                app.audio?.stopBGM?.();
+              }
+              app.applySettings();
+              if (!wasBootHidden) {
+                app.showBootScreen();
+              } else {
+                const vSumEl = document.getElementById('summary-violet');
+                const oSumEl = document.getElementById('summary-ozias');
+                if (vSumEl) vSumEl.textContent = storage.getProfileSummary('violet').label;
+                if (oSumEl) oSumEl.textContent = storage.getProfileSummary('ozias').label;
+                app.refreshHud();
+              }
+              if (!wasOverworldActive) {
+                app.audio?.stopBGM?.();
+              }
+              app.syncOverworldPause();
             }
           },
         },
