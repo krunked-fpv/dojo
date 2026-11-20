@@ -460,7 +460,7 @@ class GameApp {
       this.hudLeadLabelEl.textContent = `Lv.${lead.level} ${lead.name}`;
       const pct = Math.max(0, Math.min(100, Math.round((lead.hp / Math.max(1, lead.maxHp)) * 100)));
       this.hudLeadHpEl.style.width = `${pct}%`;
-      this.hudLeadHpEl.style.backgroundColor = pct <= 22 ? '#ef4444' : pct <= 50 ? '#f59e0b' : '#4ade80';
+      this.hudLeadHpEl.style.backgroundColor = pct <= 20 ? '#ef4444' : pct <= 50 ? '#f59e0b' : '#10b981';
     }
 
     const totalSpecies = Object.keys(SPECIES).length;
@@ -580,6 +580,7 @@ class GameApp {
 
   async startWildEncounter(biomeId) {
     if (this.battle.active) return;
+    if (!storage.ensureHealthyParty()) return;
     const wild = rollWildPokemon(biomeId, this.getAverageTeamLevel());
     if (!wild) return;
 
@@ -594,6 +595,7 @@ class GameApp {
 
   async startShrineEncounter(shrine) {
     if (this.battle.active) return;
+    if (!storage.ensureHealthyParty()) return;
     const guardian = createPokemon(shrine.guardianId, shrine.level, shrine.biome);
     await this.triggerEncounterTransition();
     this.battle.start({
@@ -673,5 +675,5 @@ class GameApp {
 }
 
 window.addEventListener('DOMContentLoaded', () => {
-  new GameApp();
+  window.__starlightApp = new GameApp();
 });

@@ -28,11 +28,30 @@ body {
   padding: 0;
   width: 100%;
   height: 100%;
+  height: 100dvh;
   background: radial-gradient(circle at 50% 10%, #1e293b 0%, #070b14 75%);
   color: var(--text-main);
   font-family: ui-rounded, 'Trebuchet MS', system-ui, -apple-system, sans-serif;
   overflow: hidden;
   -webkit-tap-highlight-color: transparent;
+}
+
+canvas,
+.overworld-canvas,
+.battle-fx-canvas,
+.trainer-portrait,
+.hud-portrait,
+.title-ball,
+.fighter-sprite,
+.starter-sprite-box img,
+.dex-sprite,
+.dex-detail-sprite,
+.team-card-top img,
+.box-card img,
+.battle-switch-card img {
+  image-rendering: -moz-crisp-edges;
+  image-rendering: crisp-edges;
+  image-rendering: pixelated;
 }
 
 button {
@@ -43,7 +62,7 @@ button {
   position: relative;
   width: 100%;
   height: 100%;
-  max-width: 980px;
+  max-width: 940px;
   margin: 0 auto;
   display: flex;
   flex-direction: column;
@@ -56,10 +75,10 @@ button {
     display: flex;
     align-items: center;
     justify-content: center;
-    padding: 12px;
+    padding: 10px;
   }
   .app-cabinet {
-    height: min(94vh, 780px);
+    height: min(95dvh, 760px);
     border-radius: 22px;
     border: 3px solid rgba(255, 255, 255, 0.15);
     overflow: hidden;
@@ -541,7 +560,7 @@ button {
   position: relative;
   flex: 1 1 auto;
   min-height: 220px;
-  background: #0b1220;
+  background: linear-gradient(180deg, #132a46 0%, #173a32 60%, #0f172a 100%);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -551,9 +570,10 @@ button {
 .overworld-canvas {
   width: 100%;
   height: 100%;
-  object-fit: contain;
-  image-rendering: pixelated;
+  object-fit: cover;
+  image-rendering: -moz-crisp-edges;
   image-rendering: crisp-edges;
+  image-rendering: pixelated;
   display: block;
 }
 

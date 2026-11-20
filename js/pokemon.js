@@ -151,9 +151,11 @@ export function getTypeEffectiveness(moveType, defenderType) {
   return table[defenderType] ?? 1;
 }
 
-export function calculateDamage(attacker, defender, move) {
-  if (move.category === 'heal') {
-    const heal = Math.max(8, Math.round(attacker.maxHp * 0.38));
+export function calculateDamage(attacker, defender, move, options = {}) {
+  if (move?.category === 'heal') {
+    const rawMaxHp = Number(attacker?.maxHp);
+    const safeMaxHp = Number.isFinite(rawMaxHp) && rawMaxHp > 0 ? rawMaxHp : 20;
+    const heal = Math.max(8, Math.round(safeMaxHp * 0.38));
     return {
       category: 'heal',
       heal,
@@ -164,7 +166,9 @@ export function calculateDamage(attacker, defender, move) {
     };
   }
 
-  if (Math.random() * 100 > (move.accuracy ?? 100)) {
+  const accuracy = Number.isFinite(Number(move?.accuracy)) ? Number(move.accuracy) : 100;
+  const hitRoll = options.forceHit === true ? 0 : options.forceHit === false ? 999 : Math.random() * 100;
+  if (hitRoll > accuracy) {
     return {
       category: 'attack',
       heal: 0,
@@ -175,19 +179,26 @@ export function calculateDamage(attacker, defender, move) {
     };
   }
 
-  const stab = attacker.type === move.type ? 1.25 : 1;
-  const effectiveness = getTypeEffectiveness(move.type, defender.type);
-  const isCrit = Math.random() < 0.08;
+  const stab = attacker?.type && move?.type && attacker.type === move.type ? 1.25 : 1;
+  const effectiveness = getTypeEffectiveness(move?.type, defender?.type);
+  const isCrit = options.forceCrit !== undefined ? Boolean(options.forceCrit) : Math.random() < 0.08;
   const critMult = isCrit ? 1.5 : 1;
-  const variance = 0.9 + Math.random() * 0.2;
+  const variance = Number.isFinite(Number(options.fixedVariance))
+    ? Number(options.fixedVariance)
+    : 0.9 + Math.random() * 0.2;
 
-  const basePower = (((2 * attacker.level) / 5 + 2) * move.power * (attacker.atk / Math.max(1, defender.def))) / 18 + 2;
+  const safeLv = Number.isFinite(Number(attacker?.level)) ? Math.max(1, Number(attacker.level)) : 1;
+  const safeAtk = Number.isFinite(Number(attacker?.atk)) ? Math.max(1, Number(attacker.atk)) : 1;
+  const safeDef = Number.isFinite(Number(defender?.def)) ? Math.max(1, Number(defender.def)) : 1;
+  const safePower = Number.isFinite(Number(move?.power)) ? Math.max(0, Number(move.power)) : 0;
+
+  const basePower = (((2 * safeLv) / 5 + 2) * safePower * (safeAtk / safeDef)) / 18 + 2;
   const damage = Math.max(1, Math.round(basePower * stab * effectiveness * critMult * variance));
 
   return {
     category: 'attack',
     heal: 0,
-    damage,
+    damage: Number.isFinite(damage) ? damage : 1,
     effectiveness,
     isCrit,
     missed: false,
@@ -195,30 +206,49 @@ export function calculateDamage(attacker, defender, move) {
 }
 
 export function calculateCatchAttempt(wildPokemon, ballBonus = 1.0) {
-  const hpRatio = wildPokemon.hp / Math.max(1, wildPokemon.maxHp);
-  const factor = wildPokemon.species.catchFactor ?? 0.78;
-  const rawChance = (1 - 0.62 * hpRatio) * factor * ballBonus;
-  const chance = Math.max(0.28, Math.min(0.96, rawChance));
+  const rawMaxHp = Number(wildPokemon?.maxHp);
+  const safeMaxHp = Number.isFinite(rawMaxHp) && rawMaxHp > 0 ? rawMaxHp : 1;
+  const rawHp = Number(wildPokemon?.hp);
+  const clampedHp = Number.isFinite(rawHp) ? Math.max(0, Math.min(safeMaxHp, rawHp)) : safeMaxHp;
+  const hpRatio = clampedHp / safeMaxHp;
+
+  const rawFactor = Number(wildPokemon?.species?.catchFactor);
+  const factor = Number.isFinite(rawFactor) && rawFactor > 0 ? rawFactor : 0.78;
+  const rawBonus = Number(ballBonus);
+  const safeBonus = Number.isFinite(rawBonus) && rawBonus > 0 ? rawBonus : 1.0;
+
+  const raw = (1 - 0.68 * hpRatio) * factor * safeBonus;
+  const chance = raw <= 0.82
+    ? Math.max(0.08, raw)
+    : Math.min(0.995, 0.82 + 0.175 * (1 - Math.exp(-(raw - 0.82) * 1.8)));
+
   const caught = Math.random() < chance;
-  const shakes = caught ? 3 : 1 + Math.floor(Math.random() * 2) + (Math.random() < 0.35 ? 1 : 0);
+  const shakes = caught ? 3 : Math.min(3, 1 + Math.floor(Math.random() * 2) + (Math.random() < 0.35 ? 1 : 0));
   return { caught, shakes, chance };
 }
 
 export function generateSilhouetteDataUri(species, back = false) {
-  const color = species?.color || '#94a3b8';
-  const name = (species?.name || 'Pokemon').slice(0, 10);
-  const eyeSection = back
-    ? `<circle cx="48" cy="36" r="6" fill="rgba(255,255,255,0.3)"/>`
-    : `<circle cx="38" cy="46" r="4.5" fill="#0f172a"/><circle cx="58" cy="46" r="4.5" fill="#0f172a"/><circle cx="36.5" cy="44.5" r="1.6" fill="#ffffff"/><circle cx="56.5" cy="44.5" r="1.6" fill="#ffffff"/>`;
+  const fill = species?.color || '#38bdf8';
+  const name = (species?.name || 'Mystery').slice(0, 11);
+  const eyes = back
+    ? '<path d="M36 32 L48 22 L60 32" fill="none" stroke="#ffffff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" opacity="0.65"/>'
+    : '<circle cx="38" cy="45" r="5" fill="#090d1a"/><circle cx="58" cy="45" r="5" fill="#090d1a"/><circle cx="36.5" cy="43.2" r="1.8" fill="#ffffff"/><circle cx="56.5" cy="43.2" r="1.8" fill="#ffffff"/><path d="M43 56 Q48 60 53 56" fill="none" stroke="#090d1a" stroke-width="2.5" stroke-linecap="round"/>';
 
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" width="96" height="96"><ellipse cx="48" cy="82" rx="24" ry="5" fill="rgba(0,0,0,0.22)"/><rect x="24" y="26" width="48" height="48" rx="22" fill="${color}" stroke="#0f172a" stroke-width="3.5"/>${eyeSection}<text x="48" y="88" font-family="monospace" font-size="10" font-weight="bold" text-anchor="middle" fill="#ffffff" stroke="#0f172a" stroke-width="2" paint-order="stroke">${name}</text></svg>`;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" width="96" height="96"><ellipse cx="48" cy="83" rx="26" ry="6" fill="rgba(2,6,23,0.45)"/><path d="M27 32 L18 14 L38 24 Z" fill="${fill}" stroke="#090d1a" stroke-width="3.5" stroke-linejoin="round"/><path d="M69 32 L78 14 L58 24 Z" fill="${fill}" stroke="#090d1a" stroke-width="3.5" stroke-linejoin="round"/><rect x="22" y="23" width="52" height="52" rx="24" fill="${fill}" stroke="#090d1a" stroke-width="4"/><rect x="25" y="26" width="46" height="46" rx="21" fill="none" stroke="#ffffff" stroke-width="1.8" opacity="0.7"/>${eyes}<text x="48" y="90" font-family="monospace" font-size="10" font-weight="bold" text-anchor="middle" fill="#ffffff" stroke="#090d1a" stroke-width="2.8" paint-order="stroke">${name}</text></svg>`;
   return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
 }
 
 export function attachPokemonSprite(imgEl, speciesOrId, { back = false, timeoutMs = 2000 } = {}) {
   if (!imgEl) return Promise.resolve();
   const species = typeof speciesOrId === 'object' ? speciesOrId : SPECIES[Number(speciesOrId)];
-  if (!species) return Promise.resolve();
+  const inlineFallback = generateSilhouetteDataUri(species || null, back);
+
+  if (!species) {
+    imgEl.alt = 'Wild Pokémon';
+    imgEl.onerror = null;
+    imgEl.src = inlineFallback;
+    return Promise.resolve();
+  }
 
   const token = `${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
   imgEl.dataset.loadToken = token;
@@ -226,50 +256,96 @@ export function attachPokemonSprite(imgEl, speciesOrId, { back = false, timeoutM
 
   const urls = getSpriteUrls(species.id, back);
   const localSvg = `./assets/fallback/${species.type}.svg`;
-  const inlineFallback = generateSilhouetteDataUri(species, back);
   const candidates = [urls.animated, urls.static, localSvg, inlineFallback];
+
+  // Immediately render local fallback sprite when empty or switching species so images never flash blank or stale
+  const nextSpeciesKey = `${species.id}:${back ? 'back' : 'front'}`;
+  if (!imgEl.getAttribute('src') || imgEl.dataset.speciesKey !== nextSpeciesKey) {
+    imgEl.dataset.speciesKey = nextSpeciesKey;
+    imgEl.onerror = () => {
+      imgEl.onerror = null;
+      imgEl.src = inlineFallback;
+    };
+    imgEl.src = localSvg;
+  }
 
   return new Promise((resolve) => {
     let settled = false;
     let index = 0;
 
-    const finish = () => {
+    const finishWithFallback = () => {
       if (settled) return;
       settled = true;
+      if (imgEl.dataset.loadToken === token) {
+        imgEl.onload = null;
+        imgEl.onerror = null;
+        imgEl.src = inlineFallback;
+      }
       resolve();
     };
 
-    const timer = setTimeout(finish, timeoutMs);
+    const finishSuccess = (loadedUrl) => {
+      if (settled) return;
+      settled = true;
+      if (imgEl.dataset.loadToken === token) {
+        imgEl.onerror = () => {
+          imgEl.onerror = null;
+          imgEl.src = inlineFallback;
+        };
+        imgEl.src = loadedUrl;
+      }
+      resolve();
+    };
+
+    const timer = setTimeout(() => {
+      if (imgEl.dataset.loadToken === token && (!imgEl.complete || imgEl.naturalWidth === 0)) {
+        finishWithFallback();
+      } else if (!settled) {
+        settled = true;
+        resolve();
+      }
+    }, Math.max(50, Number(timeoutMs) || 2000));
 
     const tryNext = () => {
       if (imgEl.dataset.loadToken !== token) {
         clearTimeout(timer);
-        finish();
+        if (!settled) {
+          settled = true;
+          resolve();
+        }
         return;
       }
       if (index >= candidates.length - 1) {
-        imgEl.onload = () => {
-          clearTimeout(timer);
-          finish();
-        };
-        imgEl.onerror = null;
-        imgEl.src = inlineFallback;
         clearTimeout(timer);
-        finish();
+        finishWithFallback();
         return;
       }
 
       const nextUrl = candidates[index++];
-      imgEl.onload = () => {
-        if (imgEl.dataset.loadToken !== token) return;
-        clearTimeout(timer);
-        finish();
-      };
-      imgEl.onerror = () => {
-        if (imgEl.dataset.loadToken !== token) return;
-        tryNext();
-      };
-      imgEl.src = nextUrl;
+      if (typeof Image !== 'undefined') {
+        const probe = new Image();
+        probe.onload = () => {
+          if (imgEl.dataset.loadToken !== token) return;
+          clearTimeout(timer);
+          finishSuccess(nextUrl);
+        };
+        probe.onerror = () => {
+          if (imgEl.dataset.loadToken !== token) return;
+          tryNext();
+        };
+        probe.src = nextUrl;
+      } else {
+        imgEl.onload = () => {
+          if (imgEl.dataset.loadToken !== token) return;
+          clearTimeout(timer);
+          finishSuccess(nextUrl);
+        };
+        imgEl.onerror = () => {
+          if (imgEl.dataset.loadToken !== token) return;
+          tryNext();
+        };
+        imgEl.src = nextUrl;
+      }
     };
 
     tryNext();

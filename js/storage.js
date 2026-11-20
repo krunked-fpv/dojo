@@ -45,20 +45,47 @@ function createFreshSaveState() {
   };
 }
 
+function safeHydrateMon(item) {
+  if (!item || typeof item !== 'object') return null;
+  try {
+    return Pokemon.fromJSON(item);
+  } catch {
+    return null;
+  }
+}
+
+function repairProfileParty(profile) {
+  if (!profile) return profile;
+  if (profile.team.length === 0 && profile.box.length > 0) {
+    profile.team.push(profile.box.shift());
+  }
+  if (profile.starterId && profile.team.length === 0) {
+    const fallbackId = SPECIES[profile.starterId] ? profile.starterId : 1;
+    profile.team.push(createStarterPokemon(fallbackId));
+  }
+  if (profile.team.length > 0 && profile.team.every((mon) => mon.isFainted)) {
+    profile.team[0].healFull();
+  }
+  return profile;
+}
+
 function hydrateProfile(raw, trainerId) {
   const fresh = createFreshProfile(trainerId);
   if (!raw || typeof raw !== 'object') return fresh;
 
   const team = Array.isArray(raw.team)
-    ? raw.team.map((item) => Pokemon.fromJSON(item)).slice(0, 6)
+    ? raw.team.map(safeHydrateMon).filter(Boolean).slice(0, 6)
     : [];
   const box = Array.isArray(raw.box)
-    ? raw.box.map((item) => Pokemon.fromJSON(item))
+    ? raw.box.map(safeHydrateMon).filter(Boolean)
     : [];
 
-  return {
+  const starterNum = Number(raw.starterId);
+  const starterId = Number.isFinite(starterNum) && SPECIES[starterNum] ? starterNum : null;
+
+  return repairProfileParty({
     trainerId,
-    starterId: raw.starterId ? Number(raw.starterId) : null,
+    starterId,
     pos: {
       x: Number.isFinite(raw.pos?.x) ? raw.pos.x : fresh.pos.x,
       y: Number.isFinite(raw.pos?.y) ? raw.pos.y : fresh.pos.y,
@@ -67,26 +94,29 @@ function hydrateProfile(raw, trainerId) {
     team,
     box,
     pokedex: {
-      seen: Array.isArray(raw.pokedex?.seen) ? [...new Set(raw.pokedex.seen.map(Number))] : [],
+      seen: Array.isArray(raw.pokedex?.seen)
+        ? [...new Set(raw.pokedex.seen.map(Number).filter((id) => Number.isFinite(id)))]
+        : [],
       caught: raw.pokedex?.caught && typeof raw.pokedex.caught === 'object' ? { ...raw.pokedex.caught } : {},
     },
     badges: Array.isArray(raw.badges) ? [...new Set(raw.badges)] : [],
     shrinesCleared: Array.isArray(raw.shrinesCleared) ? [...new Set(raw.shrinesCleared)] : [],
     chestsOpened: Array.isArray(raw.chestsOpened) ? [...new Set(raw.chestsOpened)] : [],
     bag: {
-      potions: Math.max(0, Number(raw.bag?.potions ?? 5)),
-      greatBalls: Math.max(0, Number(raw.bag?.greatBalls ?? 3)),
+      potions: Math.max(0, Number.isFinite(Number(raw.bag?.potions)) ? Number(raw.bag.potions) : 5),
+      greatBalls: Math.max(0, Number.isFinite(Number(raw.bag?.greatBalls)) ? Number(raw.bag.greatBalls) : 3),
     },
     stats: {
-      battlesWon: Math.max(0, Number(raw.stats?.battlesWon ?? 0)),
-      totalCaught: Math.max(0, Number(raw.stats?.totalCaught ?? 0)),
-      steps: Math.max(0, Number(raw.stats?.steps ?? 0)),
+      battlesWon: Math.max(0, Number.isFinite(Number(raw.stats?.battlesWon)) ? Number(raw.stats.battlesWon) : 0),
+      totalCaught: Math.max(0, Number.isFinite(Number(raw.stats?.totalCaught)) ? Number(raw.stats.totalCaught) : 0),
+      steps: Math.max(0, Number.isFinite(Number(raw.stats?.steps)) ? Number(raw.stats.steps) : 0),
     },
-  };
+  });
 }
 
 export class StorageManager {
-  constructor() {
+  constructor(storageKey = STORAGE_KEY) {
+    this.storageKey = storageKey;
     this.memoryFallback = null;
     this.state = this.load();
   }
@@ -94,7 +124,7 @@ export class StorageManager {
   load() {
     let rawJson = null;
     try {
-      rawJson = window.localStorage.getItem(STORAGE_KEY);
+      rawJson = window.localStorage.getItem(this.storageKey);
     } catch {
       rawJson = this.memoryFallback;
     }
@@ -105,7 +135,6 @@ export class StorageManager {
 
     try {
       const parsed = JSON.parse(rawJson);
-      const base = createFreshSaveState();
       return {
         version: 1,
         activeTrainerId: parsed.activeTrainerId && TRAINERS[parsed.activeTrainerId] ? parsed.activeTrainerId : null,
@@ -138,10 +167,31 @@ export class StorageManager {
     });
     this.memoryFallback = serialized;
     try {
-      window.localStorage.setItem(STORAGE_KEY, serialized);
+      window.localStorage.setItem(this.storageKey, serialized);
     } catch {
       // Fallback already retained in memoryFallback if storage quota/privacy mode blocks writes
     }
+  }
+
+  ensureValidParty(profile = this.getActiveProfile()) {
+    if (!profile) return null;
+    const beforeLen = profile.team.length;
+    repairProfileParty(profile);
+    if (profile.team.length !== beforeLen) {
+      this.save();
+    }
+    return profile.team;
+  }
+
+  ensureHealthyParty(profile = this.getActiveProfile()) {
+    if (!profile) return false;
+    this.ensureValidParty(profile);
+    if (profile.team.length === 0) return false;
+    if (profile.team.every((mon) => mon.isFainted)) {
+      profile.team[0].healFull();
+      this.save();
+    }
+    return true;
   }
 
   serializeProfile(profile) {

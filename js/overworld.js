@@ -44,6 +44,7 @@ export function drawTrainerPortrait(canvas, trainerId) {
   if (!canvas) return;
   const ctx = canvas.getContext('2d');
   if (!ctx) return;
+  ctx.imageSmoothingEnabled = false;
   const trainer = TRAINERS[trainerId] || TRAINERS.violet;
   const w = canvas.width;
   const h = canvas.height;
@@ -145,9 +146,45 @@ export class OverworldEngine {
 
     this.particles = [];
     this.rustleTile = null;
+
+    this.ambientMotes = Array.from({ length: 18 }, (_, i) => ({
+      seed: i * 1.73,
+      xFrac: ((i * 37) % 100) / 100,
+      yFrac: ((i * 61) % 100) / 100,
+      speed: 0.45 + (i % 4) * 0.2,
+      size: i % 3 === 0 ? 2 : 1.5,
+    }));
+
+    if (typeof ResizeObserver !== 'undefined' && this.canvas?.parentElement) {
+      this._resizeObserver = new ResizeObserver(() => this.syncViewportSize());
+      this._resizeObserver.observe(this.canvas.parentElement);
+    }
+  }
+
+  syncViewportSize() {
+    const parent = this.canvas?.parentElement;
+    if (!parent) return;
+    const rect = parent.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) {
+      this.viewW = GAME_META.viewportCols * this.tileSize;
+      this.viewH = GAME_META.viewportRows * this.tileSize;
+      return;
+    }
+
+    const zoom = Math.max(1.35, Math.min(2.2, Math.min(rect.width / 440, rect.height / 310)));
+    const nextW = Math.max(288, Math.min(WORLD_COLS * this.tileSize, Math.round(rect.width / zoom)));
+    const nextH = Math.max(224, Math.min(WORLD_ROWS * this.tileSize, Math.round(rect.height / zoom)));
+
+    if (nextW !== this.viewW || nextH !== this.viewH) {
+      this.viewW = nextW;
+      this.viewH = nextH;
+      this.canvas.width = nextW;
+      this.canvas.height = nextH;
+    }
   }
 
   syncFromProfile() {
+    this.syncViewportSize();
     const profile = this.getProfile();
     if (!profile) return;
     this.moving = false;
@@ -389,8 +426,8 @@ export class OverworldEngine {
       ? this.moveStartY + (this.moveTargetY - this.moveStartY) * this.moveProgress
       : profile.pos.y;
 
-    const maxCamX = WORLD_COLS * this.tileSize - this.viewW;
-    const maxCamY = WORLD_ROWS * this.tileSize - this.viewH;
+    const maxCamX = Math.max(0, WORLD_COLS * this.tileSize - this.viewW);
+    const maxCamY = Math.max(0, WORLD_ROWS * this.tileSize - this.viewH);
     const camX = Math.max(0, Math.min(maxCamX, Math.round(px * this.tileSize - this.viewW / 2 + 16)));
     const camY = Math.max(0, Math.min(maxCamY, Math.round(py * this.tileSize - this.viewH / 2 + 16)));
 
@@ -408,10 +445,38 @@ export class OverworldEngine {
       }
     }
 
+    // Subtle drifting cloud shadows over outdoor biome regions
+    const biomeId = this.currentBiomeId || getBiomeAt(profile.pos.x, profile.pos.y).id;
+    if (biomeId !== 'cave') {
+      ctx.save();
+      ctx.fillStyle = 'rgba(15, 23, 42, 0.085)';
+      for (let c = 0; c < 3; c++) {
+        const span = this.viewW + 180;
+        const cx = ((nowMs * (0.011 + c * 0.004) + c * 190 - camX * 0.35) % span + span) % span - 90;
+        const cy = 28 + c * Math.max(54, Math.floor(this.viewH * 0.28));
+        ctx.beginPath();
+        ctx.ellipse(cx, cy, 44 + c * 10, 14 + c * 3, 0, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.restore();
+    }
+
     // Draw player
     const playerScreenX = Math.round(px * this.tileSize - camX);
     const playerScreenY = Math.round(py * this.tileSize - camY);
     this.drawPlayer(ctx, playerScreenX, playerScreenY, profile.trainerId, profile.pos.dir, nowMs);
+
+    // Draw ambient biome motes (fireflies, cave crystal sparkles, sea mist)
+    ctx.save();
+    for (const mote of this.ambientMotes) {
+      const mx = Math.round(((mote.xFrac * this.viewW + Math.sin(nowMs * 0.0012 * mote.speed + mote.seed) * 14) % this.viewW + this.viewW) % this.viewW);
+      const my = Math.round(((mote.yFrac * this.viewH - nowMs * 0.006 * mote.speed) % this.viewH + this.viewH) % this.viewH);
+      const twinkle = 0.28 + 0.45 * (0.5 + 0.5 * Math.sin(nowMs * 0.004 * mote.speed + mote.seed * 2));
+      ctx.globalAlpha = twinkle;
+      ctx.fillStyle = biomeId === 'cave' ? '#e879f9' : biomeId === 'water' ? '#e0f2fe' : '#fef08a';
+      ctx.fillRect(mx, my, mote.size, mote.size);
+    }
+    ctx.restore();
 
     // Draw particles
     for (const p of this.particles) {

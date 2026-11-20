@@ -23,6 +23,13 @@ export class InputController {
       cancel: [],
       pokedex: [],
     };
+    this.lastEmitTime = {
+      action: 0,
+      cancel: 0,
+      pokedex: 0,
+    };
+    this.debounceMs = 130;
+    this.buttonPointerIds = new Map();
 
     this.dpadEl = document.getElementById('dpad');
     this.dpadArms = this.dpadEl ? Array.from(this.dpadEl.querySelectorAll('[data-dir]')) : [];
@@ -45,6 +52,10 @@ export class InputController {
 
   emit(event) {
     if (!this.listeners[event]) return;
+    const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    const prev = this.lastEmitTime[event] || 0;
+    if (now - prev < this.debounceMs) return;
+    this.lastEmitTime[event] = now;
     for (const fn of this.listeners[event]) {
       fn();
     }
@@ -66,8 +77,11 @@ export class InputController {
   clearAll() {
     this.heldKeys.clear();
     this.pointerDirs.clear();
+    this.buttonPointerIds.clear();
     this.dpadPointerId = null;
     this.dirStack = [];
+    this.btnA?.classList.remove('is-pressed');
+    this.btnB?.classList.remove('is-pressed');
     this.syncDpadVisuals();
   }
 
@@ -198,13 +212,24 @@ export class InputController {
       if (!btn) return;
       btn.addEventListener('pointerdown', (e) => {
         e.preventDefault();
+        this.buttonPointerIds.set(btn, e.pointerId);
+        try {
+          btn.setPointerCapture(e.pointerId);
+        } catch {
+          // Ignore if element cannot capture
+        }
         btn.classList.add('is-pressed');
         this.emit(eventName);
       });
-      const release = () => btn.classList.remove('is-pressed');
+      const release = (e) => {
+        const activeId = this.buttonPointerIds.get(btn);
+        if (activeId !== undefined && e.pointerId !== activeId) return;
+        this.buttonPointerIds.delete(btn);
+        btn.classList.remove('is-pressed');
+      };
       btn.addEventListener('pointerup', release);
       btn.addEventListener('pointercancel', release);
-      btn.addEventListener('pointerleave', release);
+      btn.addEventListener('lostpointercapture', release);
       btn.addEventListener('contextmenu', (e) => e.preventDefault());
     };
 
