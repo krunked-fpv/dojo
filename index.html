@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <title>Pokémon: Starlight Island — Violet &amp; Ozias</title>
+  <link rel="icon" href="./assets/fallback/pokeball.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="./css/main.css">
+  <link rel="stylesheet" href="./css/battle.css">
+  <link rel="stylesheet" href="./css/controls.css">
+</head>
+<body>
+  <div id="app-cabinet" class="app-cabinet crt-enabled">
+    <!-- Boot / Trainer Select Screen -->
+    <section id="boot-screen" class="screen boot-screen">
+      <div class="boot-stars" aria-hidden="true"></div>
+      <div class="boot-inner">
+        <div class="title-crest">
+          <img src="./assets/fallback/pokeball.svg" alt="" class="title-ball">
+          <div>
+            <p class="title-eyebrow">STARLIGHT ISLAND EDITION</p>
+            <h1 class="title-main">POKéMON ADVENTURE</h1>
+          </div>
+        </div>
+        <p class="boot-subtitle">Choose your trainer profile to start or continue your journey!</p>
+
+        <div class="trainer-grid">
+          <button id="trainer-card-violet" type="button" class="trainer-card trainer-violet">
+            <div class="trainer-portrait-wrap">
+              <canvas id="portrait-violet" width="72" height="72" class="trainer-portrait"></canvas>
+            </div>
+            <div class="trainer-card-info">
+              <span class="trainer-badge-tag">★ VIOLET</span>
+              <h2 class="trainer-name">Violet</h2>
+              <p class="trainer-tagline">Starlight Mystic &amp; Explorer</p>
+              <p id="summary-violet" class="trainer-save-summary">New Adventure!</p>
+            </div>
+          </button>
+
+          <button id="trainer-card-ozias" type="button" class="trainer-card trainer-ozias">
+            <div class="trainer-portrait-wrap">
+              <canvas id="portrait-ozias" width="72" height="72" class="trainer-portrait"></canvas>
+            </div>
+            <div class="trainer-card-info">
+              <span class="trainer-badge-tag">⚡ OZIAS</span>
+              <h2 class="trainer-name">Ozias</h2>
+              <p class="trainer-tagline">Thunder Champion &amp; Ranger</p>
+              <p id="summary-ozias" class="trainer-save-summary">New Adventure!</p>
+            </div>
+          </button>
+        </div>
+
+        <p class="boot-hint">Desktop: WASD / Arrow Keys + Space • Tablet: Touch D-Pad + A/B</p>
+      </div>
+    </section>
+
+    <!-- Starter Lab Selection Screen -->
+    <section id="starter-screen" class="screen starter-screen" hidden>
+      <div class="starter-inner">
+        <div class="lab-banner">
+          <span class="lab-pill">🌟 PROFESSOR WILLOW'S LAB</span>
+          <h2 id="starter-greeting">Choose your first partner Pokémon!</h2>
+          <p class="starter-sub">Pick Grass, Fire, or Water—every partner starts at Level 5 with helpful moves!</p>
+        </div>
+        <div id="starter-cards" class="starter-cards"></div>
+      </div>
+    </section>
+
+    <!-- Active Game Shell -->
+    <main id="game-shell" class="game-shell" hidden>
+      <!-- Top HUD -->
+      <header class="hud-bar">
+        <div class="hud-left">
+          <canvas id="hud-portrait" width="40" height="40" class="hud-portrait"></canvas>
+          <div class="hud-trainer-meta">
+            <span id="hud-trainer-name" class="hud-trainer-name">Violet</span>
+            <span id="hud-lead-label" class="hud-lead-label">Lv.5 Bulbasaur</span>
+          </div>
+          <div class="hud-mini-hp-wrap" title="Lead Pokémon HP">
+            <div class="hud-mini-hp-track">
+              <div id="hud-lead-hp" class="hud-mini-hp-fill"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="hud-actions">
+          <button id="hud-btn-dex" type="button" class="hud-pill" title="Open Pokédex &amp; Team (P)">📖 Dex 1/18</button>
+          <button id="hud-btn-badges" type="button" class="hud-pill" title="View Elemental Badges">🏅 0/6</button>
+          <button id="hud-btn-mute" type="button" class="hud-icon-btn" title="Toggle Sound">🔊</button>
+          <button id="hud-btn-pad" type="button" class="hud-icon-btn" title="Toggle On-Screen Gamepad">🎮</button>
+          <button id="hud-btn-settings" type="button" class="hud-icon-btn" title="Settings &amp; Trainer Switch">⚙️</button>
+        </div>
+      </header>
+
+      <!-- Main Viewport (Overworld + Battle Overlay) -->
+      <div class="viewport-stage">
+        <canvas id="overworld-canvas" width="480" height="352" class="overworld-canvas"></canvas>
+
+        <div id="biome-banner" class="biome-banner" hidden>🌲 Whispering Forest</div>
+
+        <button id="interact-pill" type="button" class="interact-pill" hidden>💬 Read Sign</button>
+
+        <div id="world-dialogue" class="world-dialogue" hidden>
+          <p id="world-dialogue-text"></p>
+          <span class="dialogue-next">Tap or press Space ▸</span>
+        </div>
+
+        <div id="encounter-flash" class="encounter-flash" hidden></div>
+
+        <!-- Battle Arena Overlay -->
+        <section id="battle-screen" class="battle-screen" hidden>
+          <div id="battle-stage" class="battle-stage" data-biome="forest">
+            <canvas id="battle-fx-canvas" class="battle-fx-canvas"></canvas>
+
+            <div class="battle-row battle-row-enemy">
+              <div class="status-card">
+                <div class="status-head">
+                  <div class="status-name-wrap">
+                    <span id="enemy-name" class="status-name">Pikachu</span>
+                    <span id="enemy-type" class="type-pill">⚡ Electric</span>
+                  </div>
+                  <span id="enemy-level" class="status-level">Lv.5</span>
+                </div>
+                <div id="enemy-dex-pill" class="dex-caught-pill" hidden>✓ IN DEX</div>
+                <div class="hp-track">
+                  <div id="enemy-hp-fill" class="hp-fill"></div>
+                </div>
+              </div>
+
+              <div class="fighter-mount">
+                <div class="fighter-pad"></div>
+                <img id="enemy-sprite" class="fighter-sprite is-idle" alt="Wild Pokémon">
+              </div>
+            </div>
+
+            <div class="battle-row battle-row-player">
+              <div class="fighter-mount">
+                <div class="fighter-pad"></div>
+                <img id="player-sprite" class="fighter-sprite is-idle" alt="Partner Pokémon">
+              </div>
+
+              <div class="status-card">
+                <div class="status-head">
+                  <div class="status-name-wrap">
+                    <span id="player-name" class="status-name">Bulbasaur</span>
+                    <span id="player-type" class="type-pill">🌿 Grass</span>
+                  </div>
+                  <span id="player-level" class="status-level">Lv.5</span>
+                </div>
+                <div class="hp-track">
+                  <div id="player-hp-fill" class="hp-fill"></div>
+                </div>
+                <div class="hp-meta">
+                  <span id="player-hp-text">HP 32/32</span>
+                  <span>XP</span>
+                </div>
+                <div class="xp-track">
+                  <div id="player-xp-fill" class="xp-fill"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="battle-deck">
+            <div id="battle-log" class="battle-log" role="status" aria-live="polite">What will your partner do?</div>
+            <div id="battle-moves" class="battle-moves"></div>
+            <div id="battle-actions" class="battle-actions">
+              <button id="battle-btn-ball" type="button" class="battle-act-btn is-ball">🔴 Poké Ball ∞</button>
+              <button id="battle-btn-great" type="button" class="battle-act-btn is-great">🔵 Great Ball (3)</button>
+              <button id="battle-btn-potion" type="button" class="battle-act-btn is-potion">🍓 Potion (5)</button>
+              <button id="battle-btn-team" type="button" class="battle-act-btn">🔄 Team</button>
+              <button id="battle-btn-run" type="button" class="battle-act-btn">👟 Run</button>
+            </div>
+          </div>
+
+          <div id="battle-team-drawer" class="battle-team-drawer" hidden>
+            <div class="battle-team-header">
+              <span>Choose a Pokémon to send out!</span>
+              <button id="battle-team-close" type="button" class="mini-btn">Back</button>
+            </div>
+            <div id="battle-team-list" class="battle-team-list"></div>
+          </div>
+        </section>
+      </div>
+
+      <!-- Virtual Tablet / Mobile Controls Dock -->
+      <section class="touch-controls" aria-label="Virtual Gamepad">
+        <div id="dpad" class="dpad" role="group" aria-label="Directional Pad">
+          <div class="dpad-arm dpad-up" data-dir="up">▲</div>
+          <div class="dpad-arm dpad-left" data-dir="left">◀</div>
+          <div class="dpad-center"></div>
+          <div class="dpad-arm dpad-right" data-dir="right">▶</div>
+          <div class="dpad-arm dpad-down" data-dir="down">▼</div>
+        </div>
+
+        <div class="controls-center-hint">
+          <button id="quick-dex-btn" type="button" class="controls-quick-dex">📖 Pokédex &amp; Team</button>
+          <span>Slide thumb on D-Pad to steer</span>
+        </div>
+
+        <div class="action-cluster">
+          <button id="btn-b" type="button" class="action-pad-btn action-pad-b">B<small>BACK</small></button>
+          <button id="btn-a" type="button" class="action-pad-btn action-pad-a">A<small>ACT</small></button>
+        </div>
+      </section>
+    </main>
+
+    <!-- Badge Unlocked Toast -->
+    <div id="badge-toast" class="badge-toast" hidden>
+      <span id="badge-toast-icon" class="badge-toast-icon">🏅</span>
+      <div>
+        <div class="badge-toast-eyebrow">NEW BADGE UNLOCKED!</div>
+        <strong id="badge-toast-name">Meadow Badge</strong>
+        <p id="badge-toast-desc">Forest Shrine Cleared!</p>
+      </div>
+    </div>
+
+    <!-- Pokédex / Team / Badges Modal -->
+    <div id="pokedex-modal" class="modal-backdrop" hidden>
+      <div class="modal-card modal-wide" role="dialog" aria-modal="true" aria-label="Pokédex and Team Hub">
+        <div class="modal-header">
+          <div class="modal-tabs">
+            <button id="pokedex-tab-dex" type="button" class="tab-btn is-active">📖 Pokédex</button>
+            <button id="pokedex-tab-team" type="button" class="tab-btn">⚡ Team &amp; Box</button>
+            <button id="pokedex-tab-badges" type="button" class="tab-btn">🏅 Badges</button>
+          </div>
+          <button id="pokedex-close-btn" type="button" class="close-btn" aria-label="Close">✕</button>
+        </div>
+        <div id="pokedex-body" class="modal-body"></div>
+      </div>
+    </div>
+
+    <!-- Settings & Parent Reset Modal -->
+    <div id="settings-modal" class="modal-backdrop" hidden>
+      <div class="modal-card modal-settings" role="dialog" aria-modal="true" aria-label="Game Settings">
+        <div class="modal-header">
+          <h2 class="modal-title">⚙️ Game Settings</h2>
+          <button id="settings-close-btn" type="button" class="close-btn" aria-label="Close">✕</button>
+        </div>
+        <div class="modal-body settings-body">
+          <div class="setting-row">
+            <div>
+              <strong>Chiptune Sound &amp; SFX</strong>
+              <p>Procedural retro Web Audio music and battle effects</p>
+            </div>
+            <button id="setting-mute-btn" type="button" class="setting-toggle-btn">🔊 Sound On</button>
+          </div>
+
+          <div class="setting-row">
+            <div>
+              <strong>Retro CRT Scanlines</strong>
+              <p>Subtle classic handheld phosphor glow</p>
+            </div>
+            <button id="setting-crt-btn" type="button" class="setting-toggle-btn">📺 CRT On</button>
+          </div>
+
+          <div class="setting-row">
+            <div>
+              <strong>On-Screen Touch Gamepad</strong>
+              <p>Auto shows on tablets/phones, or force On/Off</p>
+            </div>
+            <button id="setting-pad-btn" type="button" class="setting-toggle-btn">🎮 Auto</button>
+          </div>
+
+          <div class="setting-row">
+            <div>
+              <strong>Switch Trainer Profile</strong>
+              <p>Swap between Violet and Ozias anytime (progress auto-saves)</p>
+            </div>
+            <button id="setting-switch-trainer-btn" type="button" class="setting-toggle-btn is-primary">👥 Switch Trainer</button>
+          </div>
+
+          <details class="parent-zone">
+            <summary>🔒 Parent Zone — Progress Reset</summary>
+            <p class="parent-note">
+              To prevent accidental taps by young trainers, <strong>press and hold for 3 full seconds</strong> to erase saved data.
+            </p>
+            <div class="parent-actions">
+              <button id="reset-trainer-btn" type="button" class="hold-reset-btn">
+                <span id="reset-trainer-fill" class="hold-reset-fill"></span>
+                <span class="hold-reset-label">Hold 3s: Reset Current Trainer</span>
+              </button>
+              <button id="reset-all-btn" type="button" class="hold-reset-btn is-danger">
+                <span id="reset-all-fill" class="hold-reset-fill"></span>
+                <span class="hold-reset-label">Hold 3s: Reset Both Profiles</span>
+              </button>
+            </div>
+            <p id="reset-status-msg" class="reset-status-msg" aria-live="polite"></p>
+          </details>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="./js/main.js"></script>
+</body>
+</html>
