@@ -13,7 +13,7 @@ import {
 } from '../js/pokemon.js';
 import { StorageManager } from '../js/storage.js';
 import { AudioEngine, THEMES } from '../js/audio.js';
-import { BattleEngine } from '../js/battle.js';
+import { BATTLE_STATES, BattleEngine } from '../js/battle.js';
 
 function assert(condition, message) {
   if (!condition) {
@@ -380,7 +380,7 @@ function buildTestSuites() {
         {
           name: 'AudioEngine initializes lowpass master filter (~900-1300Hz), quiet BGM gains, and unlocks safely',
           async fn() {
-            const testAudio = new AudioEngine();
+            const testAudio = new AudioEngine({ silent: true, attachUnlockListeners: false });
             try {
               const ctx = testAudio.ensureContext();
               if (ctx) {
@@ -411,10 +411,7 @@ function buildTestSuites() {
               testAudio.playLevelUp();
               testAudio.stopBGM();
             } finally {
-              testAudio.stopBGM();
-              if (testAudio.ctx && typeof testAudio.ctx.close === 'function') {
-                await testAudio.ctx.close().catch(() => {});
-              }
+              await testAudio.destroy();
             }
           },
         },
@@ -459,12 +456,13 @@ function buildTestSuites() {
 
             // BattleEngine cannot throw or soft-lock on empty party start
             const TEST_KEY = 'starlight_pokemon_test_battle_guard_v1';
+            let engine = null;
             try {
               window.localStorage.removeItem(TEST_KEY);
               const store = new StorageManager(TEST_KEY);
               store.selectTrainer('violet'); // unstarted: team is empty
               let endedWith = null;
-              const engine = new BattleEngine({
+              engine = new BattleEngine({
                 storage: store,
                 audio: { playMenuBlip() {} },
                 onBattleEnd: (res) => {
@@ -476,6 +474,285 @@ function buildTestSuites() {
               assertEqual(endedWith?.outcome, 'escaped', 'BattleEngine invokes onBattleEnd cleanly');
               assert(BADGES.length === 6 && Object.keys(SPECIES).length === 18, 'Config roster intact');
             } finally {
+              engine?.destroy();
+              window.localStorage.removeItem(TEST_KEY);
+            }
+          },
+        },
+      ],
+    },
+    {
+      name: '8. Turn State Machine, Rapid-Click Lock & Loop Cleanup',
+      tests: [
+        {
+          name: 'BATTLE_STATES exported and 25 rapid clicks execute only 1 player turn & 1 PP consumption',
+          async fn() {
+            const requiredStates = [
+              'INACTIVE', 'INTRO', 'PLAYER_INPUT', 'ACTION_ANIMATING',
+              'OPPONENT_AI', 'OPPONENT_ANIMATING', 'CHECK_FAINT',
+              'RETURN_TO_INPUT', 'FORCED_SWITCH', 'BATTLE_END',
+            ];
+            for (const s of requiredStates) {
+              assertEqual(BATTLE_STATES[s], s, `BATTLE_STATES.${s}`);
+            }
+
+            const TEST_KEY = 'starlight_pokemon_test_turn_lock_v1';
+            const noopAudio = {
+              playMenuBlip() {},
+              playCursorMove() {},
+              playMoveSelect() {},
+              playPhysicalImpact() {},
+              playElemental() {},
+              playFaint() {},
+              playHealChime() {},
+              playLevelUp() {},
+            };
+            const store = new StorageManager(TEST_KEY);
+            store.selectTrainer('violet');
+            store.chooseStarter(1); // Bulbasaur Lv.5
+            const player = store.getActiveProfile().team[0];
+            const enemy = createPokemon(10, 4); // Caterpie Lv.4
+
+            const engine = new BattleEngine({
+              storage: store,
+              audio: noopAudio,
+              onBattleEnd() {},
+              onBadgesUnlocked() {},
+              onHudRefresh() {},
+            });
+
+            const waitUntil = async (pred, timeoutMs = 4500) => {
+              const start = performance.now();
+              while (!pred()) {
+                if (engine.typingResolve) engine.finishTypewriter();
+                if (performance.now() - start > timeoutMs) {
+                  throw new Error(`Timed out waiting for condition (state=${engine.state}, busy=${engine.busy})`);
+                }
+                await new Promise((r) => setTimeout(r, 15));
+              }
+            };
+
+            try {
+              const startPromise = engine.start({ enemy, biomeId: 'forest' });
+              await waitUntil(() => engine.state === BATTLE_STATES.PLAYER_INPUT);
+              await startPromise;
+
+              let playerMoveExecutions = 0;
+              const origExec = engine.executeMoveAction.bind(engine);
+              engine.executeMoveAction = async (side, move, sid) => {
+                if (side === 'player') playerMoveExecutions += 1;
+                return origExec(side, move, sid);
+              };
+
+              const tackleBtn = Array.from(document.querySelectorAll('#battle-moves .move-card'))
+                .find((btn) => btn.dataset.moveId === 'tackle') || document.querySelector('#battle-moves .move-card');
+              assert(Boolean(tackleBtn), 'Move card rendered for battle');
+
+              const moveId = tackleBtn.dataset.moveId;
+              const ppBefore = player.getMovePp(moveId).current;
+
+              // Spam-click 25 times synchronously
+              for (let i = 0; i < 25; i++) {
+                tackleBtn.click();
+              }
+
+              // Global Action Lock must be engaged immediately on the very first click
+              assertEqual(engine.busy, true, 'engine.busy locked immediately');
+              assert(
+                engine.state === BATTLE_STATES.ACTION_ANIMATING || engine.state === BATTLE_STATES.OPPONENT_AI,
+                `expected locked turn state, got ${engine.state}`,
+              );
+              assert(
+                document.getElementById('battle-screen').classList.contains('is-action-locked'),
+                'battle-screen has .is-action-locked immediately',
+              );
+              const allDisabled = Array.from(document.querySelectorAll('#battle-moves .move-card'))
+                .every((b) => b.disabled);
+              assertEqual(allDisabled, true, 'all move buttons disabled during turn execution');
+              assertEqual(player.getMovePp(moveId).current, ppBefore - 1, 'PP consumed exactly once despite 25 clicks');
+
+              // Let the turn finish cleanly
+              await waitUntil(() => engine.state === BATTLE_STATES.PLAYER_INPUT || !engine.active, 6000);
+              assertEqual(playerMoveExecutions, 1, 'only 1 player move executed across 25 rapid clicks');
+
+              // Test say() typing -> waiting -> resolved lifecycle
+              const logEl = document.getElementById('battle-log');
+              const sayPromise = engine.say('Testing arcade box!', 5, 350);
+              assert(logEl.classList.contains('is-typing'), 'logEl sets .is-typing during typewriter');
+              await new Promise((r) => setTimeout(r, 140));
+              assert(logEl.classList.contains('is-waiting'), 'logEl sets .is-waiting with bouncing arrow cue');
+              engine.finishTypewriter();
+              await sayPromise;
+              assert(!logEl.classList.contains('is-typing') && !logEl.classList.contains('is-waiting'), 'classes cleared after finishTypewriter');
+
+              engine.stop();
+              assertEqual(engine.state, BATTLE_STATES.INACTIVE, 'state reset to INACTIVE on stop');
+              assertEqual(engine.fxRaf, null, 'fxRaf cancelled on stop');
+              assertEqual(engine.pendingTimers.size, 0, 'all pendingTimers cleared on stop');
+              assertEqual(engine.ballRafId, null, 'ballRafId null on stop');
+              assertEqual(engine.hpRafs.enemy, null, 'enemy hpRaf null on stop');
+              assertEqual(engine.hpRafs.player, null, 'player hpRaf null on stop');
+            } finally {
+              engine.destroy();
+              window.localStorage.removeItem(TEST_KEY);
+            }
+          },
+        },
+        {
+          name: 'Closing Pokédex (X button & backdrop) and Settings immediately unpauses overworld movement',
+          fn() {
+            const app = window.__starlightApp;
+            assert(Boolean(app), 'GameApp mounted');
+
+            const wasBootHidden = app.bootScreenEl.hidden;
+            const wasShellHidden = app.gameShellEl.hidden;
+            const wasOverworldActive = app.overworld.active;
+            const wasPaused = app.overworld.paused;
+            const wasBattleActive = app.battle.active;
+
+            try {
+              app.battle.active = false;
+              app.encounterTransitioning = false;
+              app.dialogueOpen = false;
+              app.gameShellEl.hidden = false;
+              app.bootScreenEl.hidden = true;
+              app.overworld.active = true;
+              app.syncOverworldPause();
+              assertEqual(app.overworld.paused, false, 'overworld initially unpaused');
+
+              app.openPokedex('dex');
+              assertEqual(app.pokedex.isOpen(), true, 'Pokédex opened');
+              assertEqual(app.overworld.paused, true, 'overworld paused while Pokédex open');
+              document.getElementById('pokedex-close-btn').click();
+              assertEqual(app.pokedex.isOpen(), false, 'Pokédex closed via X button');
+              assertEqual(app.overworld.paused, false, 'overworld unpaused after Pokédex X button');
+
+              app.openPokedex('badges');
+              assertEqual(app.overworld.paused, true, 'overworld paused on Pokédex badges tab');
+              const dexModal = document.getElementById('pokedex-modal');
+              dexModal.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+              assertEqual(app.pokedex.isOpen(), false, 'Pokédex closed via backdrop click');
+              assertEqual(app.overworld.paused, false, 'overworld unpaused after Pokédex backdrop click');
+
+              app.openSettings();
+              assertEqual(app.isSettingsOpen(), true, 'Settings opened');
+              assertEqual(app.overworld.paused, true, 'overworld paused while Settings open');
+              document.getElementById('settings-close-btn').click();
+              assertEqual(app.isSettingsOpen(), false, 'Settings closed via X button');
+              assertEqual(app.overworld.paused, false, 'overworld unpaused after Settings close');
+            } finally {
+              app.pokedex.close();
+              app.closeSettings();
+              app.battle.active = wasBattleActive;
+              app.bootScreenEl.hidden = wasBootHidden;
+              app.gameShellEl.hidden = wasShellHidden;
+              app.overworld.active = wasOverworldActive;
+              app.overworld.setPaused(wasPaused);
+            }
+          },
+        },
+      ],
+    },
+    {
+      name: '9. Audio Scheduler Stability & Authentic Chiptune Engine',
+      tests: [
+        {
+          name: 'Rapid BGM theme switching maintains single scheduler and stopBGM clears active nodes',
+          async fn() {
+            const testAudio = new AudioEngine({ silent: true, attachUnlockListeners: false });
+            try {
+              testAudio.ensureContext();
+              await testAudio.unlock();
+
+              const cycle = ['battle', 'overworld', 'title', 'battle'];
+              for (let i = 0; i < 12; i++) {
+                testAudio.playBGM(cycle[i % cycle.length]);
+              }
+
+              const diagActive = testAudio.getDiagnostics();
+              assertEqual(diagActive.currentTheme, 'battle', 'final active theme is battle');
+              if (testAudio.ctx && testAudio.ctx.state === 'running') {
+                assertEqual(diagActive.schedulerActive, true, 'single scheduler active when running');
+              }
+
+              // Authentic Gen 1/Gen 3 battle ostinato composition assertions
+              const battle = THEMES.battle;
+              assertInRange(battle.stepSec, 0.12, 0.16, 'battle stepSec in 0.12-0.16s groove range');
+              assert(battle.melody.length >= 64, 'battle melody >= 64 steps');
+              assert(Array.isArray(battle.drums) && battle.drums.length >= 16, 'battle percussion track present');
+              assert(battle.leadWave === 'pulse25' || battle.leadWave === 'pulse12', 'battle lead uses authentic pulse wave');
+
+              testAudio.playCursorMove();
+              testAudio.playMoveSelect();
+              testAudio.playPhysicalImpact(45);
+              testAudio.playFaint();
+
+              testAudio.stopBGM();
+              const diagStopped = testAudio.getDiagnostics();
+              assertEqual(diagStopped.currentTheme, null, 'currentTheme cleared on stopBGM');
+              assertEqual(diagStopped.schedulerActive, false, 'scheduler stopped on stopBGM');
+              assertEqual(diagStopped.activeBgmNodes, 0, 'all active BGM oscillators stopped and cleared');
+              assertEqual(diagStopped.stepIndex, 0, 'stepIndex reset to 0 on stopBGM');
+            } finally {
+              await testAudio.destroy();
+            }
+          },
+        },
+      ],
+    },
+    {
+      name: '10. Elemental Move Cards & PP Meter UI',
+      tests: [
+        {
+          name: 'Move cards render type-specific elemental styling, cursor, category, power, and 5 PP pips',
+          fn() {
+            const TEST_KEY = 'starlight_pokemon_test_cards_v1';
+            const store = new StorageManager(TEST_KEY);
+            store.selectTrainer('ozias');
+            store.chooseStarter(4); // Charmander
+
+            const engine = new BattleEngine({
+              storage: store,
+              audio: { playMenuBlip() {}, playCursorMove() {} },
+              onBattleEnd() {},
+              onBadgesUnlocked() {},
+              onHudRefresh() {},
+            });
+
+            try {
+              const speciesToTest = [4, 7, 1, 25, 133]; // Charmander(fire), Squirtle(water), Bulbasaur(grass), Pikachu(electric), Eevee(normal)
+              const expectedClasses = ['move-card--fire', 'move-card--water', 'move-card--grass', 'move-card--electric', 'move-card--normal'];
+
+              engine.enemy = createPokemon(10, 5);
+              engine.active = true;
+              engine.state = BATTLE_STATES.PLAYER_INPUT;
+
+              const seenClasses = new Set();
+              for (const spId of speciesToTest) {
+                engine.player = createPokemon(spId, 5);
+                engine.renderMoveButtons();
+                const cards = Array.from(document.querySelectorAll('#battle-moves .move-card'));
+                assertGreater(cards.length, 0, `cards rendered for species ${spId}`);
+
+                for (const card of cards) {
+                  for (const cls of card.classList) {
+                    if (cls.startsWith('move-card--')) seenClasses.add(cls);
+                  }
+                  const cursor = card.querySelector('.move-cursor');
+                  assert(Boolean(cursor) && cursor.textContent.includes('▶'), 'move-cursor ▶ present');
+                  assert(Boolean(card.querySelector('.move-cat-badge')), 'category badge present');
+                  assert(Boolean(card.querySelector('.move-pwr-tag')), 'power tag present');
+                  const ppText = card.querySelector('.move-pp-text')?.textContent || '';
+                  assert(/^PP \d+\/\d+$/.test(ppText), `valid PP readout "${ppText}"`);
+                  assertEqual(card.querySelectorAll('.pp-pip').length, 5, '5 PP energy pips rendered');
+                }
+              }
+
+              for (const reqCls of expectedClasses) {
+                assert(seenClasses.has(reqCls), `rendered elemental class ${reqCls}`);
+              }
+            } finally {
+              engine.destroy();
               window.localStorage.removeItem(TEST_KEY);
             }
           },
@@ -491,6 +768,14 @@ function renderTestBadge(summary) {
 
   const banner = document.createElement('div');
   banner.id = 'starlight-test-banner';
+  banner.dataset.summary = JSON.stringify({
+    passed: summary.passed,
+    failed: summary.failed,
+    total: summary.total,
+    durationMs: summary.durationMs,
+    allPassed: summary.allPassed,
+    failures: summary.results.filter((r) => !r.passed),
+  });
   banner.style.cssText = [
     'position: fixed',
     'top: 8px',

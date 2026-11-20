@@ -1,91 +1,208 @@
-// Warm Handheld Procedural Web Audio Engine (Master Low-Pass, ADSR Envelopes, Zero External Assets)
+// Authentic Retro Chiptune Web Audio Engine (Lookahead Sync, Duty-Cycle Pulse Waves & Percussion)
+
+const E2 = 82.41;
+const F2 = 87.31;
+const Fs2 = 92.50;
+const G2 = 98.00;
+const A2 = 110.00;
+const B1 = 61.74;
+const B2 = 123.47;
+const C2 = 65.41;
+const D2 = 73.42;
+const Ds2 = 77.78;
+
+const C3 = 130.81;
+const D3 = 146.83;
+const Ds3 = 155.56;
+const E3 = 164.81;
+const F3 = 174.61;
+const Fs3 = 185.00;
+const G3 = 196.00;
+const A3 = 220.00;
+const B3 = 246.94;
+
+const C4 = 261.63;
+const D4 = 293.66;
+const Ds4 = 311.13;
+const E4 = 329.63;
+const F4 = 349.23;
+const Fs4 = 369.99;
+const G4 = 392.00;
+const A4 = 440.00;
+const Bb4 = 466.16;
+const B4 = 493.88;
+
+const C5 = 523.25;
+const D5 = 587.33;
+const Ds5 = 622.25;
+const E5 = 659.25;
+const F5 = 698.46;
+const Fs5 = 739.99;
+const G5 = 783.99;
+const A5 = 880.00;
+const B5 = 987.77;
+const C6 = 1046.50;
 
 export const THEMES = {
   title: {
-    stepSec: 0.22,
+    stepSec: 0.195,
+    leadWave: 'pulse25',
     melody: [
-      523.25, 0, 659.25, 783.99, 1046.5, 0, 987.77, 783.99,
-      587.33, 0, 698.46, 880.0, 1046.5, 987.77, 880.0, 659.25,
+      E4, 0, G4, B4, E5, 0, D5, B4,
+      C5, 0, B4, A4, G4, 0, Fs4, 0,
+      E4, 0, G4, B4, E5, 0, Fs5, G5,
+      Fs5, 0, D5, B4, E5, 0, 0, 0,
     ],
     arp: [
-      261.63, 329.63, 392.0, 523.25, 329.63, 392.0, 493.88, 392.0,
-      293.66, 349.23, 440.0, 587.33, 246.94, 392.0, 493.88, 392.0,
+      B3, 0, 0, E4, 0, 0, B3, 0,
+      C4, 0, 0, E4, 0, 0, D4, 0,
+      B3, 0, 0, E4, 0, 0, G4, 0,
+      D4, 0, B3, 0, E4, 0, 0, 0,
     ],
     bass: [
-      130.81, 0, 196.0, 0, 164.81, 0, 196.0, 0,
-      174.61, 0, 220.0, 0, 196.0, 0, 146.83, 0,
+      E3, 0, B2, 0, E3, 0, G3, 0,
+      C3, 0, G3, 0, B2, 0, Fs3, 0,
+      E3, 0, B2, 0, E3, 0, G3, 0,
+      D3, 0, B2, 0, E3, 0, B2, 0,
     ],
-    leadGain: 0.058,
-    arpGain: 0.042,
-    bassGain: 0.095,
+    drums: [
+      'K', 0, 'h', 0, 'S', 0, 'h', 0,
+      'K', 0, 'h', 0, 'S', 0, 'h', 'h',
+    ],
+    leadGain: 0.056,
+    arpGain: 0.032,
+    bassGain: 0.092,
+    drumGain: 0.045,
   },
   overworld: {
-    stepSec: 0.175,
+    stepSec: 0.165,
+    leadWave: 'pulse25',
     melody: [
-      523.25, 0, 659.25, 783.99, 659.25, 0, 587.33, 659.25,
-      783.99, 880.0, 783.99, 659.25, 587.33, 0, 523.25, 0,
-      587.33, 0, 698.46, 880.0, 783.99, 0, 659.25, 587.33,
-      523.25, 659.25, 783.99, 659.25, 523.25, 0, 392.0, 0,
+      G4, 0, B4, D5, G5, 0, Fs5, D5,
+      E5, 0, D5, C5, B4, 0, A4, 0,
+      G4, 0, B4, D5, E5, 0, D5, B4,
+      C5, B4, A4, G4, A4, 0, D4, 0,
+      G4, 0, B4, D5, G5, 0, A5, G5,
+      Fs5, 0, D5, Fs5, G5, 0, E5, 0,
+      D5, 0, C5, B4, A4, 0, B4, C5,
+      D5, 0, Fs4, 0, G4, 0, 0, 0,
     ],
     arp: [
-      261.63, 329.63, 392.0, 329.63, 261.63, 329.63, 392.0, 329.63,
-      293.66, 349.23, 440.0, 349.23, 246.94, 293.66, 392.0, 293.66,
-      293.66, 349.23, 440.0, 349.23, 246.94, 329.63, 392.0, 329.63,
-      261.63, 329.63, 392.0, 329.63, 261.63, 392.0, 246.94, 196.0,
+      D4, 0, 0, B3, 0, 0, D4, 0,
+      C4, 0, 0, E4, 0, 0, D4, 0,
+      B3, 0, 0, D4, 0, 0, B3, 0,
+      E4, 0, C4, 0, D4, 0, 0, 0,
     ],
     bass: [
-      130.81, 0, 196.0, 130.81, 164.81, 0, 196.0, 164.81,
-      174.61, 0, 220.0, 174.61, 196.0, 0, 246.94, 196.0,
-      146.83, 0, 220.0, 146.83, 196.0, 0, 246.94, 196.0,
-      130.81, 164.81, 196.0, 164.81, 130.81, 0, 196.0, 0,
+      G3, 0, D3, 0, G3, 0, B2, 0,
+      C3, 0, G3, 0, G2, 0, D3, 0,
+      G3, 0, D3, 0, E3, 0, B2, 0,
+      C3, 0, A2, 0, D3, 0, A2, 0,
+      G3, 0, D3, 0, G3, 0, B2, 0,
+      D3, 0, A2, 0, E3, 0, B2, 0,
+      C3, 0, G2, 0, A2, 0, C3, 0,
+      D3, 0, A2, 0, G2, 0, D3, 0,
     ],
-    leadGain: 0.055,
-    arpGain: 0.04,
+    drums: [
+      'K', 0, 'h', 0, 'S', 0, 'h', 0,
+      'K', 0, 'K', 0, 'S', 0, 'h', 0,
+    ],
+    leadGain: 0.056,
+    arpGain: 0.030,
     bassGain: 0.095,
+    drumGain: 0.048,
   },
   battle: {
-    stepSec: 0.135,
+    // Grounded, tense Gen 1 / Gen 3 inspired E-minor battle groove (~106 BPM 16th grid, -1 = sustain tie)
+    stepSec: 0.142,
+    leadWave: 'pulse25',
     melody: [
-      659.25, 659.25, 0, 783.99, 698.46, 659.25, 587.33, 659.25,
-      880.0, 0, 783.99, 698.46, 659.25, 587.33, 523.25, 587.33,
-      659.25, 783.99, 880.0, 0, 987.77, 880.0, 783.99, 698.46,
-      783.99, 659.25, 587.33, 659.25, 523.25, 0, 493.88, 0,
+      // Bar 1: Bold dramatic Em -> Bb tension intro
+      E4, -1, 0, E4, G4, -1, 0, A4, Bb4, -1, -1, 0, A4, -1, G4, 0,
+      // Bar 2: Minor rise -> B7 dominant stab
+      E4, -1, 0, G4, B4, -1, -1, 0, Ds5, -1, -1, 0, B4, -1, 0, 0,
+      // Bar 3: Driving E-minor battle motif
+      E5, -1, -1, D5, E5, 0, G5, -1, Fs5, -1, E5, 0, B4, -1, -1, 0,
+      // Bar 4: Urgent dominant response
+      E5, -1, -1, Fs5, G5, 0, A5, -1, Fs5, -1, Ds5, -1, B4, -1, 0, 0,
+      // Bar 5: High-energy minor hook
+      G5, -1, -1, Fs5, E5, 0, B4, -1, C5, -1, D5, 0, E5, -1, -1, 0,
+      // Bar 6: Phrygian bII (F) -> B7 turnaround
+      F5, -1, -1, E5, D5, 0, C5, -1, B4, -1, Ds5, -1, E5, -1, 0, 0,
+      // Bar 7: Ascending minor climax
+      C5, -1, E5, -1, G5, -1, B5, -1, A5, -1, G5, 0, Fs5, -1, E5, 0,
+      // Bar 8: B7 lock -> Em resolve
+      Ds5, -1, Fs5, -1, B5, -1, -1, 0, A5, 0, Fs5, 0, E5, -1, 0, 0,
     ],
+    // Held chord tones only on strong bar accents
     arp: [
-      329.63, 392.0, 493.88, 392.0, 329.63, 392.0, 493.88, 392.0,
-      349.23, 440.0, 523.25, 440.0, 293.66, 349.23, 440.0, 349.23,
-      329.63, 392.0, 493.88, 392.0, 392.0, 493.88, 587.33, 493.88,
-      293.66, 349.23, 440.0, 392.0, 329.63, 392.0, 293.66, 349.23,
+      B3, -1, 0, 0, B3, -1, 0, 0, D4, -1, 0, 0, 0, 0, 0, 0,
+      B3, -1, 0, 0, E4, -1, 0, 0, Fs4, -1, 0, 0, Ds4, -1, 0, 0,
+      B4, -1, 0, 0, G4, -1, 0, 0, A4, -1, 0, 0, G4, -1, 0, 0,
+      B4, -1, 0, 0, B4, -1, 0, 0, A4, -1, 0, 0, Fs4, -1, 0, 0,
+      B4, -1, 0, 0, G4, -1, 0, 0, E4, -1, 0, 0, G4, -1, 0, 0,
+      A4, -1, 0, 0, F4, -1, 0, 0, Fs4, -1, 0, 0, Ds4, -1, 0, 0,
+      E4, -1, 0, 0, G4, -1, 0, 0, C5, -1, 0, 0, B4, -1, 0, 0,
+      Fs4, -1, 0, 0, Ds5, -1, 0, 0, B4, -1, 0, 0, G4, -1, 0, 0,
     ],
+    // Heavy, grounded 8th-note octave/fifth triangle bassline
     bass: [
-      164.81, 0, 246.94, 164.81, 164.81, 0, 246.94, 196.0,
-      174.61, 0, 261.63, 174.61, 146.83, 0, 220.0, 146.83,
-      164.81, 0, 246.94, 164.81, 196.0, 0, 293.66, 196.0,
-      146.83, 196.0, 220.0, 196.0, 164.81, 0, 146.83, 0,
+      E2, 0, E3, 0, E2, 0, B2, 0, E2, 0, E3, 0, D2, 0, D3, 0,
+      E2, 0, E3, 0, G2, 0, G3, 0, B1, 0, B2, 0, Ds2, 0, Fs2, 0,
+      E2, 0, E3, 0, B2, 0, E3, 0, D2, 0, D3, 0, B1, 0, B2, 0,
+      E2, 0, E3, 0, G2, 0, G3, 0, B1, 0, B2, 0, Ds2, 0, B2, 0,
+      G2, 0, G3, 0, E2, 0, E3, 0, C2, 0, C3, 0, E2, 0, E3, 0,
+      F2, 0, F3, 0, D2, 0, D3, 0, B1, 0, B2, 0, E2, 0, B2, 0,
+      C2, 0, C3, 0, G2, 0, C3, 0, A2, 0, A3, 0, B2, 0, E3, 0,
+      B1, 0, B2, 0, Ds2, 0, B2, 0, B1, 0, Fs2, 0, E2, 0, B2, 0,
     ],
-    leadGain: 0.062,
-    arpGain: 0.046,
-    bassGain: 0.105,
+    // Clean 4/4 pocket with minimal crisp percussion (zero fast-forward noise clutter)
+    drums: [
+      'K', 0, 0, 0, 'S', 0, 'h', 0,
+      'K', 0, 'K', 0, 'S', 0, 'h', 0,
+      'K', 0, 0, 0, 'S', 0, 'h', 0,
+      'K', 0, 'K', 0, 'S', 0, 0, 'S',
+    ],
+    leadGain: 0.064,
+    arpGain: 0.032,
+    bassGain: 0.108,
+    drumGain: 0.052,
   },
 };
 
 export class AudioEngine {
-  constructor() {
+  constructor({ silent = false, attachUnlockListeners = true } = {}) {
     this.ctx = null;
     this.masterFilter = null;
     this.masterGain = null;
+    this.bgmBus = null;
+    this.silentSink = null;
+    this.silent = Boolean(silent);
+
+    this.pulse12Wave = null;
+    this.pulse25Wave = null;
     this.warmPulseWave = null;
     this.noiseBuffer = null;
+
     this.muted = false;
     this.unlocked = false;
+    this._unlockPromise = null;
 
     this.currentTheme = null;
     this.schedulerTimer = null;
+    this.schedulerStartCount = 0;
+    this.bgmGeneration = 0;
+    this.activeBgmNodes = new Set();
+
     this.nextStepTime = 0;
     this.stepIndex = 0;
+    this.bgmSyncStartTime = 0;
+    this.bgmStepsSinceSync = 0;
+    this._lastCursorAt = 0;
 
     this._boundUnlock = () => this.unlock();
-    if (typeof window !== 'undefined') {
+    this._unlockListenersAttached = false;
+    if (attachUnlockListeners && typeof window !== 'undefined') {
       const opts = { capture: true, passive: true };
       window.addEventListener('pointerdown', this._boundUnlock, opts);
       window.addEventListener('pointerup', this._boundUnlock, opts);
@@ -93,24 +210,41 @@ export class AudioEngine {
       window.addEventListener('touchend', this._boundUnlock, opts);
       window.addEventListener('keydown', this._boundUnlock, opts);
       window.addEventListener('click', this._boundUnlock, opts);
+      this._unlockListenersAttached = true;
     }
   }
 
-  buildWarmPulseWave(ctx) {
+  _removeUnlockListeners() {
+    if (!this._unlockListenersAttached || typeof window === 'undefined') return;
+    const opts = { capture: true, passive: true };
+    window.removeEventListener('pointerdown', this._boundUnlock, opts);
+    window.removeEventListener('pointerup', this._boundUnlock, opts);
+    window.removeEventListener('touchstart', this._boundUnlock, opts);
+    window.removeEventListener('touchend', this._boundUnlock, opts);
+    window.removeEventListener('keydown', this._boundUnlock, opts);
+    window.removeEventListener('click', this._boundUnlock, opts);
+    this._unlockListenersAttached = false;
+  }
+
+  buildPulseWave(ctx, duty = 0.25) {
     if (typeof ctx.createPeriodicWave !== 'function') return null;
     try {
-      const harmonics = 10;
+      const harmonics = 16;
       const real = new Float32Array(harmonics + 1);
       const imag = new Float32Array(harmonics + 1);
-      // Warm 25%-ish duty-style band-limited pulse with rolled-off upper harmonics
       for (let n = 1; n <= harmonics; n++) {
-        const rolloff = 1 / (n * (1 + n * 0.18));
-        imag[n] = (2 / (n * Math.PI)) * Math.sin(n * Math.PI * 0.28) * rolloff * 2.2;
+        // Gentle Gibbs/Nyquist roll-off while preserving authentic Game Boy square bite
+        const rolloff = 1 / (1 + Math.pow(n / 11, 2));
+        imag[n] = (2 / (n * Math.PI)) * Math.sin(n * Math.PI * duty) * rolloff * 2.0;
       }
       return ctx.createPeriodicWave(real, imag, { disableNormalization: false });
     } catch {
       return null;
     }
+  }
+
+  buildWarmPulseWave(ctx) {
+    return this.buildPulseWave(ctx, 0.25);
   }
 
   ensureContext() {
@@ -123,23 +257,54 @@ export class AudioEngine {
       this.ctx = new AudioCtx();
       this.masterFilter = this.ctx.createBiquadFilter();
       this.masterFilter.type = 'lowpass';
-      this.masterFilter.frequency.value = 1120;
-      this.masterFilter.Q.value = 0.72;
+      this.masterFilter.frequency.value = 1260;
+      this.masterFilter.Q.value = 0.65;
 
       this.masterGain = this.ctx.createGain();
-      this.masterGain.gain.value = this.muted ? 0 : 0.32;
+      this.masterGain.gain.value = this.muted ? 0 : 0.34;
 
+      this.bgmBus = this.ctx.createGain();
+      this.bgmBus.gain.value = 1.0;
+
+      this.bgmBus.connect(this.masterFilter);
       this.masterFilter.connect(this.masterGain);
-      this.masterGain.connect(this.ctx.destination);
+      if (this.silent) {
+        this.silentSink = this.ctx.createGain();
+        this.silentSink.gain.value = 0;
+        this.masterGain.connect(this.silentSink);
+        this.silentSink.connect(this.ctx.destination);
+      } else {
+        this.masterGain.connect(this.ctx.destination);
+      }
 
-      this.warmPulseWave = this.buildWarmPulseWave(this.ctx);
+      this.pulse12Wave = this.buildPulseWave(this.ctx, 0.125);
+      this.pulse25Wave = this.buildPulseWave(this.ctx, 0.25);
+      this.warmPulseWave = this.pulse25Wave;
       this.noiseBuffer = this.buildNoiseBuffer(this.ctx);
       return this.ctx;
     } catch {
       this.ctx = null;
       this.masterFilter = null;
       this.masterGain = null;
+      this.bgmBus = null;
+      this.silentSink = null;
       return null;
+    }
+  }
+
+  async destroy() {
+    this.stopBGM();
+    this._removeUnlockListeners();
+    this.unlocked = false;
+    this._unlockPromise = null;
+    const ctx = this.ctx;
+    this.ctx = null;
+    this.masterFilter = null;
+    this.masterGain = null;
+    this.bgmBus = null;
+    this.silentSink = null;
+    if (ctx && typeof ctx.close === 'function') {
+      await ctx.close().catch(() => {});
     }
   }
 
@@ -156,23 +321,78 @@ export class AudioEngine {
   unlock() {
     const ctx = this.ensureContext();
     if (!ctx) return Promise.resolve(false);
+    if (this.unlocked && ctx.state === 'running') {
+      this._removeUnlockListeners();
+      return Promise.resolve(true);
+    }
+    if (this._unlockPromise) return this._unlockPromise;
 
     const onReady = () => {
+      this._unlockPromise = null;
       this.unlocked = ctx.state === 'running';
-      if (this.unlocked && this.currentTheme && !this.schedulerTimer && !this.muted) {
-        this.startScheduler();
+      if (this.unlocked) {
+        this._removeUnlockListeners();
+        if (this.currentTheme && !this.schedulerTimer && !this.muted) {
+          this.startScheduler();
+        }
       }
       return this.unlocked;
     };
 
     if (ctx.state === 'suspended' && typeof ctx.resume === 'function') {
       try {
-        return Promise.resolve(ctx.resume()).then(onReady).catch(() => false);
+        this._unlockPromise = Promise.resolve(ctx.resume())
+          .then(onReady)
+          .catch(() => {
+            this._unlockPromise = null;
+            return false;
+          });
+        return this._unlockPromise;
       } catch {
+        this._unlockPromise = null;
         return Promise.resolve(false);
       }
     }
     return Promise.resolve(onReady());
+  }
+
+  _haltActiveBgmNodes() {
+    for (const entry of this.activeBgmNodes) {
+      try {
+        entry.source.onended = null;
+      } catch {
+        // Ignore
+      }
+      try {
+        entry.source.stop();
+      } catch {
+        // Ignore already-stopped nodes
+      }
+      try {
+        entry.source.disconnect();
+      } catch {
+        // Ignore
+      }
+      try {
+        entry.gain.disconnect();
+      } catch {
+        // Ignore
+      }
+    }
+    this.activeBgmNodes.clear();
+
+    if (this.ctx && this.masterFilter) {
+      if (this.bgmBus) {
+        try {
+          this.bgmBus.disconnect();
+        } catch {
+          // Ignore
+        }
+      }
+      this.bgmBus = this.ctx.createGain();
+      this.bgmBus.gain.value = 1.0;
+      this.bgmBus.connect(this.masterFilter);
+    }
   }
 
   setMuted(muted) {
@@ -180,10 +400,12 @@ export class AudioEngine {
     if (this.masterGain && this.ctx) {
       const now = this.ctx.currentTime;
       this.masterGain.gain.cancelScheduledValues(now);
-      this.masterGain.gain.setTargetAtTime(this.muted ? 0 : 0.32, now, 0.02);
+      this.masterGain.gain.setTargetAtTime(this.muted ? 0 : 0.34, now, 0.015);
     }
     if (this.muted) {
+      this.bgmGeneration += 1;
       this.stopScheduler();
+      this._haltActiveBgmNodes();
     } else if (this.currentTheme && this.ctx && this.ctx.state === 'running') {
       this.startScheduler();
     }
@@ -193,38 +415,61 @@ export class AudioEngine {
     return this.muted;
   }
 
+  _trackBgmNode(source, gainNode) {
+    const entry = { source, gain: gainNode };
+    this.activeBgmNodes.add(entry);
+    source.onended = () => {
+      this.activeBgmNodes.delete(entry);
+      try {
+        source.disconnect();
+      } catch {
+        // Ignore
+      }
+      try {
+        gainNode.disconnect();
+      } catch {
+        // Ignore
+      }
+    };
+  }
+
   triggerVoice({
     freq,
     endFreq = null,
     midFreq = null,
     wave = 'triangle',
     useWarmPulse = false,
-    attack = 0.008,
-    decay = 0.05,
+    attack = 0.006,
+    decay = 0.045,
     sustain = 0.36,
     duration = 0.14,
     gain = 0.12,
     delay = 0,
     startTime = null,
+    destination = null,
+    trackBgm = false,
   }) {
-    if (this.muted) return;
+    if (this.muted) return null;
     const ctx = this.ensureContext();
-    if (!ctx || !this.masterFilter || ctx.state !== 'running') return;
+    const dest = destination || this.masterFilter;
+    if (!ctx || !dest || ctx.state !== 'running') return null;
 
-    const dur = Math.max(0.03, duration);
+    const dur = Math.max(0.025, duration);
     const start = startTime !== null ? startTime : ctx.currentTime + Math.max(0, delay);
-    const atk = Math.min(dur * 0.45, Math.max(0.004, attack));
-    const decEnd = Math.min(dur * 0.8, atk + Math.max(0.01, decay));
+    const atk = Math.min(dur * 0.45, Math.max(0.002, attack));
+    const decEnd = Math.min(dur * 0.82, atk + Math.max(0.008, decay));
     const peakGain = Math.max(0.001, gain);
-    const sustainGain = Math.max(0.0001, peakGain * Math.max(0.05, Math.min(0.95, sustain)));
+    const sustainGain = Math.max(0.0001, peakGain * Math.max(0.04, Math.min(0.95, sustain)));
 
     const osc = ctx.createOscillator();
     const env = ctx.createGain();
 
-    if (useWarmPulse && this.warmPulseWave) {
-      osc.setPeriodicWave(this.warmPulseWave);
+    if (wave === 'pulse12' && this.pulse12Wave) {
+      osc.setPeriodicWave(this.pulse12Wave);
+    } else if ((wave === 'pulse25' || wave === 'square' || useWarmPulse) && this.pulse25Wave) {
+      osc.setPeriodicWave(this.pulse25Wave);
     } else {
-      osc.type = wave === 'square' ? 'triangle' : wave;
+      osc.type = wave === 'pulse12' || wave === 'pulse25' ? 'square' : wave;
     }
 
     const startHz = Math.max(20, freq);
@@ -244,14 +489,18 @@ export class AudioEngine {
     env.gain.exponentialRampToValueAtTime(0.0001, start + dur);
 
     osc.connect(env);
-    env.connect(this.masterFilter);
+    env.connect(dest);
+    if (trackBgm) {
+      this._trackBgmNode(osc, env);
+    }
     osc.start(start);
-    osc.stop(start + dur + 0.025);
+    osc.stop(start + dur + 0.02);
+    return osc;
   }
 
   playTone(opts) {
     this.triggerVoice({
-      wave: opts.type === 'square' ? 'triangle' : (opts.type || 'triangle'),
+      wave: opts.type === 'square' ? 'pulse25' : (opts.type || 'triangle'),
       useWarmPulse: opts.type === 'square',
       ...opts,
     });
@@ -263,17 +512,21 @@ export class AudioEngine {
     filterType = 'lowpass',
     startFreq = 820,
     endFreq = 180,
-    q = 1.0,
-    attack = 0.006,
+    q = 0.9,
+    attack = 0.003,
     delay = 0,
+    startTime = null,
+    destination = null,
+    trackBgm = false,
   }) {
-    if (this.muted) return;
+    if (this.muted) return null;
     const ctx = this.ensureContext();
-    if (!ctx || !this.masterFilter || ctx.state !== 'running' || !this.noiseBuffer) return;
+    const dest = destination || this.masterFilter;
+    if (!ctx || !dest || ctx.state !== 'running' || !this.noiseBuffer) return null;
 
-    const dur = Math.max(0.03, duration);
-    const start = ctx.currentTime + Math.max(0, delay);
-    const atk = Math.min(dur * 0.35, Math.max(0.003, attack));
+    const dur = Math.max(0.02, duration);
+    const start = startTime !== null ? startTime : ctx.currentTime + Math.max(0, delay);
+    const atk = Math.min(dur * 0.35, Math.max(0.002, attack));
 
     const src = ctx.createBufferSource();
     src.buffer = this.noiseBuffer;
@@ -281,9 +534,9 @@ export class AudioEngine {
     const filter = ctx.createBiquadFilter();
     filter.type = filterType;
     filter.Q.value = q;
-    filter.frequency.setValueAtTime(Math.max(40, startFreq), start);
+    filter.frequency.setValueAtTime(Math.max(30, startFreq), start);
     if (endFreq !== startFreq) {
-      filter.frequency.exponentialRampToValueAtTime(Math.max(40, endFreq), start + dur);
+      filter.frequency.exponentialRampToValueAtTime(Math.max(30, endFreq), start + dur);
     }
 
     const env = ctx.createGain();
@@ -293,15 +546,82 @@ export class AudioEngine {
 
     src.connect(filter);
     filter.connect(env);
-    env.connect(this.masterFilter);
+    env.connect(dest);
+    if (trackBgm) {
+      this._trackBgmNode(src, env);
+    }
 
     src.start(start);
-    src.stop(start + dur + 0.025);
+    src.stop(start + dur + 0.02);
+    return src;
+  }
+
+  triggerDrum(hitType, startTime, drumGain = 0.08) {
+    if (!hitType || !this.bgmBus) return;
+    if (hitType === 'K') {
+      // Pure grounded low-frequency triangle kick thud (zero white-noise clutter)
+      this.triggerVoice({
+        freq: 112,
+        endFreq: 36,
+        wave: 'triangle',
+        startTime,
+        duration: 0.075,
+        attack: 0.002,
+        decay: 0.03,
+        sustain: 0.25,
+        gain: Math.min(0.11, drumGain * 1.25),
+        destination: this.bgmBus,
+        trackBgm: true,
+      });
+    } else if (hitType === 'S') {
+      // Warm tight Game Boy snare
+      this.triggerVoice({
+        freq: 175,
+        endFreq: 78,
+        wave: 'triangle',
+        startTime,
+        duration: 0.055,
+        attack: 0.002,
+        decay: 0.024,
+        sustain: 0.2,
+        gain: drumGain * 0.72,
+        destination: this.bgmBus,
+        trackBgm: true,
+      });
+      this.playNoise({
+        startTime,
+        duration: 0.06,
+        gain: drumGain * 0.78,
+        filterType: 'lowpass',
+        startFreq: 920,
+        endFreq: 240,
+        q: 0.65,
+        attack: 0.002,
+        destination: this.bgmBus,
+        trackBgm: true,
+      });
+    } else if (hitType === 'h') {
+      // Subtle soft low-passed tick
+      this.playNoise({
+        startTime,
+        duration: 0.018,
+        gain: drumGain * 0.24,
+        filterType: 'lowpass',
+        startFreq: 980,
+        endFreq: 420,
+        q: 0.65,
+        attack: 0.002,
+        destination: this.bgmBus,
+        trackBgm: true,
+      });
+    }
   }
 
   playBGM(theme) {
     if (!THEMES[theme]) return;
     if (this.currentTheme === theme && this.schedulerTimer) return;
+
+    this.stopBGM();
     this.currentTheme = theme;
     this.stepIndex = 0;
 
@@ -311,12 +631,18 @@ export class AudioEngine {
   }
 
   stopBGM() {
-    this.currentTheme = null;
+    this.bgmGeneration += 1;
     this.stopScheduler();
+    this._haltActiveBgmNodes();
+    this.currentTheme = null;
+    this.stepIndex = 0;
+    this.nextStepTime = 0;
+    this.bgmSyncStartTime = 0;
+    this.bgmStepsSinceSync = 0;
   }
 
   stopScheduler() {
-    if (this.schedulerTimer) {
+    if (this.schedulerTimer !== null) {
       clearInterval(this.schedulerTimer);
       this.schedulerTimer = null;
     }
@@ -327,127 +653,282 @@ export class AudioEngine {
     const ctx = this.ensureContext();
     if (!ctx || !this.currentTheme) return;
 
-    this.nextStepTime = ctx.currentTime + 0.05;
-    this.schedulerTimer = setInterval(() => this.scheduleAhead(), 85);
+    const gen = ++this.bgmGeneration;
+    this.schedulerStartCount += 1;
+    this.nextStepTime = ctx.currentTime + 0.03;
+    this.bgmSyncStartTime = this.nextStepTime;
+    this.bgmStepsSinceSync = 0;
+    this.schedulerTimer = setInterval(() => this.scheduleAhead(gen), 25);
+    this.scheduleAhead(gen);
   }
 
-  scheduleAhead() {
+  _countHoldSteps(arr, startIdx) {
+    if (!arr || arr.length === 0) return 1;
+    let hold = 1;
+    while (startIdx + hold < arr.length && arr[startIdx + hold] === -1) {
+      hold += 1;
+    }
+    return hold;
+  }
+
+  scheduleAhead(gen = this.bgmGeneration) {
+    if (gen !== this.bgmGeneration) return;
     if (this.muted || !this.currentTheme || !this.ctx || this.ctx.state !== 'running') return;
     const theme = THEMES[this.currentTheme];
     if (!theme) return;
 
-    while (this.nextStepTime < this.ctx.currentTime + 0.24) {
+    const now = this.ctx.currentTime;
+    // Anti-burst guard: if browser tab was backgrounded or stalled, re-anchor cleanly instead of dumping backlog
+    if (now - this.nextStepTime > 0.5) {
+      this.nextStepTime = now + 0.03;
+      this.bgmSyncStartTime = this.nextStepTime;
+      this.bgmStepsSinceSync = 0;
+    }
+
+    const horizon = now + 0.14;
+    const dest = this.bgmBus || this.masterFilter;
+
+    while (this.nextStepTime < horizon) {
       const idx = this.stepIndex % theme.melody.length;
       const melFreq = theme.melody[idx];
-      const arpFreq = theme.arp ? theme.arp[idx % theme.arp.length] : 0;
-      const bassFreq = theme.bass[idx % theme.bass.length];
+      const arpIdx = theme.arp ? idx % theme.arp.length : 0;
+      const arpFreq = theme.arp ? theme.arp[arpIdx] : 0;
+      const bassIdx = idx % theme.bass.length;
+      const bassFreq = theme.bass[bassIdx];
+      const drumHit = theme.drums ? theme.drums[idx % theme.drums.length] : null;
       const stepDur = theme.stepSec;
 
       if (melFreq > 0) {
+        const melHold = this._countHoldSteps(theme.melody, idx);
         this.triggerVoice({
           freq: melFreq,
-          useWarmPulse: true,
-          wave: 'triangle',
+          wave: theme.leadWave || 'pulse25',
           startTime: this.nextStepTime,
-          duration: stepDur * 0.82,
-          attack: 0.01,
-          decay: 0.045,
-          sustain: 0.42,
+          duration: stepDur * Math.max(0.72, melHold - 0.16),
+          attack: 0.005,
+          decay: 0.035,
+          sustain: 0.54,
           gain: Math.min(0.12, theme.leadGain),
+          destination: dest,
+          trackBgm: true,
         });
       }
       if (arpFreq > 0) {
+        const arpHold = this._countHoldSteps(theme.arp, arpIdx);
         this.triggerVoice({
           freq: arpFreq,
-          wave: 'sine',
+          wave: 'pulse25',
           startTime: this.nextStepTime,
-          duration: stepDur * 0.72,
-          attack: 0.008,
-          decay: 0.04,
-          sustain: 0.3,
+          duration: stepDur * Math.max(0.65, arpHold - 0.18),
+          attack: 0.004,
+          decay: 0.025,
+          sustain: 0.42,
           gain: Math.min(0.12, theme.arpGain),
+          destination: dest,
+          trackBgm: true,
         });
       }
       if (bassFreq > 0) {
+        const bassHold = this._countHoldSteps(theme.bass, bassIdx);
         this.triggerVoice({
           freq: bassFreq,
           wave: 'triangle',
           startTime: this.nextStepTime,
-          duration: stepDur * 0.88,
-          attack: 0.008,
-          decay: 0.05,
-          sustain: 0.5,
+          duration: stepDur * Math.max(0.84, bassHold - 0.12),
+          attack: 0.004,
+          decay: 0.035,
+          sustain: 0.62,
           gain: Math.min(0.12, theme.bassGain),
+          destination: dest,
+          trackBgm: true,
         });
+      }
+      if (drumHit) {
+        this.triggerDrum(drumHit, this.nextStepTime, theme.drumGain || 0.052);
       }
 
       this.nextStepTime += stepDur;
       this.stepIndex += 1;
+      this.bgmStepsSinceSync += 1;
     }
+  }
+
+  getDiagnostics() {
+    const theme = this.currentTheme ? THEMES[this.currentTheme] : null;
+    const stepSec = theme?.stepSec || 0;
+    const expectedStepsPerSec = stepSec > 0 ? 1 / stepSec : 0;
+    const audioNow = this.ctx ? this.ctx.currentTime : 0;
+    const elapsedAudio = this.bgmStepsSinceSync > 0 && this.ctx
+      ? Math.max(0.001, (this.nextStepTime - this.bgmSyncStartTime))
+      : 0;
+    const measuredStepsPerSec = elapsedAudio > 0 && this.bgmStepsSinceSync > 0
+      ? this.bgmStepsSinceSync / elapsedAudio
+      : 0;
+    const tempoDriftPct = expectedStepsPerSec > 0 && measuredStepsPerSec > 0
+      ? Math.abs(measuredStepsPerSec - expectedStepsPerSec) / expectedStepsPerSec * 100
+      : 0;
+
+    return {
+      currentTheme: this.currentTheme,
+      unlocked: this.unlocked,
+      muted: this.muted,
+      schedulerActive: this.schedulerTimer !== null,
+      schedulerStartCount: this.schedulerStartCount,
+      activeBgmNodes: this.activeBgmNodes.size,
+      stepIndex: this.stepIndex,
+      stepSec,
+      expectedStepsPerSec: Number(expectedStepsPerSec.toFixed(3)),
+      measuredStepsPerSec: Number(measuredStepsPerSec.toFixed(3)),
+      tempoDriftPct: Number(tempoDriftPct.toFixed(4)),
+      audioCurrentTime: Number(audioNow.toFixed(3)),
+    };
   }
 
   // --- Sound Effects ---
 
+  playCursorMove() {
+    const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    if (now - this._lastCursorAt < 35) return;
+    this._lastCursorAt = now;
+    this.triggerVoice({
+      freq: 720,
+      wave: 'pulse25',
+      duration: 0.032,
+      attack: 0.002,
+      decay: 0.015,
+      sustain: 0.25,
+      gain: 0.05,
+    });
+  }
+
+  playMoveSelect() {
+    this.triggerVoice({
+      freq: 587.33,
+      wave: 'pulse25',
+      duration: 0.048,
+      attack: 0.002,
+      decay: 0.02,
+      sustain: 0.45,
+      gain: 0.085,
+      delay: 0,
+    });
+    this.triggerVoice({
+      freq: 880.0,
+      wave: 'pulse25',
+      duration: 0.078,
+      attack: 0.002,
+      decay: 0.03,
+      sustain: 0.4,
+      gain: 0.095,
+      delay: 0.048,
+    });
+  }
+
   playMenuBlip(pitch = 620) {
     this.triggerVoice({
       freq: pitch,
-      endFreq: pitch * 1.15,
-      wave: 'triangle',
-      duration: 0.07,
-      attack: 0.005,
+      wave: 'pulse25',
+      duration: 0.045,
+      attack: 0.002,
+      decay: 0.02,
       sustain: 0.25,
-      gain: 0.085,
+      gain: 0.065,
     });
   }
 
   playEncounterAlert() {
-    const notes = [392.0, 523.25, 659.25, 783.99];
-    notes.forEach((n, i) => {
-      this.triggerVoice({
-        freq: n,
-        useWarmPulse: true,
-        wave: 'triangle',
-        duration: 0.09,
-        gain: 0.11,
-        delay: i * 0.055,
-      });
+    // Bold 2-step minor encounter alert
+    this.triggerVoice({
+      freq: B4,
+      wave: 'pulse25',
+      duration: 0.11,
+      attack: 0.004,
+      decay: 0.03,
+      sustain: 0.55,
+      gain: 0.09,
+      delay: 0,
+    });
+    this.triggerVoice({
+      freq: E5,
+      wave: 'pulse25',
+      duration: 0.20,
+      attack: 0.004,
+      decay: 0.04,
+      sustain: 0.55,
+      gain: 0.09,
+      delay: 0.12,
     });
   }
 
   playPhysicalImpact(power = 45) {
     const boost = Math.min(1.25, Math.max(0.85, power / 50));
-    // Tactile downward pitch thud (110Hz -> 20Hz) + low-passed noise burst
+    // Heavy, punchy low-frequency thud with instant noise transient, zero high-pitched ringing
     this.triggerVoice({
-      freq: 110,
-      endFreq: 20,
-      wave: 'triangle',
-      duration: 0.16,
-      attack: 0.004,
-      decay: 0.06,
-      sustain: 0.2,
+      freq: 128,
+      endFreq: 26,
+      wave: 'sine',
+      duration: 0.14,
+      attack: 0.002,
+      decay: 0.045,
+      sustain: 0.22,
       gain: 0.24 * boost,
     });
     this.triggerVoice({
-      freq: 92,
-      endFreq: 20,
-      wave: 'sine',
-      duration: 0.14,
-      attack: 0.004,
-      sustain: 0.25,
-      gain: 0.18 * boost,
+      freq: 96,
+      endFreq: 22,
+      wave: 'triangle',
+      duration: 0.13,
+      attack: 0.002,
+      decay: 0.045,
+      sustain: 0.18,
+      gain: 0.19 * boost,
     });
     this.playNoise({
-      duration: 0.13,
+      duration: 0.095,
       gain: 0.22 * boost,
       filterType: 'lowpass',
-      startFreq: 780,
-      endFreq: 130,
-      q: 0.9,
+      startFreq: 620,
+      endFreq: 95,
+      q: 0.65,
+      attack: 0.002,
     });
   }
 
   playTackle() {
     this.playPhysicalImpact(42);
+  }
+
+  playFaint() {
+    // Low-frequency descending pitch drop
+    this.triggerVoice({
+      freq: 220,
+      endFreq: 46,
+      wave: 'pulse25',
+      duration: 0.44,
+      attack: 0.005,
+      decay: 0.14,
+      sustain: 0.35,
+      gain: 0.11,
+    });
+    this.triggerVoice({
+      freq: 110,
+      endFreq: 28,
+      wave: 'triangle',
+      duration: 0.44,
+      attack: 0.005,
+      decay: 0.15,
+      sustain: 0.38,
+      gain: 0.16,
+    });
+    this.playNoise({
+      duration: 0.18,
+      gain: 0.11,
+      filterType: 'lowpass',
+      startFreq: 340,
+      endFreq: 65,
+      q: 0.65,
+      delay: 0.16,
+    });
   }
 
   playElemental(type, moveId = '') {
@@ -459,8 +940,8 @@ export class AudioEngine {
     switch (type) {
       case 'fire':
         this.triggerVoice({
-          freq: 250,
-          endFreq: 88,
+          freq: 240,
+          endFreq: 82,
           wave: 'triangle',
           duration: 0.24,
           gain: 0.14,
@@ -471,8 +952,8 @@ export class AudioEngine {
             gain: 0.15 - idx * 0.018,
             filterType: 'bandpass',
             startFreq: 420 + idx * 140,
-            endFreq: 1050,
-            q: 1.6,
+            endFreq: 980,
+            q: 1.4,
             delay: d,
           });
         });
@@ -483,8 +964,8 @@ export class AudioEngine {
           duration: 0.22,
           gain: 0.14,
           filterType: 'lowpass',
-          startFreq: 980,
-          endFreq: 320,
+          startFreq: 920,
+          endFreq: 300,
         });
         [
           [310, 690, 0],
@@ -506,20 +987,20 @@ export class AudioEngine {
         [523.25, 659.25, 783.99, 987.77].forEach((f, i) => {
           this.triggerVoice({
             freq: f,
-            endFreq: f * 1.12,
-            wave: 'triangle',
-            duration: 0.1,
-            gain: 0.11,
+            endFreq: f * 1.1,
+            wave: 'pulse25',
+            duration: 0.095,
+            gain: 0.09,
             delay: i * 0.048,
           });
         });
         this.playNoise({
-          duration: 0.16,
+          duration: 0.15,
           gain: 0.1,
           filterType: 'bandpass',
-          startFreq: 950,
-          endFreq: 480,
-          q: 1.4,
+          startFreq: 900,
+          endFreq: 440,
+          q: 1.2,
         });
         break;
 
@@ -527,45 +1008,45 @@ export class AudioEngine {
         this.triggerVoice({
           freq: 880,
           endFreq: 420,
-          useWarmPulse: true,
-          wave: 'triangle',
-          duration: 0.1,
-          gain: 0.1,
+          wave: 'pulse12',
+          duration: 0.095,
+          gain: 0.095,
           delay: 0,
         });
         this.triggerVoice({
           freq: 1046.5,
           endFreq: 523.25,
-          wave: 'triangle',
-          duration: 0.12,
-          gain: 0.11,
+          wave: 'pulse25',
+          duration: 0.115,
+          gain: 0.1,
           delay: 0.065,
         });
         this.playNoise({
-          duration: 0.12,
+          duration: 0.11,
           gain: 0.11,
           filterType: 'bandpass',
-          startFreq: 980,
-          endFreq: 620,
-          q: 2.0,
+          startFreq: 960,
+          endFreq: 580,
+          q: 1.6,
           delay: 0.02,
         });
         break;
 
       case 'rock':
         this.triggerVoice({
-          freq: 105,
-          endFreq: 20,
+          freq: 112,
+          endFreq: 24,
           wave: 'triangle',
-          duration: 0.2,
+          duration: 0.18,
           gain: 0.22,
         });
         this.playNoise({
-          duration: 0.2,
+          duration: 0.18,
           gain: 0.22,
           filterType: 'lowpass',
-          startFreq: 620,
-          endFreq: 110,
+          startFreq: 580,
+          endFreq: 100,
+          q: 0.7,
         });
         break;
 
@@ -595,8 +1076,8 @@ export class AudioEngine {
           gain: 0.16,
           filterType: 'bandpass',
           startFreq: 380,
-          endFreq: 980,
-          q: 1.8,
+          endFreq: 940,
+          q: 1.5,
         });
         this.triggerVoice({
           freq: 493.88,
@@ -655,16 +1136,15 @@ export class AudioEngine {
 
   playPokeballBounce(bounceIdx = 0) {
     const scale = Math.pow(0.68, Math.max(0, bounceIdx));
-    // Soft metallic click + tactile shell bounce
     this.triggerVoice({
-      freq: 960,
-      endFreq: 410,
+      freq: 820,
+      endFreq: 360,
       wave: 'triangle',
       duration: 0.055,
       attack: 0.003,
       decay: 0.02,
       sustain: 0.2,
-      gain: 0.11 * scale,
+      gain: 0.105 * scale,
     });
     this.triggerVoice({
       freq: 165,
@@ -677,10 +1157,10 @@ export class AudioEngine {
     this.playNoise({
       duration: 0.04,
       gain: 0.08 * scale,
-      filterType: 'bandpass',
-      startFreq: 1050,
-      endFreq: 680,
-      q: 2.2,
+      filterType: 'lowpass',
+      startFreq: 860,
+      endFreq: 340,
+      q: 0.8,
     });
   }
 
@@ -710,10 +1190,10 @@ export class AudioEngine {
     this.playNoise({
       duration: 0.14,
       gain: 0.16,
-      filterType: 'bandpass',
-      startFreq: 980,
-      endFreq: 420,
-      q: 1.2,
+      filterType: 'lowpass',
+      startFreq: 860,
+      endFreq: 280,
+      q: 0.9,
     });
     this.triggerVoice({
       freq: 460,
@@ -725,15 +1205,13 @@ export class AudioEngine {
   }
 
   playCaptureSuccess() {
-    // Authentic 3-tone rising major chord lock (C5 -> E5 -> G5 -> locked C major triad)
     const lockTones = [523.25, 659.25, 783.99];
     lockTones.forEach((freq, i) => {
       this.triggerVoice({
         freq,
-        wave: 'triangle',
-        useWarmPulse: true,
+        wave: 'pulse25',
         duration: 0.14,
-        gain: 0.1,
+        gain: 0.095,
         delay: i * 0.11,
       });
     });
@@ -742,8 +1220,7 @@ export class AudioEngine {
     [261.63, 523.25, 659.25, 783.99, 1046.5].forEach((freq, i) => {
       this.triggerVoice({
         freq,
-        wave: i === 0 ? 'triangle' : 'sine',
-        useWarmPulse: i === 4,
+        wave: i === 4 ? 'pulse25' : i === 0 ? 'triangle' : 'sine',
         duration: 0.48,
         attack: 0.015,
         decay: 0.1,
@@ -755,7 +1232,6 @@ export class AudioEngine {
   }
 
   playLevelUp() {
-    // Harmonized multi-voice major arpeggio (C-E-G-C)
     const lead = [523.25, 659.25, 783.99, 1046.5];
     const harmony = [329.63, 392.0, 523.25, 659.25];
     lead.forEach((freq, i) => {
@@ -764,10 +1240,9 @@ export class AudioEngine {
       const dur = isLast ? 0.38 : 0.12;
       this.triggerVoice({
         freq,
-        useWarmPulse: true,
-        wave: 'triangle',
+        wave: 'pulse25',
         duration: dur,
-        gain: 0.1,
+        gain: 0.095,
         delay,
       });
       this.triggerVoice({
@@ -816,10 +1291,9 @@ export class AudioEngine {
       const dur = isLast ? 0.46 : 0.13;
       this.triggerVoice({
         freq,
-        useWarmPulse: true,
-        wave: 'triangle',
+        wave: 'pulse25',
         duration: dur,
-        gain: 0.105,
+        gain: 0.1,
         delay,
       });
       this.triggerVoice({

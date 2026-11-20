@@ -6,9 +6,18 @@ import {
   getTypeEffectiveness,
 } from './pokemon.js';
 
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
+export const BATTLE_STATES = {
+  INACTIVE: 'INACTIVE',
+  INTRO: 'INTRO',
+  PLAYER_INPUT: 'PLAYER_INPUT',
+  ACTION_ANIMATING: 'ACTION_ANIMATING',
+  OPPONENT_AI: 'OPPONENT_AI',
+  OPPONENT_ANIMATING: 'OPPONENT_ANIMATING',
+  CHECK_FAINT: 'CHECK_FAINT',
+  RETURN_TO_INPUT: 'RETURN_TO_INPUT',
+  FORCED_SWITCH: 'FORCED_SWITCH',
+  BATTLE_END: 'BATTLE_END',
+};
 
 function lerpChannel(a, b, t) {
   return Math.round(a + (b - a) * t);
@@ -26,7 +35,7 @@ const HP_COLOR_AMBER_B = [251, 191, 36];
 const HP_COLOR_CRIMSON_A = [220, 38, 38];
 const HP_COLOR_CRIMSON_B = [251, 113, 133];
 
-const ACTION_COOLDOWN_MS = 220;
+const ACTION_COOLDOWN_MS = 180;
 const PHYSICAL_MOVE_IDS = new Set(['tackle', 'quick_attack', 'spark_dash', 'gust', 'rock_throw']);
 
 export class BattleEngine {
@@ -71,9 +80,11 @@ export class BattleEngine {
 
     this.active = false;
     this.busy = false;
-    this.state = 'INACTIVE';
+    this.state = BATTLE_STATES.INACTIVE;
     this.sessionId = 0;
+    this.turnToken = 0;
     this.lastActionAt = 0;
+    this.selectedMoveIndex = 0;
 
     this.enemy = null;
     this.player = null;
@@ -86,42 +97,74 @@ export class BattleEngine {
     this.popups = [];
     this.pokeballAnim = null;
     this.captureBeam = null;
+
+    // Single-instance tracked loop and timer handles
     this.fxRaf = null;
+    this.fxLoopCount = 0;
     this.lastFxTime = 0;
+    this.hpRafs = { enemy: null, player: null };
+    this.hpResolvers = { enemy: null, player: null };
+    this.ballRafId = null;
+    this.ballResolver = null;
+    this.pendingTimers = new Map();
 
     this.shakeTimer = 0;
     this.shakeDuration = 0;
     this.shakeIntensity = 0;
 
     this.typingTimer = null;
+    this.typingHoldTimer = null;
     this.typingResolve = null;
     this.typingFullText = '';
 
     this.displayedEnemyHp = 0;
     this.displayedPlayerHp = 0;
     this.mustSwitchForced = false;
+    this.resizeObserver = null;
+    this._uiAbort = new AbortController();
 
     this.bindUI();
   }
 
   bindUI() {
-    this.logEl?.addEventListener('click', () => this.finishTypewriter());
-    this.btnBall?.addEventListener('click', () => this.handleThrowBall(false));
-    this.btnGreat?.addEventListener('click', () => this.handleThrowBall(true));
-    this.btnPotion?.addEventListener('click', () => this.handleUsePotion());
-    this.btnTeam?.addEventListener('click', () => this.openTeamDrawer(false));
-    this.btnRun?.addEventListener('click', () => this.handleRun());
+    const signal = this._uiAbort.signal;
+    this.logEl?.addEventListener('click', () => this.finishTypewriter(), { signal });
+    this.btnBall?.addEventListener('click', () => this.handleThrowBall(false), { signal });
+    this.btnGreat?.addEventListener('click', () => this.handleThrowBall(true), { signal });
+    this.btnPotion?.addEventListener('click', () => this.handleUsePotion(), { signal });
+    this.btnTeam?.addEventListener('click', () => this.openTeamDrawer(false), { signal });
+    this.btnRun?.addEventListener('click', () => this.handleRun(), { signal });
+
+    const actionButtons = [this.btnBall, this.btnGreat, this.btnPotion, this.btnTeam, this.btnRun];
+    for (const btn of actionButtons) {
+      if (!btn) continue;
+      const playHoverCue = () => {
+        if (!btn.disabled && this.canAcceptPlayerAction()) {
+          this.audio?.playCursorMove?.();
+        }
+      };
+      btn.addEventListener('pointerenter', playHoverCue, { signal });
+      btn.addEventListener('focus', playHoverCue, { signal });
+    }
+
     this.teamCloseBtn?.addEventListener('click', () => {
       if (!this.mustSwitchForced) {
         this.audio?.playMenuBlip?.(480);
         this.closeTeamDrawer();
       }
-    });
+    }, { signal });
 
     if (typeof ResizeObserver !== 'undefined' && this.stageEl) {
-      const ro = new ResizeObserver(() => this.syncCanvasSize());
-      ro.observe(this.stageEl);
+      this.resizeObserver = new ResizeObserver(() => this.syncCanvasSize());
+      this.resizeObserver.observe(this.stageEl);
     }
+  }
+
+  destroy() {
+    this.stop();
+    this._uiAbort.abort();
+    this.resizeObserver?.disconnect();
+    this.resizeObserver = null;
   }
 
   syncCanvasSize() {
@@ -136,31 +179,142 @@ export class BattleEngine {
     }
   }
 
+  clearAllTimersAndLoops() {
+    if (this.fxRaf !== null) {
+      cancelAnimationFrame(this.fxRaf);
+      this.fxRaf = null;
+    }
+
+    for (const side of ['enemy', 'player']) {
+      if (this.hpRafs[side] !== null) {
+        cancelAnimationFrame(this.hpRafs[side]);
+        this.hpRafs[side] = null;
+      }
+      if (this.hpResolvers[side]) {
+        const res = this.hpResolvers[side];
+        this.hpResolvers[side] = null;
+        res();
+      }
+    }
+
+    if (this.ballRafId !== null) {
+      cancelAnimationFrame(this.ballRafId);
+      this.ballRafId = null;
+    }
+    if (this.ballResolver) {
+      const res = this.ballResolver;
+      this.ballResolver = null;
+      res();
+    }
+
+    for (const [timerId, resolve] of this.pendingTimers.entries()) {
+      clearTimeout(timerId);
+      this.pendingTimers.delete(timerId);
+      resolve();
+    }
+
+    this.finishTypewriter();
+  }
+
+  wait(ms, sid = this.sessionId) {
+    if (!this.isSessionValid(sid) || ms <= 0) {
+      return Promise.resolve();
+    }
+    return new Promise((resolve) => {
+      let settled = false;
+      const done = () => {
+        if (settled) return;
+        settled = true;
+        resolve();
+      };
+      const timerId = setTimeout(() => {
+        this.pendingTimers.delete(timerId);
+        done();
+      }, ms);
+      this.pendingTimers.set(timerId, done);
+    });
+  }
+
   canAcceptPlayerAction() {
-    if (!this.active || this.busy || this.state !== 'PLAYER_INPUT') return false;
+    if (!this.active || this.busy || this.state !== BATTLE_STATES.PLAYER_INPUT) return false;
     if (this.teamDrawerEl && !this.teamDrawerEl.hidden) return false;
     const now = performance.now();
     if (now - this.lastActionAt < ACTION_COOLDOWN_MS) return false;
     return true;
   }
 
-  markActionLocked(nextState = 'EXECUTING_TURN') {
+  lockPlayerAction(nextState = BATTLE_STATES.ACTION_ANIMATING) {
+    this.turnToken += 1;
     this.lastActionAt = performance.now();
     this.busy = true;
     this.state = nextState;
+    this.screenEl?.classList.add('is-action-locked');
     this.setControlsDisabled(true);
+    return this.turnToken;
+  }
+
+  markActionLocked(nextState = BATTLE_STATES.ACTION_ANIMATING) {
+    return this.lockPlayerAction(nextState);
   }
 
   unlockPlayerInput() {
     if (!this.active) return;
     this.busy = false;
-    this.state = 'PLAYER_INPUT';
+    this.state = BATTLE_STATES.PLAYER_INPUT;
+    this.screenEl?.classList.remove('is-action-locked');
     this.setControlsDisabled(false);
-    this.renderActionButtons();
+    this.syncMoveSelectionVisuals();
+  }
+
+  setIdlePrompt(text) {
+    this.finishTypewriter();
+    this.typingFullText = text;
+    if (this.logEl) {
+      this.logEl.classList.remove('is-typing', 'is-waiting');
+      this.logEl.textContent = text;
+    }
+  }
+
+  returnToPlayerInput(sid = this.sessionId) {
+    if (!this.isSessionValid(sid) || !this.player || !this.enemy) return;
+    if (this.player.isFainted || this.enemy.isFainted) return;
+
+    this.state = BATTLE_STATES.RETURN_TO_INPUT;
+    this.finishTypewriter();
+
+    if (this.enemySpriteEl) {
+      this.enemySpriteEl.className = 'fighter-sprite fighter-sprite-enemy is-idle';
+    }
+    if (this.playerSpriteEl) {
+      this.playerSpriteEl.className = 'fighter-sprite fighter-sprite-player is-idle';
+    }
+
+    this.renderStatusCards();
+    this.renderMoveButtons();
+    this.setIdlePrompt(`What will ${this.player.name} do?`);
+    this.unlockPlayerInput();
   }
 
   isSessionValid(sid) {
     return this.active && sid === this.sessionId;
+  }
+
+  getDiagnostics() {
+    return {
+      active: this.active,
+      busy: this.busy,
+      state: this.state,
+      sessionId: this.sessionId,
+      turnToken: this.turnToken,
+      fxRafActive: this.fxRaf !== null,
+      fxLoopCount: this.fxLoopCount,
+      pendingTimers: this.pendingTimers.size,
+      activeHpRafs: Number(this.hpRafs.enemy !== null) + Number(this.hpRafs.player !== null),
+      ballRafActive: this.ballRafId !== null,
+      particleCount: this.particles.length,
+      popupCount: this.popups.length,
+      actionLockedClass: Boolean(this.screenEl?.classList.contains('is-action-locked')),
+    };
   }
 
   async start({ enemy, biomeId = 'forest', isShrine = false, shrineData = null }) {
@@ -176,6 +330,9 @@ export class BattleEngine {
       return;
     }
 
+    // Clear any leftover timers/RAFs before establishing new session
+    this.clearAllTimersAndLoops();
+
     const firstHealthy = profile.team.findIndex((m) => !m.isFainted);
     this.playerIndex = firstHealthy >= 0 ? firstHealthy : 0;
     this.player = profile.team[this.playerIndex];
@@ -184,6 +341,9 @@ export class BattleEngine {
     }
 
     const sid = ++this.sessionId;
+    this.turnToken = 0;
+    this.lastActionAt = 0;
+    this.selectedMoveIndex = 0;
     this.enemy = enemy;
     this.biomeId = isShrine ? 'shrine' : biomeId;
     this.isShrine = isShrine;
@@ -191,7 +351,7 @@ export class BattleEngine {
 
     this.active = true;
     this.busy = true;
-    this.state = 'INTRO';
+    this.state = BATTLE_STATES.INTRO;
     this.mustSwitchForced = false;
     this.particles = [];
     this.popups = [];
@@ -202,13 +362,22 @@ export class BattleEngine {
 
     this.storage.recordSeen(enemy.speciesId);
 
-    this.screenEl.hidden = false;
-    this.stageEl.dataset.biome = this.biomeId;
+    if (this.screenEl) {
+      this.screenEl.hidden = false;
+      this.screenEl.classList.add('is-action-locked');
+    }
+    if (this.stageEl) {
+      this.stageEl.dataset.biome = this.biomeId;
+    }
     this.syncCanvasSize();
     this.startFxLoop();
 
-    this.enemySpriteEl.className = 'fighter-sprite fighter-sprite-enemy is-idle';
-    this.playerSpriteEl.className = 'fighter-sprite fighter-sprite-player is-idle';
+    if (this.enemySpriteEl) {
+      this.enemySpriteEl.className = 'fighter-sprite fighter-sprite-enemy is-idle';
+    }
+    if (this.playerSpriteEl) {
+      this.playerSpriteEl.className = 'fighter-sprite fighter-sprite-player is-idle';
+    }
     this.displayedEnemyHp = enemy.hp;
     this.displayedPlayerHp = this.player.hp;
 
@@ -230,27 +399,30 @@ export class BattleEngine {
     await this.say(introMsg);
 
     if (!this.isSessionValid(sid)) return;
-    this.unlockPlayerInput();
+    this.returnToPlayerInput(sid);
   }
 
   stop(result = { outcome: 'escaped', faintedAll: false }) {
     this.sessionId += 1;
+    this.turnToken += 1;
     this.active = false;
     this.busy = false;
-    this.state = 'INACTIVE';
+    this.state = BATTLE_STATES.INACTIVE;
+    this.mustSwitchForced = false;
     this.pokeballAnim = null;
     this.captureBeam = null;
     this.particles = [];
     this.popups = [];
     this.shakeTimer = 0;
     if (this.stageEl) this.stageEl.style.transform = '';
+
     this.closeTeamDrawer();
-    this.finishTypewriter();
-    if (this.fxRaf) {
-      cancelAnimationFrame(this.fxRaf);
-      this.fxRaf = null;
+    this.clearAllTimersAndLoops();
+
+    if (this.screenEl) {
+      this.screenEl.classList.remove('is-action-locked');
+      this.screenEl.hidden = true;
     }
-    if (this.screenEl) this.screenEl.hidden = true;
     this.onBattleEnd?.(result);
   }
 
@@ -261,8 +433,10 @@ export class BattleEngine {
       return;
     }
     if (this.canAcceptPlayerAction()) {
-      const firstMove = this.movesEl?.querySelector('button:not(:disabled)');
-      if (firstMove) firstMove.click();
+      const selectedBtn = this.movesEl?.querySelector('.move-card.is-selected:not(:disabled)');
+      const fallbackBtn = this.movesEl?.querySelector('.move-card:not(:disabled)');
+      const target = selectedBtn || fallbackBtn;
+      if (target) target.click();
     }
   }
 
@@ -278,25 +452,35 @@ export class BattleEngine {
     const profile = this.storage.getActiveProfile();
     const caughtBefore = Boolean(profile?.pokedex?.caught?.[this.enemy.speciesId]);
 
-    this.enemyNameEl.textContent = this.enemy.name;
-    this.enemyLevelEl.textContent = `Lv.${this.enemy.level}`;
+    if (this.enemyNameEl) this.enemyNameEl.textContent = this.enemy.name;
+    if (this.enemyLevelEl) this.enemyLevelEl.textContent = `Lv.${this.enemy.level}`;
     const eType = TYPES[this.enemy.type] || TYPES.normal;
-    this.enemyTypeEl.textContent = `${eType.icon} ${eType.label}`;
-    this.enemyTypeEl.style.background = eType.bg;
-    this.enemyTypeEl.style.color = '#ffffff';
-    this.enemyDexPillEl.hidden = !caughtBefore || this.isShrine;
+    if (this.enemyTypeEl) {
+      this.enemyTypeEl.textContent = `${eType.icon} ${eType.label}`;
+      this.enemyTypeEl.style.background = eType.bg;
+      this.enemyTypeEl.style.color = '#ffffff';
+    }
+    if (this.enemyDexPillEl) {
+      this.enemyDexPillEl.hidden = !caughtBefore || this.isShrine;
+    }
     this.updateHpBarVisual(this.enemyHpFillEl, this.displayedEnemyHp, this.enemy.maxHp);
 
-    this.playerNameEl.textContent = this.player.name;
-    this.playerLevelEl.textContent = `Lv.${this.player.level}`;
+    if (this.playerNameEl) this.playerNameEl.textContent = this.player.name;
+    if (this.playerLevelEl) this.playerLevelEl.textContent = `Lv.${this.player.level}`;
     const pType = TYPES[this.player.type] || TYPES.normal;
-    this.playerTypeEl.textContent = `${pType.icon} ${pType.label}`;
-    this.playerTypeEl.style.background = pType.bg;
-    this.playerTypeEl.style.color = '#ffffff';
+    if (this.playerTypeEl) {
+      this.playerTypeEl.textContent = `${pType.icon} ${pType.label}`;
+      this.playerTypeEl.style.background = pType.bg;
+      this.playerTypeEl.style.color = '#ffffff';
+    }
     this.updateHpBarVisual(this.playerHpFillEl, this.displayedPlayerHp, this.player.maxHp);
-    this.playerHpTextEl.textContent = `HP ${Math.round(this.displayedPlayerHp)}/${this.player.maxHp}`;
-    const xpPct = Math.min(100, Math.round((this.player.xp / Math.max(1, this.player.xpToNext)) * 100));
-    this.playerXpFillEl.style.width = `${xpPct}%`;
+    if (this.playerHpTextEl) {
+      this.playerHpTextEl.textContent = `HP ${Math.round(this.displayedPlayerHp)}/${this.player.maxHp}`;
+    }
+    if (this.playerXpFillEl) {
+      const xpPct = Math.min(100, Math.round((this.player.xp / Math.max(1, this.player.xpToNext)) * 100));
+      this.playerXpFillEl.style.width = `${xpPct}%`;
+    }
   }
 
   updateHpBarVisual(el, hp, maxHp) {
@@ -316,12 +500,10 @@ export class BattleEngine {
     let startCol;
     let endCol;
     if (pct > 50) {
-      // Pure vibrant Emerald above 50%, subtly warming as it nears 50%
       const blend = Math.max(0, Math.min(1, (65 - pct) / 15));
       startCol = lerpHex(HP_COLOR_EMERALD_A, HP_COLOR_AMBER_A, blend * 0.25);
       endCol = lerpHex(HP_COLOR_EMERALD_B, HP_COLOR_AMBER_B, blend * 0.25);
     } else if (pct > 20) {
-      // Morph smoothly between Emerald/Amber (50%) and Amber/Crimson (20%)
       const t = (50 - pct) / 30;
       startCol = lerpHex(HP_COLOR_AMBER_A, HP_COLOR_CRIMSON_A, Math.max(0, (t - 0.55) / 0.45) * 0.35);
       endCol = lerpHex(HP_COLOR_AMBER_B, HP_COLOR_CRIMSON_B, Math.max(0, (t - 0.55) / 0.45) * 0.35);
@@ -333,19 +515,43 @@ export class BattleEngine {
     el.style.background = `linear-gradient(90deg, ${startCol}, ${endCol})`;
   }
 
-  async animateHpTo(side, targetHp, duration = 480) {
+  async animateHpTo(side, targetHp, duration = 460) {
     const sid = this.sessionId;
+    if (!this.isSessionValid(sid)) return;
+
+    if (this.hpRafs[side] !== null) {
+      cancelAnimationFrame(this.hpRafs[side]);
+      this.hpRafs[side] = null;
+    }
+    if (this.hpResolvers[side]) {
+      const prevResolve = this.hpResolvers[side];
+      this.hpResolvers[side] = null;
+      prevResolve();
+    }
+
     const startHp = side === 'enemy' ? this.displayedEnemyHp : this.displayedPlayerHp;
     const maxHp = side === 'enemy' ? this.enemy.maxHp : this.player.maxHp;
     const startTime = performance.now();
 
     return new Promise((resolve) => {
+      let settled = false;
+      const done = () => {
+        if (settled) return;
+        settled = true;
+        this.hpRafs[side] = null;
+        if (this.hpResolvers[side] === done) {
+          this.hpResolvers[side] = null;
+        }
+        resolve();
+      };
+      this.hpResolvers[side] = done;
+
       const tick = (now) => {
         if (!this.isSessionValid(sid)) {
-          resolve();
+          done();
           return;
         }
-        const t = Math.min(1, (now - startTime) / duration);
+        const t = Math.min(1, (now - startTime) / Math.max(1, duration));
         const eased = 1 - Math.pow(1 - t, 3);
         const current = startHp + (targetHp - startHp) * eased;
 
@@ -355,11 +561,13 @@ export class BattleEngine {
         } else {
           this.displayedPlayerHp = current;
           this.updateHpBarVisual(this.playerHpFillEl, current, maxHp);
-          this.playerHpTextEl.textContent = `HP ${Math.round(current)}/${maxHp}`;
+          if (this.playerHpTextEl) {
+            this.playerHpTextEl.textContent = `HP ${Math.round(current)}/${maxHp}`;
+          }
         }
 
         if (t < 1 && this.isSessionValid(sid)) {
-          requestAnimationFrame(tick);
+          this.hpRafs[side] = requestAnimationFrame(tick);
         } else {
           if (side === 'enemy') {
             this.displayedEnemyHp = targetHp;
@@ -367,73 +575,159 @@ export class BattleEngine {
           } else {
             this.displayedPlayerHp = targetHp;
             this.updateHpBarVisual(this.playerHpFillEl, targetHp, maxHp);
-            this.playerHpTextEl.textContent = `HP ${Math.round(targetHp)}/${maxHp}`;
+            if (this.playerHpTextEl) {
+              this.playerHpTextEl.textContent = `HP ${Math.round(targetHp)}/${maxHp}`;
+            }
             this.onHudRefresh?.();
           }
-          resolve();
+          done();
         }
       };
-      requestAnimationFrame(tick);
+
+      this.hpRafs[side] = requestAnimationFrame(tick);
     });
+  }
+
+  selectMoveCard(index, playSound = false) {
+    if (!this.movesEl) return;
+    const cards = Array.from(this.movesEl.querySelectorAll('.move-card'));
+    if (cards.length === 0) return;
+
+    const clamped = Math.max(0, Math.min(cards.length - 1, index));
+    const changed = clamped !== this.selectedMoveIndex;
+    this.selectedMoveIndex = clamped;
+    cards.forEach((card, i) => {
+      card.classList.toggle('is-selected', i === clamped);
+    });
+    if (playSound && changed && this.canAcceptPlayerAction()) {
+      this.audio?.playCursorMove?.();
+    }
+  }
+
+  syncMoveSelectionVisuals() {
+    this.selectMoveCard(this.selectedMoveIndex, false);
   }
 
   renderMoveButtons() {
     if (!this.movesEl || !this.player || !this.enemy) return;
     const moves = this.player.getMoveObjects();
+    const hasAnyPp = this.player.hasAnyMovePp();
     this.movesEl.innerHTML = '';
 
-    for (const move of moves) {
+    if (this.selectedMoveIndex >= moves.length) {
+      this.selectedMoveIndex = 0;
+    }
+
+    moves.forEach((move, idx) => {
       const typeMeta = TYPES[move.type] || TYPES.normal;
       const eff = move.category === 'heal' ? 1 : getTypeEffectiveness(move.type, this.enemy.type);
+      const pp = this.player.getMovePp(move.id);
+      const outOfPp = pp.current <= 0 && hasAnyPp;
+      const ppRatio = pp.max > 0 ? pp.current / pp.max : 0;
+      const ppStateClass = pp.current === 0 || ppRatio <= 0.25 ? 'is-critical' : ppRatio <= 0.5 ? 'is-low' : '';
+      const filledPips = pp.current <= 0 ? 0 : Math.max(1, Math.min(5, Math.round(ppRatio * 5)));
+
+      let pipsHtml = '';
+      for (let p = 0; p < 5; p++) {
+        pipsHtml += `<span class="pp-pip${p < filledPips ? ' is-filled' : ''}"></span>`;
+      }
 
       const btn = document.createElement('button');
       btn.type = 'button';
-      btn.className = 'move-btn';
-      btn.style.backgroundColor = typeMeta.bg;
-      btn.style.borderColor = typeMeta.color;
+      btn.className = `move-btn move-card move-card--${move.type}${idx === this.selectedMoveIndex ? ' is-selected' : ''}`;
+      btn.dataset.moveId = move.id;
+      btn.dataset.moveType = move.type;
+      btn.dataset.outOfPp = outOfPp ? '1' : '0';
 
-      let badgeHtml = '';
+      let effBadgeHtml = '';
       if (move.category === 'heal') {
-        badgeHtml = '<span class="move-eff-tag is-heal">♥ HEAL</span>';
+        effBadgeHtml = '<span class="move-eff-tag is-heal">♥ RECOVER</span>';
       } else if (eff > 1) {
-        badgeHtml = '<span class="move-eff-tag is-super">★ SUPER!</span>';
+        effBadgeHtml = '<span class="move-eff-tag is-super">★ 2× SUPER</span>';
       } else if (eff < 1) {
-        badgeHtml = '<span class="move-eff-tag">• RESIST</span>';
+        effBadgeHtml = '<span class="move-eff-tag is-resist">½× RESIST</span>';
       }
 
+      const catClass = move.category === 'heal' || move.damageClass === 'status'
+        ? 'status'
+        : (move.damageClass === 'physical' ? 'physical' : 'special');
+      const catLabel = catClass === 'status' ? '💚 HEAL' : catClass === 'physical' ? '💥 PHY' : '✦ SPC';
+      const powerLabel = move.category === 'heal' ? 'HEAL 38%' : `PWR ${move.power}`;
+
       btn.innerHTML = `
-        <span class="move-btn-main">
-          <span class="move-btn-name">${typeMeta.icon} ${move.name}</span>
-          <span class="move-btn-meta">${typeMeta.label} • ${move.category === 'heal' ? 'Restores HP' : `Power ${move.power}`}</span>
+        <span class="move-card-top">
+          <span class="move-name-wrap">
+            <span class="move-cursor" aria-hidden="true">▶</span>
+            <span class="move-btn-name">${typeMeta.icon} ${move.name}</span>
+          </span>
+          ${effBadgeHtml}
         </span>
-        ${badgeHtml}
+        <span class="move-card-bottom">
+          <span class="move-stats-wrap">
+            <span class="move-cat-badge is-${catClass}">${catLabel}</span>
+            <span class="move-pwr-tag">${powerLabel}</span>
+          </span>
+          <span class="move-pp-wrap ${ppStateClass}">
+            <span class="move-pp-text">PP ${pp.current}/${pp.max}</span>
+            <span class="pp-pips" aria-hidden="true">${pipsHtml}</span>
+          </span>
+        </span>
       `;
-      btn.addEventListener('click', () => this.handlePlayerMove(move));
+
+      const locked = this.busy || this.state !== BATTLE_STATES.PLAYER_INPUT;
+      btn.disabled = locked || outOfPp;
+
+      btn.addEventListener('pointerenter', () => {
+        if (!btn.disabled && this.canAcceptPlayerAction()) {
+          this.selectMoveCard(idx, true);
+        }
+      });
+      btn.addEventListener('focus', () => {
+        if (!btn.disabled && this.canAcceptPlayerAction()) {
+          this.selectMoveCard(idx, true);
+        }
+      });
+      btn.addEventListener('click', () => {
+        this.selectedMoveIndex = idx;
+        this.handlePlayerMove(move);
+      });
+
       this.movesEl.appendChild(btn);
-    }
+    });
   }
 
   renderActionButtons() {
     const profile = this.storage.getActiveProfile();
     if (!profile || !this.player) return;
 
-    const locked = this.busy || this.state !== 'PLAYER_INPUT';
-    this.btnBall.textContent = this.isShrine ? '🛡️ Guardian' : '🔴 Poké Ball ∞';
-    this.btnBall.disabled = locked;
-    this.btnGreat.textContent = `🔵 Great Ball (${profile.bag.greatBalls})`;
-    this.btnGreat.disabled = locked || this.isShrine || profile.bag.greatBalls <= 0;
-    this.btnPotion.textContent = `🍓 Potion (${profile.bag.potions})`;
-    this.btnPotion.disabled = locked || profile.bag.potions <= 0 || this.player.hp >= this.player.maxHp;
-    this.btnTeam.disabled = locked || profile.team.length <= 1;
-    this.btnRun.disabled = locked;
+    const locked = this.busy || this.state !== BATTLE_STATES.PLAYER_INPUT;
+    if (this.btnBall) {
+      this.btnBall.textContent = this.isShrine ? '🛡️ Guardian' : '🔴 Poké Ball ∞';
+      this.btnBall.disabled = locked;
+    }
+    if (this.btnGreat) {
+      this.btnGreat.textContent = `🔵 Great Ball (${profile.bag.greatBalls})`;
+      this.btnGreat.disabled = locked || this.isShrine || profile.bag.greatBalls <= 0;
+    }
+    if (this.btnPotion) {
+      this.btnPotion.textContent = `🍓 Potion (${profile.bag.potions})`;
+      this.btnPotion.disabled = locked || profile.bag.potions <= 0 || this.player.hp >= this.player.maxHp;
+    }
+    if (this.btnTeam) {
+      this.btnTeam.disabled = locked || profile.team.length <= 1;
+    }
+    if (this.btnRun) {
+      this.btnRun.disabled = locked;
+    }
   }
 
   setControlsDisabled(disabled) {
     this.movesEl?.querySelectorAll('button').forEach((btn) => {
-      btn.disabled = disabled;
+      const outOfPp = btn.dataset.outOfPp === '1';
+      btn.disabled = Boolean(disabled) || outOfPp;
     });
-    if (this.btnBall) this.btnBall.disabled = disabled;
-    if (this.btnRun) this.btnRun.disabled = disabled;
+    if (this.btnBall) this.btnBall.disabled = Boolean(disabled);
+    if (this.btnRun) this.btnRun.disabled = Boolean(disabled);
     if (disabled) {
       if (this.btnGreat) this.btnGreat.disabled = true;
       if (this.btnPotion) this.btnPotion.disabled = true;
@@ -443,40 +737,76 @@ export class BattleEngine {
     }
   }
 
-  say(text, speedMs = 17) {
+  say(text, speedMs = 18, holdMs = 380) {
     this.finishTypewriter();
-    this.typingFullText = text;
-    if (this.logEl) this.logEl.textContent = '';
+    const safeText = String(text ?? '');
+    this.typingFullText = safeText;
+
+    if (this.logEl) {
+      this.logEl.textContent = '';
+      this.logEl.classList.remove('is-waiting');
+      this.logEl.classList.add('is-typing');
+    }
 
     return new Promise((resolve) => {
       this.typingResolve = resolve;
       let idx = 0;
-      this.typingTimer = setInterval(() => {
-        if (!this.active) {
+
+      const enterWaitingPhase = () => {
+        if (this.typingTimer !== null) {
+          clearInterval(this.typingTimer);
+          this.typingTimer = null;
+        }
+        if (this.logEl) {
+          this.logEl.textContent = safeText;
+          this.logEl.classList.remove('is-typing');
+          this.logEl.classList.add('is-waiting');
+        }
+        if (holdMs <= 0) {
           this.finishTypewriter();
           return;
         }
-        idx += 1;
-        if (this.logEl) this.logEl.textContent = text.slice(0, idx);
-        if (idx >= text.length) {
-          clearInterval(this.typingTimer);
-          this.typingTimer = null;
-          setTimeout(() => {
-            if (this.typingResolve === resolve) {
-              this.typingResolve = null;
-              resolve();
+        this.typingHoldTimer = setTimeout(() => {
+          this.typingHoldTimer = null;
+          if (this.typingResolve === resolve) {
+            if (this.logEl) {
+              this.logEl.classList.remove('is-typing', 'is-waiting');
             }
-          }, 240);
+            this.typingResolve = null;
+            resolve();
+          }
+        }, holdMs);
+      };
+
+      if (speedMs <= 0 || safeText.length === 0) {
+        enterWaitingPhase();
+        return;
+      }
+
+      this.typingTimer = setInterval(() => {
+        idx += 1;
+        if (this.logEl) {
+          this.logEl.textContent = safeText.slice(0, idx);
+        }
+        if (idx >= safeText.length) {
+          enterWaitingPhase();
         }
       }, speedMs);
     });
   }
 
   finishTypewriter() {
-    if (this.typingTimer) {
+    if (this.typingTimer !== null) {
       clearInterval(this.typingTimer);
       this.typingTimer = null;
-      if (this.logEl && this.typingFullText) {
+    }
+    if (this.typingHoldTimer !== null) {
+      clearTimeout(this.typingHoldTimer);
+      this.typingHoldTimer = null;
+    }
+    if (this.logEl) {
+      this.logEl.classList.remove('is-typing', 'is-waiting');
+      if (this.typingFullText) {
         this.logEl.textContent = this.typingFullText;
       }
     }
@@ -668,7 +998,7 @@ export class BattleEngine {
           shape,
         });
       }
-      await sleep(22);
+      await this.wait(22, sessionId);
     }
   }
 
@@ -709,11 +1039,19 @@ export class BattleEngine {
   }
 
   startFxLoop() {
-    if (this.fxRaf) cancelAnimationFrame(this.fxRaf);
+    if (this.fxRaf !== null) {
+      cancelAnimationFrame(this.fxRaf);
+      this.fxRaf = null;
+    }
+    this.fxLoopCount += 1;
+    const loopSid = this.sessionId;
     this.lastFxTime = performance.now();
 
     const frame = (now) => {
-      if (!this.active) return;
+      if (!this.isSessionValid(loopSid)) {
+        this.fxRaf = null;
+        return;
+      }
       const dt = Math.min(0.05, Math.max(0.001, (now - this.lastFxTime) / 1000));
       this.lastFxTime = now;
       this.updateAndDrawFx(dt);
@@ -738,7 +1076,6 @@ export class BattleEngine {
     ctx.imageSmoothingEnabled = false;
     ctx.clearRect(0, 0, this.fxCanvas.width, this.fxCanvas.height);
 
-    // Draw capture energy beam behind Pokéball when active
     if (this.captureBeam && this.pokeballAnim) {
       const b = this.pokeballAnim;
       const t = this.captureBeam;
@@ -758,7 +1095,6 @@ export class BattleEngine {
       ctx.restore();
     }
 
-    // Update & render particles
     for (let i = this.particles.length - 1; i >= 0; i--) {
       const p = this.particles[i];
       p.life += dt;
@@ -859,12 +1195,10 @@ export class BattleEngine {
       ctx.restore();
     }
 
-    // Draw Pokéball animation if active
     if (this.pokeballAnim) {
       this.drawPokeball(ctx, this.pokeballAnim);
     }
 
-    // Floating combat text (damage numbers, SUPER EFFECTIVE!, CRITICAL HIT!)
     for (let i = this.popups.length - 1; i >= 0; i--) {
       const pop = this.popups[i];
       pop.life += dt;
@@ -901,7 +1235,6 @@ export class BattleEngine {
     ctx.rotate(ball.angle || 0);
     const r = 17;
 
-    // Ground shadow beneath ball when near pedestal
     if (ball.shadowAlpha) {
       ctx.save();
       ctx.rotate(-(ball.angle || 0));
@@ -912,13 +1245,11 @@ export class BattleEngine {
       ctx.restore();
     }
 
-    // Outer circle
     ctx.fillStyle = '#ffffff';
     ctx.beginPath();
     ctx.arc(0, 0, r, 0, Math.PI * 2);
     ctx.fill();
 
-    // Top half
     ctx.fillStyle = ball.isGreat ? '#0ea5e9' : '#ef4444';
     ctx.beginPath();
     ctx.arc(0, 0, r, Math.PI, 0);
@@ -931,13 +1262,11 @@ export class BattleEngine {
       ctx.fillRect(5, -10, 5, 4);
     }
 
-    // Specular shine
     ctx.fillStyle = 'rgba(255, 255, 255, 0.45)';
     ctx.beginPath();
     ctx.ellipse(-6, -7, 4.5, 2.5, -0.5, 0, Math.PI * 2);
     ctx.fill();
 
-    // Center band & outline
     ctx.lineWidth = 3;
     ctx.strokeStyle = '#0f172a';
     ctx.beginPath();
@@ -964,16 +1293,16 @@ export class BattleEngine {
       ? (isQuick ? 'quick-lunge-right' : 'lunge-right')
       : (isQuick ? 'quick-lunge-left' : 'lunge-left');
 
-    atkSprite.classList.remove('is-idle');
-    atkSprite.classList.add(lungeClass);
+    atkSprite?.classList.remove('is-idle');
+    atkSprite?.classList.add(lungeClass);
 
     if (move.category === 'heal') {
       this.audio?.playElemental?.('heal', move.id);
       this.spawnImpactFX(attackerSide, 'heal', `+${result.heal} HP`, '#86efac', { fontSize: 22 });
-      await sleep(320);
+      await this.wait(320, sessionId);
       if (!this.isSessionValid(sessionId)) return;
-      atkSprite.classList.remove(lungeClass);
-      atkSprite.classList.add('is-idle');
+      atkSprite?.classList.remove(lungeClass);
+      atkSprite?.classList.add('is-idle');
       return;
     }
 
@@ -984,7 +1313,7 @@ export class BattleEngine {
       } else {
         this.audio?.playElemental?.(move.type, move.id);
       }
-      await sleep(150);
+      await this.wait(150, sessionId);
     } else {
       this.audio?.playElemental?.(move.type, move.id);
       await this.animateElementalStream(attackerSide, defenderSide, move, sessionId);
@@ -995,8 +1324,8 @@ export class BattleEngine {
     if (result.missed) {
       this.spawnImpactFX(defenderSide, 'normal', 'MISSED!', '#cbd5e1', { count: 8, fontSize: 20 });
     } else {
-      defSprite.classList.remove('is-idle');
-      defSprite.classList.add('hit-shake');
+      defSprite?.classList.remove('is-idle');
+      defSprite?.classList.add('hit-shake');
 
       const maxHp = Math.max(1, defender?.maxHp || 30);
       const dmgIntensity = (result.damage / maxHp) * 18 + (result.isCrit ? 4 : 0) + (result.effectiveness > 1 ? 3 : 0);
@@ -1024,48 +1353,96 @@ export class BattleEngine {
       }
     }
 
-    await sleep(360);
+    await this.wait(360, sessionId);
     if (!this.isSessionValid(sessionId)) return;
-    atkSprite.classList.remove(lungeClass);
-    atkSprite.classList.add('is-idle');
-    defSprite.classList.remove('hit-shake');
-    defSprite.classList.add('is-idle');
+    atkSprite?.classList.remove(lungeClass);
+    atkSprite?.classList.add('is-idle');
+    defSprite?.classList.remove('hit-shake');
+    defSprite?.classList.add('is-idle');
+  }
+
+  chooseEnemyMove() {
+    if (!this.enemy || this.enemy.isFainted || !this.player || this.player.isFainted) {
+      return null;
+    }
+    const moves = this.enemy.getMoveObjects();
+    if (moves.length === 0) return null;
+    let chosen = moves[Math.floor(Math.random() * moves.length)];
+    if (chosen.category === 'heal' && this.enemy.hp > this.enemy.maxHp * 0.6) {
+      const attacks = moves.filter((m) => m.category === 'attack');
+      if (attacks.length > 0) {
+        chosen = attacks[Math.floor(Math.random() * attacks.length)];
+      }
+    }
+    return chosen;
   }
 
   async handlePlayerMove(move) {
     if (!this.canAcceptPlayerAction()) return;
     if (!this.player || this.player.isFainted || !this.enemy || this.enemy.isFainted) return;
 
+    const ppInfo = this.player.getMovePp(move.id);
+    if (ppInfo.current <= 0 && this.player.hasAnyMovePp()) {
+      this.audio?.playMenuBlip?.(300);
+      return;
+    }
+
     const sid = this.sessionId;
-    this.markActionLocked('EXECUTING_TURN');
-    this.audio?.playMenuBlip?.(680);
+    const token = this.lockPlayerAction(BATTLE_STATES.ACTION_ANIMATING);
+    this.audio?.playMoveSelect?.();
+
+    if (ppInfo.current > 0) {
+      this.player.consumeMovePp(move.id);
+      this.storage.save();
+      this.renderMoveButtons();
+      this.setControlsDisabled(true);
+    }
 
     try {
       const playerFaster = this.player.spd >= this.enemy.spd;
 
       if (playerFaster) {
-        const ended = await this.executeTurn('player', move, sid);
-        if (ended || !this.isSessionValid(sid)) return;
-        const enemyEnded = await this.executeEnemyTurn(sid);
-        if (enemyEnded || !this.isSessionValid(sid)) return;
+        this.state = BATTLE_STATES.ACTION_ANIMATING;
+        const playerEnded = await this.executeMoveAction('player', move, sid);
+        if (playerEnded || !this.isSessionValid(sid) || this.turnToken !== token) return;
+
+        this.state = BATTLE_STATES.OPPONENT_AI;
+        const enemyMove = this.chooseEnemyMove();
+        if (enemyMove) {
+          this.state = BATTLE_STATES.OPPONENT_ANIMATING;
+          const enemyEnded = await this.executeMoveAction('enemy', enemyMove, sid);
+          if (enemyEnded || !this.isSessionValid(sid) || this.turnToken !== token) return;
+        }
       } else {
-        const enemyEnded = await this.executeEnemyTurn(sid);
-        if (enemyEnded || !this.isSessionValid(sid)) return;
-        const ended = await this.executeTurn('player', move, sid);
-        if (ended || !this.isSessionValid(sid)) return;
+        this.state = BATTLE_STATES.OPPONENT_AI;
+        const enemyMove = this.chooseEnemyMove();
+        if (enemyMove) {
+          this.state = BATTLE_STATES.OPPONENT_ANIMATING;
+          const enemyEnded = await this.executeMoveAction('enemy', enemyMove, sid);
+          if (enemyEnded || !this.isSessionValid(sid) || this.turnToken !== token) return;
+        }
+
+        this.state = BATTLE_STATES.ACTION_ANIMATING;
+        const playerEnded = await this.executeMoveAction('player', move, sid);
+        if (playerEnded || !this.isSessionValid(sid) || this.turnToken !== token) return;
       }
 
-      if (!this.isSessionValid(sid)) return;
-      this.unlockPlayerInput();
-      await this.say(`What will ${this.player.name} do?`);
-    } finally {
-      if (this.isSessionValid(sid) && this.state === 'EXECUTING_TURN') {
-        this.unlockPlayerInput();
+      if (!this.isSessionValid(sid) || this.turnToken !== token) return;
+      this.returnToPlayerInput(sid);
+    } catch (err) {
+      console.error('Turn execution error:', err);
+      if (
+        this.isSessionValid(sid) &&
+        this.turnToken === token &&
+        this.state !== BATTLE_STATES.FORCED_SWITCH &&
+        this.state !== BATTLE_STATES.BATTLE_END
+      ) {
+        this.returnToPlayerInput(sid);
       }
     }
   }
 
-  async executeTurn(side, move, sid = this.sessionId) {
+  async executeMoveAction(side, move, sid = this.sessionId) {
     if (!this.isSessionValid(sid)) return true;
     const isPlayer = side === 'player';
     const attacker = isPlayer ? this.player : this.enemy;
@@ -1089,11 +1466,13 @@ export class BattleEngine {
       await this.animateHpTo(side, attacker.hp);
       if (!this.isSessionValid(sid)) return true;
       await this.say(`${attacker.name} restored ${gained} HP!`);
+      this.state = BATTLE_STATES.CHECK_FAINT;
       return false;
     }
 
     if (result.missed) {
       await this.say(`${attacker.name}'s attack missed!`);
+      this.state = BATTLE_STATES.CHECK_FAINT;
       return false;
     }
 
@@ -1113,9 +1492,10 @@ export class BattleEngine {
 
     if (!this.isSessionValid(sid)) return true;
 
+    this.state = BATTLE_STATES.CHECK_FAINT;
     if (defender.isFainted) {
-      this.state = 'RESOLVING';
       if (defSide === 'enemy') {
+        this.state = BATTLE_STATES.BATTLE_END;
         await this.handleEnemyDefeated(sid);
       } else {
         await this.handlePlayerFainted(sid);
@@ -1125,20 +1505,19 @@ export class BattleEngine {
     return false;
   }
 
+  async executeTurn(side, move, sid = this.sessionId) {
+    return this.executeMoveAction(side, move, sid);
+  }
+
   async executeEnemyTurn(sid = this.sessionId) {
     if (!this.isSessionValid(sid) || !this.enemy || this.enemy.isFainted || !this.player || this.player.isFainted) {
       return true;
     }
-    const moves = this.enemy.getMoveObjects();
-    if (moves.length === 0) return false;
-    let chosen = moves[Math.floor(Math.random() * moves.length)];
-    if (chosen.category === 'heal' && this.enemy.hp > this.enemy.maxHp * 0.6) {
-      const attacks = moves.filter((m) => m.category === 'attack');
-      if (attacks.length > 0) {
-        chosen = attacks[Math.floor(Math.random() * attacks.length)];
-      }
-    }
-    return this.executeTurn('enemy', chosen, sid);
+    this.state = BATTLE_STATES.OPPONENT_AI;
+    const chosen = this.chooseEnemyMove();
+    if (!chosen) return false;
+    this.state = BATTLE_STATES.OPPONENT_ANIMATING;
+    return this.executeMoveAction('enemy', chosen, sid);
   }
 
   async handleUsePotion() {
@@ -1147,22 +1526,35 @@ export class BattleEngine {
     if (!this.storage.useItem('potions')) return;
 
     const sid = this.sessionId;
-    this.markActionLocked('EXECUTING_TURN');
+    const token = this.lockPlayerAction(BATTLE_STATES.ACTION_ANIMATING);
     this.audio?.playHealChime?.();
 
-    const healAmount = Math.max(18, Math.round(this.player.maxHp * 0.45));
-    const gained = this.player.healAmount(healAmount);
-    this.storage.save();
-    this.spawnImpactFX('player', 'heal', `+${gained} HP`, '#86efac', { fontSize: 22 });
-    await this.animateHpTo('player', this.player.hp);
-    if (!this.isSessionValid(sid)) return;
-    await this.say(`Used a Berry Potion! ${this.player.name} recovered ${gained} HP!`);
+    try {
+      const healAmount = Math.max(18, Math.round(this.player.maxHp * 0.45));
+      const gained = this.player.healAmount(healAmount);
+      this.storage.save();
+      this.spawnImpactFX('player', 'heal', `+${gained} HP`, '#86efac', { fontSize: 22 });
+      await this.animateHpTo('player', this.player.hp);
+      if (!this.isSessionValid(sid) || this.turnToken !== token) return;
+      await this.say(`Used a Berry Potion! ${this.player.name} recovered ${gained} HP!`);
+      if (!this.isSessionValid(sid) || this.turnToken !== token) return;
 
-    const ended = await this.executeEnemyTurn(sid);
-    if (ended || !this.isSessionValid(sid)) return;
+      this.state = BATTLE_STATES.CHECK_FAINT;
+      const ended = await this.executeEnemyTurn(sid);
+      if (ended || !this.isSessionValid(sid) || this.turnToken !== token) return;
 
-    this.unlockPlayerInput();
-    await this.say(`What will ${this.player.name} do?`);
+      this.returnToPlayerInput(sid);
+    } catch (err) {
+      console.error('Potion error:', err);
+      if (
+        this.isSessionValid(sid) &&
+        this.turnToken === token &&
+        this.state !== BATTLE_STATES.FORCED_SWITCH &&
+        this.state !== BATTLE_STATES.BATTLE_END
+      ) {
+        this.returnToPlayerInput(sid);
+      }
+    }
   }
 
   async handleThrowBall(isGreat) {
@@ -1171,11 +1563,11 @@ export class BattleEngine {
 
     const sid = this.sessionId;
     if (this.isShrine) {
-      this.markActionLocked('EXECUTING_TURN');
+      const token = this.lockPlayerAction(BATTLE_STATES.ACTION_ANIMATING);
       this.audio?.playMenuBlip?.(340);
       await this.say("Shrine Guardians can't be caught! Defeat it to win the Elemental Badge!");
-      if (!this.isSessionValid(sid)) return;
-      this.unlockPlayerInput();
+      if (!this.isSessionValid(sid) || this.turnToken !== token) return;
+      this.returnToPlayerInput(sid);
       return;
     }
 
@@ -1183,164 +1575,199 @@ export class BattleEngine {
       return;
     }
 
-    this.markActionLocked('CAPTURE_SEQUENCE');
-    const ballName = isGreat ? 'Great Ball' : 'Poké Ball';
-    await this.say(`Threw a ${ballName}!`);
-    if (!this.isSessionValid(sid)) return;
+    const token = this.lockPlayerAction(BATTLE_STATES.ACTION_ANIMATING);
+    try {
+      const ballName = isGreat ? 'Great Ball' : 'Poké Ball';
+      await this.say(`Threw a ${ballName}!`);
+      if (!this.isSessionValid(sid) || this.turnToken !== token) return;
 
-    this.audio?.playPokeballThrow?.();
+      this.audio?.playPokeballThrow?.();
 
-    const start = this.getSpriteCenter('player');
-    const target = this.getSpriteCenter('enemy');
-    const pedestal = this.getPedestalPoint('enemy');
-    const hoverPos = { x: target.x, y: target.y - 38 };
-    const attempt = calculateCatchAttempt(this.enemy, isGreat ? 1.45 : 1.0);
+      const start = this.getSpriteCenter('player');
+      const target = this.getSpriteCenter('enemy');
+      const pedestal = this.getPedestalPoint('enemy');
+      const hoverPos = { x: target.x, y: target.y - 38 };
+      const attempt = calculateCatchAttempt(this.enemy, isGreat ? 1.45 : 1.0);
 
-    // Stage 1: Parabolic arcing throw
-    await this.animateBallFlight(start, hoverPos, isGreat, 430, sid);
-    if (!this.isSessionValid(sid)) return;
+      await this.animateBallFlight(start, hoverPos, isGreat, 430, sid);
+      if (!this.isSessionValid(sid) || this.turnToken !== token) return;
 
-    // Stage 2: Open red capture beam -> wild Pokémon turns into glowing red energy silhouette and gets pulled in
-    this.captureBeam = { x: target.x, y: target.y };
-    this.pokeballAnim = { x: hoverPos.x, y: hoverPos.y, angle: 0, isGreat, glow: true, scale: 1.08 };
-    this.enemySpriteEl.classList.remove('is-idle');
-    this.enemySpriteEl.classList.add('capture-energize');
-    this.audio?.playPokeballAbsorb?.();
-    await sleep(180);
-    if (!this.isSessionValid(sid)) return;
+      this.captureBeam = { x: target.x, y: target.y };
+      this.pokeballAnim = { x: hoverPos.x, y: hoverPos.y, angle: 0, isGreat, glow: true, scale: 1.08 };
+      this.enemySpriteEl?.classList.remove('is-idle');
+      this.enemySpriteEl?.classList.add('capture-energize');
+      this.audio?.playPokeballAbsorb?.();
+      await this.wait(180, sid);
+      if (!this.isSessionValid(sid) || this.turnToken !== token) return;
 
-    for (let i = 0; i < 16; i++) {
-      this.particles.push({
-        x: target.x + (Math.random() - 0.5) * 66,
-        y: target.y + (Math.random() - 0.5) * 66,
-        vx: 0,
-        vy: 0,
-        gravity: 0,
-        pullTo: hoverPos,
-        life: 0,
-        maxLife: 0.32,
-        color: i % 2 === 0 ? '#f87171' : '#fecaca',
-        size: 4 + Math.random() * 3,
-        shape: 'star',
-      });
-    }
+      for (let i = 0; i < 16; i++) {
+        this.particles.push({
+          x: target.x + (Math.random() - 0.5) * 66,
+          y: target.y + (Math.random() - 0.5) * 66,
+          vx: 0,
+          vy: 0,
+          gravity: 0,
+          pullTo: hoverPos,
+          life: 0,
+          maxLife: 0.32,
+          color: i % 2 === 0 ? '#f87171' : '#fecaca',
+          size: 4 + Math.random() * 3,
+          shape: 'star',
+        });
+      }
 
-    this.enemySpriteEl.classList.add('capture-pull');
-    await sleep(300);
-    if (!this.isSessionValid(sid)) return;
-    this.captureBeam = null;
+      this.enemySpriteEl?.classList.add('capture-pull');
+      await this.wait(300, sid);
+      if (!this.isSessionValid(sid) || this.turnToken !== token) return;
+      this.captureBeam = null;
 
-    // Stage 3: Drop ball to pedestal with damped physical bounces + sound + dust
-    await this.animateBallDropAndBounce(hoverPos.x, hoverPos.y, pedestal.y - 12, isGreat, sid);
-    if (!this.isSessionValid(sid)) return;
+      await this.animateBallDropAndBounce(hoverPos.x, hoverPos.y, pedestal.y - 12, isGreat, sid);
+      if (!this.isSessionValid(sid) || this.turnToken !== token) return;
 
-    // Stage 4: 1..3 timed wobbles with suspenseful pauses
-    const restY = pedestal.y - 12;
-    for (let i = 1; i <= attempt.shakes; i++) {
-      if (!this.isSessionValid(sid)) return;
-      this.audio?.playPokeballWobble?.(i);
-      await this.animateBallWobble(hoverPos.x, restY, isGreat, i % 2 === 1 ? -1 : 1, sid);
-      await sleep(380);
-    }
-    if (!this.isSessionValid(sid)) return;
+      const restY = pedestal.y - 12;
+      for (let i = 1; i <= attempt.shakes; i++) {
+        if (!this.isSessionValid(sid) || this.turnToken !== token) return;
+        this.audio?.playPokeballWobble?.(i);
+        await this.animateBallWobble(hoverPos.x, restY, isGreat, i % 2 === 1 ? -1 : 1, sid);
+        await this.wait(380, sid);
+      }
+      if (!this.isSessionValid(sid) || this.turnToken !== token) return;
 
-    // Stage 5: Capture Lock Starburst OR Breakout
-    if (attempt.caught) {
-      this.state = 'RESOLVING';
-      this.pokeballAnim = { x: hoverPos.x, y: restY, angle: 0, isGreat, glow: true, shadowAlpha: 0.45 };
-      this.audio?.playCaptureSuccess?.();
-      this.spawnStarBurst({ x: hoverPos.x, y: restY });
-      this.spawnFloatingText(hoverPos.x, restY - 36, 'GOTCHA!', '#fde047', 24, 0);
-      await sleep(620);
-      if (!this.isSessionValid(sid)) return;
+      if (attempt.caught) {
+        this.state = BATTLE_STATES.BATTLE_END;
+        this.pokeballAnim = { x: hoverPos.x, y: restY, angle: 0, isGreat, glow: true, shadowAlpha: 0.45 };
+        this.audio?.playCaptureSuccess?.();
+        this.spawnStarBurst({ x: hoverPos.x, y: restY });
+        this.spawnFloatingText(hoverPos.x, restY - 36, 'GOTCHA!', '#fde047', 24, 0);
+        await this.wait(620, sid);
+        if (!this.isSessionValid(sid) || this.turnToken !== token) return;
+        this.pokeballAnim = null;
+
+        this.enemy.hp = Math.max(1, this.enemy.hp);
+        const { destination, newBadges } = this.storage.recordCaught(this.enemy);
+        const winBadges = this.storage.recordBattleWin();
+        const allNewBadges = [...newBadges, ...winBadges];
+
+        await this.say(`Gotcha! ${this.enemy.name} was caught!`);
+        if (!this.isSessionValid(sid) || this.turnToken !== token) return;
+        if (destination === 'box') {
+          await this.say(`${this.enemy.name} was sent to your Reserve Box (Team of 6 is full)!`);
+        }
+
+        await this.awardVictoryXp(0.6, sid);
+        if (!this.isSessionValid(sid) || this.turnToken !== token) return;
+        this.onHudRefresh?.();
+        if (allNewBadges.length > 0) {
+          this.onBadgesUnlocked?.(allNewBadges);
+        }
+        this.stop({ outcome: 'caught', caughtSpecies: this.enemy.speciesId });
+        return;
+      }
+
+      this.audio?.playBreakout?.();
       this.pokeballAnim = null;
+      this.enemySpriteEl?.classList.remove('capture-energize', 'capture-pull', 'capture-shrink');
+      this.enemySpriteEl?.classList.add('is-idle');
+      this.spawnImpactFX('enemy', 'normal', 'Broke free!', '#fde047', { count: 16, fontSize: 19 });
+      await this.say(`Oh no! ${this.enemy.name} broke free!`);
+      if (!this.isSessionValid(sid) || this.turnToken !== token) return;
 
-      this.enemy.hp = Math.max(1, this.enemy.hp);
-      const { destination, newBadges } = this.storage.recordCaught(this.enemy);
-      const winBadges = this.storage.recordBattleWin();
-      const allNewBadges = [...newBadges, ...winBadges];
+      const ended = await this.executeEnemyTurn(sid);
+      if (ended || !this.isSessionValid(sid) || this.turnToken !== token) return;
 
-      await this.say(`Gotcha! ${this.enemy.name} was caught!`);
-      if (!this.isSessionValid(sid)) return;
-      if (destination === 'box') {
-        await this.say(`${this.enemy.name} was sent to your Reserve Box (Team of 6 is full)!`);
+      this.returnToPlayerInput(sid);
+    } catch (err) {
+      console.error('Capture sequence error:', err);
+      if (
+        this.isSessionValid(sid) &&
+        this.turnToken === token &&
+        this.state !== BATTLE_STATES.FORCED_SWITCH &&
+        this.state !== BATTLE_STATES.BATTLE_END
+      ) {
+        this.returnToPlayerInput(sid);
       }
+    }
+  }
 
-      await this.awardVictoryXp(0.6, sid);
-      if (!this.isSessionValid(sid)) return;
-      this.onHudRefresh?.();
-      if (allNewBadges.length > 0) {
-        this.onBadgesUnlocked?.(allNewBadges);
-      }
-      this.stop({ outcome: 'caught', caughtSpecies: this.enemy.speciesId });
-      return;
+  _runBallRaf(duration, sid, onStep, onDone) {
+    if (this.ballRafId !== null) {
+      cancelAnimationFrame(this.ballRafId);
+      this.ballRafId = null;
+    }
+    if (this.ballResolver) {
+      const prev = this.ballResolver;
+      this.ballResolver = null;
+      prev();
     }
 
-    // Breakout!
-    this.audio?.playBreakout?.();
-    this.pokeballAnim = null;
-    this.enemySpriteEl.classList.remove('capture-energize', 'capture-pull', 'capture-shrink');
-    this.enemySpriteEl.classList.add('is-idle');
-    this.spawnImpactFX('enemy', 'normal', 'Broke free!', '#fde047', { count: 16, fontSize: 19 });
-    await this.say(`Oh no! ${this.enemy.name} broke free!`);
-    if (!this.isSessionValid(sid)) return;
+    const startTime = performance.now();
+    return new Promise((resolve) => {
+      let settled = false;
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        this.ballRafId = null;
+        if (this.ballResolver === finish) {
+          this.ballResolver = null;
+        }
+        resolve();
+      };
+      this.ballResolver = finish;
 
-    const ended = await this.executeEnemyTurn(sid);
-    if (ended || !this.isSessionValid(sid)) return;
-
-    this.unlockPlayerInput();
-    await this.say(`What will ${this.player.name} do?`);
+      const tick = (now) => {
+        if (!this.isSessionValid(sid)) {
+          finish();
+          return;
+        }
+        const t = Math.min(1, (now - startTime) / Math.max(1, duration));
+        onStep(t);
+        if (t < 1) {
+          this.ballRafId = requestAnimationFrame(tick);
+        } else {
+          onDone?.();
+          finish();
+        }
+      };
+      this.ballRafId = requestAnimationFrame(tick);
+    });
   }
 
   animateBallFlight(start, target, isGreat, duration, sid = this.sessionId) {
-    const startTime = performance.now();
-    return new Promise((resolve) => {
-      const tick = (now) => {
-        if (!this.isSessionValid(sid)) {
-          resolve();
-          return;
-        }
-        const t = Math.min(1, (now - startTime) / duration);
-        const arcHeight = Math.sin(t * Math.PI) * 104;
-        const bx = start.x + (target.x - start.x) * t;
-        const by = start.y + (target.y - start.y) * t - arcHeight;
-        this.pokeballAnim = {
+    return this._runBallRaf(duration, sid, (t) => {
+      const arcHeight = Math.sin(t * Math.PI) * 104;
+      const bx = start.x + (target.x - start.x) * t;
+      const by = start.y + (target.y - start.y) * t - arcHeight;
+      this.pokeballAnim = {
+        x: bx,
+        y: by,
+        angle: t * Math.PI * 5,
+        isGreat,
+        glow: false,
+        scale: 1.0 - t * 0.08,
+      };
+      if (Math.random() < 0.45) {
+        this.particles.push({
           x: bx,
           y: by,
-          angle: t * Math.PI * 5,
-          isGreat,
-          glow: false,
-          scale: 1.0 - t * 0.08,
-        };
-        if (Math.random() < 0.45) {
-          this.particles.push({
-            x: bx,
-            y: by,
-            vx: (Math.random() - 0.5) * 28,
-            vy: (Math.random() - 0.5) * 28,
-            gravity: 0,
-            life: 0,
-            maxLife: 0.22,
-            color: isGreat ? '#7dd3fc' : '#fef08a',
-            size: 2.5,
-            shape: 'star',
-          });
-        }
-        if (t < 1) requestAnimationFrame(tick);
-        else resolve();
-      };
-      requestAnimationFrame(tick);
+          vx: (Math.random() - 0.5) * 28,
+          vy: (Math.random() - 0.5) * 28,
+          gravity: 0,
+          life: 0,
+          maxLife: 0.22,
+          color: isGreat ? '#7dd3fc' : '#fef08a',
+          size: 2.5,
+          shape: 'star',
+        });
+      }
     });
   }
 
   async animateBallDropAndBounce(x, fromY, groundY, isGreat, sid = this.sessionId) {
-    // Initial drop from hover down to pedestal
     await this.animateBallSegment(x, fromY, groundY, 0, isGreat, 210, sid);
     if (!this.isSessionValid(sid)) return;
     this.audio?.playPokeballBounce?.(0);
     this.spawnImpactDust({ x, y: groundY + 12 }, 7);
 
-    // Three damped physical bounces
     const bounceHeights = [30, 14, 6];
     const bounceDurations = [190, 140, 100];
     for (let b = 0; b < bounceHeights.length; b++) {
@@ -1353,65 +1780,38 @@ export class BattleEngine {
   }
 
   animateBallSegment(x, y0, y1, angle, isGreat, duration, sid) {
-    const startTime = performance.now();
-    return new Promise((resolve) => {
-      const tick = (now) => {
-        if (!this.isSessionValid(sid)) {
-          resolve();
-          return;
-        }
-        const t = Math.min(1, (now - startTime) / duration);
-        const eased = t * t;
-        this.pokeballAnim = {
-          x,
-          y: y0 + (y1 - y0) * eased,
-          angle,
-          isGreat,
-          glow: false,
-          shadowAlpha: 0.25 + eased * 0.2,
-        };
-        if (t < 1) requestAnimationFrame(tick);
-        else resolve();
+    return this._runBallRaf(duration, sid, (t) => {
+      const eased = t * t;
+      this.pokeballAnim = {
+        x,
+        y: y0 + (y1 - y0) * eased,
+        angle,
+        isGreat,
+        glow: false,
+        shadowAlpha: 0.25 + eased * 0.2,
       };
-      requestAnimationFrame(tick);
     });
   }
 
   animateBallBounceArc(x, groundY, height, isGreat, duration, sid) {
-    const startTime = performance.now();
-    return new Promise((resolve) => {
-      const tick = (now) => {
-        if (!this.isSessionValid(sid)) {
-          resolve();
-          return;
-        }
-        const t = Math.min(1, (now - startTime) / duration);
-        const arc = Math.sin(t * Math.PI) * height;
-        this.pokeballAnim = {
-          x,
-          y: groundY - arc,
-          angle: 0,
-          isGreat,
-          glow: false,
-          shadowAlpha: Math.max(0.18, 0.45 - (arc / 40) * 0.22),
-        };
-        if (t < 1) requestAnimationFrame(tick);
-        else resolve();
+    return this._runBallRaf(duration, sid, (t) => {
+      const arc = Math.sin(t * Math.PI) * height;
+      this.pokeballAnim = {
+        x,
+        y: groundY - arc,
+        angle: 0,
+        isGreat,
+        glow: false,
+        shadowAlpha: Math.max(0.18, 0.45 - (arc / 40) * 0.22),
       };
-      requestAnimationFrame(tick);
     });
   }
 
   animateBallWobble(x, y, isGreat, dir, sid = this.sessionId) {
-    const startTime = performance.now();
-    const duration = 280;
-    return new Promise((resolve) => {
-      const tick = (now) => {
-        if (!this.isSessionValid(sid)) {
-          resolve();
-          return;
-        }
-        const t = Math.min(1, (now - startTime) / duration);
+    return this._runBallRaf(
+      280,
+      sid,
+      (t) => {
         const swing = Math.sin(t * Math.PI * 2) * 0.46 * dir;
         this.pokeballAnim = {
           x: x + Math.sin(t * Math.PI * 2) * 7 * dir,
@@ -1421,20 +1821,19 @@ export class BattleEngine {
           glow: t < 0.55,
           shadowAlpha: 0.42,
         };
-        if (t < 1) requestAnimationFrame(tick);
-        else {
-          this.pokeballAnim = { x, y, angle: 0, isGreat, glow: false, shadowAlpha: 0.42 };
-          resolve();
-        }
-      };
-      requestAnimationFrame(tick);
-    });
+      },
+      () => {
+        this.pokeballAnim = { x, y, angle: 0, isGreat, glow: false, shadowAlpha: 0.42 };
+      },
+    );
   }
 
   async handleEnemyDefeated(sid = this.sessionId) {
-    this.enemySpriteEl.classList.remove('is-idle');
-    this.enemySpriteEl.classList.add('faint-drop');
-    await sleep(340);
+    this.state = BATTLE_STATES.BATTLE_END;
+    this.audio?.playFaint?.();
+    this.enemySpriteEl?.classList.remove('is-idle');
+    this.enemySpriteEl?.classList.add('faint-drop');
+    await this.wait(360, sid);
     if (!this.isSessionValid(sid)) return;
 
     await this.say(`${this.enemy.name} fainted!`);
@@ -1486,9 +1885,10 @@ export class BattleEngine {
   }
 
   async handlePlayerFainted(sid = this.sessionId) {
-    this.playerSpriteEl.classList.remove('is-idle');
-    this.playerSpriteEl.classList.add('faint-drop');
-    await sleep(340);
+    this.audio?.playFaint?.();
+    this.playerSpriteEl?.classList.remove('is-idle');
+    this.playerSpriteEl?.classList.add('faint-drop');
+    await this.wait(360, sid);
     if (!this.isSessionValid(sid)) return;
     await this.say(`${this.player.name} fainted!`);
     if (!this.isSessionValid(sid)) return;
@@ -1496,13 +1896,15 @@ export class BattleEngine {
     const profile = this.storage.getActiveProfile();
     const healthyIdx = profile?.team?.findIndex((mon) => !mon.isFainted) ?? -1;
     if (healthyIdx >= 0) {
-      this.state = 'FORCED_SWITCH';
+      this.state = BATTLE_STATES.FORCED_SWITCH;
       this.busy = false;
       this.mustSwitchForced = true;
+      this.screenEl?.classList.remove('is-action-locked');
       this.openTeamDrawer(true);
       return;
     }
 
+    this.state = BATTLE_STATES.BATTLE_END;
     await this.say('Your team needs a quick rest! Returning to Starlight Fountain...');
     if (!this.isSessionValid(sid)) return;
     this.stop({ outcome: 'fainted', faintedAll: true });
@@ -1511,10 +1913,10 @@ export class BattleEngine {
   async handleRun() {
     if (!this.canAcceptPlayerAction()) return;
     const sid = this.sessionId;
-    this.markActionLocked('RESOLVING');
+    const token = this.lockPlayerAction(BATTLE_STATES.BATTLE_END);
     this.audio?.playMenuBlip?.(520);
     await this.say(this.isShrine ? 'Stepped back safely from the Shrine!' : 'Got away safely!');
-    if (!this.isSessionValid(sid)) return;
+    if (!this.isSessionValid(sid) || this.turnToken !== token) return;
     this.stop({ outcome: 'escaped', faintedAll: false });
   }
 
@@ -1524,8 +1926,12 @@ export class BattleEngine {
     const profile = this.storage.getActiveProfile();
     if (!profile || !this.teamDrawerEl || !this.teamListEl) return;
 
+    if (!forced) {
+      this.audio?.playMenuBlip?.(640);
+    }
+
     this.mustSwitchForced = forced;
-    this.teamCloseBtn.hidden = forced;
+    if (this.teamCloseBtn) this.teamCloseBtn.hidden = forced;
     this.teamDrawerEl.hidden = false;
     this.teamListEl.innerHTML = '';
 
@@ -1560,6 +1966,7 @@ export class BattleEngine {
 
   async switchPlayerPokemon(teamIdx) {
     if (!this.active || this.busy) return;
+    if (this.state !== BATTLE_STATES.PLAYER_INPUT && this.state !== BATTLE_STATES.FORCED_SWITCH) return;
     const profile = this.storage.getActiveProfile();
     if (!profile || !profile.team[teamIdx] || profile.team[teamIdx].isFainted) return;
     if (teamIdx === this.playerIndex) return;
@@ -1568,27 +1975,43 @@ export class BattleEngine {
     const wasForced = this.mustSwitchForced;
     this.mustSwitchForced = false;
     this.closeTeamDrawer();
-    this.markActionLocked('EXECUTING_TURN');
+    const token = this.lockPlayerAction(BATTLE_STATES.ACTION_ANIMATING);
+    this.audio?.playMoveSelect?.();
 
-    this.playerIndex = teamIdx;
-    this.player = profile.team[teamIdx];
-    this.displayedPlayerHp = this.player.hp;
-    this.playerSpriteEl.className = 'fighter-sprite fighter-sprite-player is-idle';
+    try {
+      this.playerIndex = teamIdx;
+      this.player = profile.team[teamIdx];
+      this.selectedMoveIndex = 0;
+      this.displayedPlayerHp = this.player.hp;
+      if (this.playerSpriteEl) {
+        this.playerSpriteEl.className = 'fighter-sprite fighter-sprite-player is-idle';
+      }
 
-    this.renderStatusCards();
-    this.renderMoveButtons();
-    this.onHudRefresh?.();
-    await attachPokemonSprite(this.playerSpriteEl, this.player.speciesId, { back: true, timeoutMs: 1800 });
-    if (!this.isSessionValid(sid)) return;
-    await this.say(`Go, ${this.player.name}!`);
-    if (!this.isSessionValid(sid)) return;
+      this.renderStatusCards();
+      this.renderMoveButtons();
+      this.setControlsDisabled(true);
+      this.onHudRefresh?.();
+      await attachPokemonSprite(this.playerSpriteEl, this.player.speciesId, { back: true, timeoutMs: 1800 });
+      if (!this.isSessionValid(sid) || this.turnToken !== token) return;
+      await this.say(`Go, ${this.player.name}!`);
+      if (!this.isSessionValid(sid) || this.turnToken !== token) return;
 
-    if (!wasForced) {
-      const ended = await this.executeEnemyTurn(sid);
-      if (ended || !this.isSessionValid(sid)) return;
+      if (!wasForced) {
+        const ended = await this.executeEnemyTurn(sid);
+        if (ended || !this.isSessionValid(sid) || this.turnToken !== token) return;
+      }
+
+      this.returnToPlayerInput(sid);
+    } catch (err) {
+      console.error('Switch error:', err);
+      if (
+        this.isSessionValid(sid) &&
+        this.turnToken === token &&
+        this.state !== BATTLE_STATES.FORCED_SWITCH &&
+        this.state !== BATTLE_STATES.BATTLE_END
+      ) {
+        this.returnToPlayerInput(sid);
+      }
     }
-
-    this.unlockPlayerInput();
-    await this.say(`What will ${this.player.name} do?`);
   }
 }

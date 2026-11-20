@@ -8,7 +8,7 @@ function makeUid() {
 }
 
 export class Pokemon {
-  constructor({ uid = makeUid(), speciesId, level = 5, xp = 0, hp = null, caughtBiome = 'wild' }) {
+  constructor({ uid = makeUid(), speciesId, level = 5, xp = 0, hp = null, caughtBiome = 'wild', movePp = null }) {
     const species = SPECIES[speciesId];
     if (!species) {
       throw new Error(`Unknown Pokémon speciesId: ${speciesId}`);
@@ -27,6 +27,13 @@ export class Pokemon {
     this.recalculateStats();
 
     this.hp = hp === null || hp === undefined ? this.maxHp : Math.max(0, Math.min(this.maxHp, Number(hp)));
+
+    this.movePp = {};
+    for (const moveId of this.species.movePool) {
+      const maxPp = MOVES[moveId]?.pp || 20;
+      const saved = movePp && typeof movePp === 'object' ? Number(movePp[moveId]) : NaN;
+      this.movePp[moveId] = Number.isFinite(saved) ? Math.max(0, Math.min(maxPp, Math.round(saved))) : maxPp;
+    }
   }
 
   get species() {
@@ -61,6 +68,7 @@ export class Pokemon {
 
   healFull() {
     this.hp = this.maxHp;
+    this.restoreAllPp();
   }
 
   healAmount(amount) {
@@ -100,6 +108,31 @@ export class Pokemon {
     return this.species.movePool.map((moveId) => MOVES[moveId]).filter(Boolean);
   }
 
+  getMovePp(moveId) {
+    const max = MOVES[moveId]?.pp || 20;
+    const raw = this.movePp?.[moveId];
+    const current = Number.isFinite(Number(raw)) ? Math.max(0, Math.min(max, Math.round(Number(raw)))) : max;
+    return { current, max };
+  }
+
+  consumeMovePp(moveId) {
+    const { current, max } = this.getMovePp(moveId);
+    if (!this.movePp) this.movePp = {};
+    this.movePp[moveId] = Math.max(0, Math.min(max, current - 1));
+    return this.movePp[moveId];
+  }
+
+  restoreAllPp() {
+    if (!this.movePp) this.movePp = {};
+    for (const moveId of this.species.movePool) {
+      this.movePp[moveId] = MOVES[moveId]?.pp || 20;
+    }
+  }
+
+  hasAnyMovePp() {
+    return this.species.movePool.some((moveId) => this.getMovePp(moveId).current > 0);
+  }
+
   toJSON() {
     return {
       uid: this.uid,
@@ -108,6 +141,7 @@ export class Pokemon {
       xp: this.xp,
       hp: this.hp,
       caughtBiome: this.caughtBiome,
+      movePp: { ...this.movePp },
     };
   }
 
@@ -306,13 +340,17 @@ export function attachPokemonSprite(imgEl, speciesOrId, { back = false, timeoutM
       }
     }, Math.max(50, Number(timeoutMs) || 2000));
 
+    const abortStale = () => {
+      clearTimeout(timer);
+      if (!settled) {
+        settled = true;
+        resolve();
+      }
+    };
+
     const tryNext = () => {
       if (imgEl.dataset.loadToken !== token) {
-        clearTimeout(timer);
-        if (!settled) {
-          settled = true;
-          resolve();
-        }
+        abortStale();
         return;
       }
       if (index >= candidates.length - 1) {
@@ -325,23 +363,35 @@ export function attachPokemonSprite(imgEl, speciesOrId, { back = false, timeoutM
       if (typeof Image !== 'undefined') {
         const probe = new Image();
         probe.onload = () => {
-          if (imgEl.dataset.loadToken !== token) return;
+          if (imgEl.dataset.loadToken !== token) {
+            abortStale();
+            return;
+          }
           clearTimeout(timer);
           finishSuccess(nextUrl);
         };
         probe.onerror = () => {
-          if (imgEl.dataset.loadToken !== token) return;
+          if (imgEl.dataset.loadToken !== token) {
+            abortStale();
+            return;
+          }
           tryNext();
         };
         probe.src = nextUrl;
       } else {
         imgEl.onload = () => {
-          if (imgEl.dataset.loadToken !== token) return;
+          if (imgEl.dataset.loadToken !== token) {
+            abortStale();
+            return;
+          }
           clearTimeout(timer);
           finishSuccess(nextUrl);
         };
         imgEl.onerror = () => {
-          if (imgEl.dataset.loadToken !== token) return;
+          if (imgEl.dataset.loadToken !== token) {
+            abortStale();
+            return;
+          }
           tryNext();
         };
         imgEl.src = nextUrl;

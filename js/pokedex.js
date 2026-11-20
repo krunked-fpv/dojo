@@ -2,10 +2,11 @@ import { BADGES, BIOMES, MOVES, SPECIES, TYPES } from './config.js';
 import { attachPokemonSprite } from './pokemon.js';
 
 export class PokedexUI {
-  constructor({ storage, audio, onTeamChanged }) {
+  constructor({ storage, audio, onTeamChanged, onClose }) {
     this.storage = storage;
     this.audio = audio;
     this.onTeamChanged = onTeamChanged;
+    this.onClose = onClose;
 
     this.modalEl = document.getElementById('pokedex-modal');
     this.closeBtn = document.getElementById('pokedex-close-btn');
@@ -60,8 +61,15 @@ export class PokedexUI {
   }
 
   close() {
+    const wasOpen = this.isOpen();
     if (this.modalEl) {
       this.modalEl.hidden = true;
+    }
+    if (typeof document !== 'undefined' && document.activeElement instanceof HTMLElement) {
+      document.activeElement.blur();
+    }
+    if (wasOpen) {
+      this.onClose?.();
     }
   }
 

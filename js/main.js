@@ -60,13 +60,25 @@ class GameApp {
     this.dialogueOpen = false;
     this.biomeBannerTimer = null;
     this.badgeToastTimer = null;
-    this.lastFrameTime = performance.now();
+    this.resetRedirectTimer = null;
+    this.encounterTransitioning = false;
+    this.encounterTimer = null;
+    this.encounterToken = 0;
 
+    this.loopRafId = null;
+    this.loopStartCount = 0;
+    this.lastFrameTime = performance.now();
+    this.fpsSampleStart = this.lastFrameTime;
+    this.fpsFrameCount = 0;
+    this.measuredFps = 0;
+
+    this.audio = audio;
     this.input = new InputController();
     this.pokedex = new PokedexUI({
       storage,
       audio,
       onTeamChanged: () => this.refreshHud(),
+      onClose: () => this.syncOverworldPause(),
     });
 
     this.battle = new BattleEngine({
@@ -96,7 +108,30 @@ class GameApp {
     this.bindHudAndModalEvents();
     this.bindInputEvents();
     this.showBootScreen();
-    requestAnimationFrame((now) => this.loop(now));
+
+    if (this.cabinetEl) {
+      this.cabinetEl.dataset.diagnostics = JSON.stringify(this.getDiagnostics());
+    }
+
+    this.startMainLoop();
+  }
+
+  blurFocusedControl() {
+    if (typeof document !== 'undefined' && document.activeElement instanceof HTMLElement) {
+      document.activeElement.blur();
+    }
+  }
+
+  startMainLoop() {
+    if (this.loopRafId !== null) {
+      cancelAnimationFrame(this.loopRafId);
+      this.loopRafId = null;
+    }
+    this.loopStartCount += 1;
+    this.lastFrameTime = performance.now();
+    this.fpsSampleStart = this.lastFrameTime;
+    this.fpsFrameCount = 0;
+    this.loopRafId = requestAnimationFrame((now) => this.loop(now));
   }
 
   applySettings() {
@@ -165,6 +200,7 @@ class GameApp {
       const next = order[(order.indexOf(current) + 1) % order.length];
       storage.updateSettings({ showTouchPad: next });
       this.applySettings();
+      this.blurFocusedControl();
     });
 
     this.settingPadBtn?.addEventListener('click', () => {
@@ -174,6 +210,7 @@ class GameApp {
       const next = order[(order.indexOf(current) + 1) % order.length];
       storage.updateSettings({ showTouchPad: next });
       this.applySettings();
+      this.blurFocusedControl();
     });
 
     this.settingCrtBtn?.addEventListener('click', () => {
@@ -181,6 +218,7 @@ class GameApp {
       const next = !storage.getSettings().crtEnabled;
       storage.updateSettings({ crtEnabled: next });
       this.applySettings();
+      this.blurFocusedControl();
     });
 
     this.hudSettingsBtn?.addEventListener('click', () => {
@@ -217,7 +255,9 @@ class GameApp {
       const id = storage.getActiveTrainerId();
       storage.resetTrainerProgress(id);
       this.resetStatusEl.textContent = `${TRAINERS[id]?.name || 'Trainer'}'s progress was reset cleanly!`;
-      setTimeout(() => {
+      if (this.resetRedirectTimer) clearTimeout(this.resetRedirectTimer);
+      this.resetRedirectTimer = setTimeout(() => {
+        this.resetRedirectTimer = null;
         this.closeSettings();
         this.showBootScreen();
       }, 450);
@@ -226,7 +266,9 @@ class GameApp {
     this.bindHoldReset(this.resetAllBtn, this.resetAllFill, () => {
       storage.resetAllProgress();
       this.resetStatusEl.textContent = 'Both Violet and Ozias profiles were reset cleanly!';
-      setTimeout(() => {
+      if (this.resetRedirectTimer) clearTimeout(this.resetRedirectTimer);
+      this.resetRedirectTimer = setTimeout(() => {
+        this.resetRedirectTimer = null;
         this.closeSettings();
         this.showBootScreen();
       }, 450);
@@ -242,10 +284,12 @@ class GameApp {
     const HOLD_MS = 3000;
 
     const cancelHold = (showHint = false) => {
+      if (rafId !== null) {
+        cancelAnimationFrame(rafId);
+        rafId = null;
+      }
       if (!holding) return;
       holding = false;
-      if (rafId) cancelAnimationFrame(rafId);
-      rafId = null;
       fillEl.style.width = '0%';
       if (showHint && this.resetStatusEl) {
         this.resetStatusEl.textContent = 'Hold steady for 3 full seconds to confirm reset.';
@@ -253,7 +297,10 @@ class GameApp {
     };
 
     const tick = (now) => {
-      if (!holding) return;
+      if (!holding) {
+        rafId = null;
+        return;
+      }
       const elapsed = now - startTime;
       const progress = Math.min(1, elapsed / HOLD_MS);
       fillEl.style.width = `${(progress * 100).toFixed(1)}%`;
@@ -277,6 +324,10 @@ class GameApp {
 
     btnEl.addEventListener('pointerdown', (e) => {
       e.preventDefault();
+      if (rafId !== null) {
+        cancelAnimationFrame(rafId);
+        rafId = null;
+      }
       holding = true;
       startTime = performance.now();
       lastTickStep = -1;
@@ -300,7 +351,7 @@ class GameApp {
         this.battle.triggerPrimaryAction();
         return;
       }
-      if (!this.pokedex.isOpen() && !this.isSettingsOpen() && !this.gameShellEl.hidden) {
+      if (!this.pokedex.isOpen() && !this.isSettingsOpen() && !this.gameShellEl.hidden && !this.encounterTransitioning) {
         this.overworld.triggerInteract();
       }
     });
@@ -325,7 +376,7 @@ class GameApp {
     });
 
     this.input.on('pokedex', () => {
-      if (this.gameShellEl.hidden || this.battle.active || this.isSettingsOpen()) return;
+      if (this.gameShellEl.hidden || this.battle.active || this.encounterTransitioning || this.isSettingsOpen()) return;
       if (this.pokedex.isOpen()) {
         this.pokedex.close();
         this.syncOverworldPause();
@@ -340,9 +391,23 @@ class GameApp {
     storage.updateSettings({ muted: next });
     this.applySettings();
     if (!next) audio.playMenuBlip(740);
+    this.blurFocusedControl();
+  }
+
+  cancelEncounterTransition() {
+    this.encounterToken += 1;
+    this.encounterTransitioning = false;
+    if (this.encounterTimer !== null) {
+      clearTimeout(this.encounterTimer);
+      this.encounterTimer = null;
+    }
+    if (this.encounterFlashEl) {
+      this.encounterFlashEl.hidden = true;
+    }
   }
 
   showBootScreen() {
+    this.cancelEncounterTransition();
     this.overworld.setActive(false);
     this.bootScreenEl.hidden = false;
     this.starterScreenEl.hidden = true;
@@ -470,7 +535,16 @@ class GameApp {
   }
 
   syncOverworldPause() {
-    const paused = this.dialogueOpen || this.battle.active || this.pokedex.isOpen() || this.isSettingsOpen();
+    if (this.worldDialogueEl && this.worldDialogueEl.hidden && this.dialogueOpen) {
+      this.dialogueOpen = false;
+    }
+    const paused = (
+      this.dialogueOpen ||
+      this.encounterTransitioning ||
+      this.battle.active ||
+      this.pokedex.isOpen() ||
+      this.isSettingsOpen()
+    );
     this.overworld.setPaused(paused);
   }
 
@@ -489,6 +563,7 @@ class GameApp {
     audio.playMenuBlip(540);
     this.worldDialogueEl.hidden = true;
     this.dialogueOpen = false;
+    this.blurFocusedControl();
     this.syncOverworldPause();
   }
 
@@ -567,43 +642,69 @@ class GameApp {
   }
 
   async triggerEncounterTransition() {
+    const token = ++this.encounterToken;
+    this.encounterTransitioning = true;
     this.input.clearAll();
     this.syncOverworldPause();
+    audio.stopBGM();
     audio.playEncounterAlert();
-    if (this.encounterFlashEl) {
-      this.encounterFlashEl.hidden = false;
-      await new Promise((res) => setTimeout(res, 380));
-      this.encounterFlashEl.hidden = true;
+
+    try {
+      if (this.encounterFlashEl) {
+        this.encounterFlashEl.hidden = false;
+        await new Promise((res) => {
+          if (this.encounterTimer !== null) {
+            clearTimeout(this.encounterTimer);
+          }
+          this.encounterTimer = setTimeout(() => {
+            this.encounterTimer = null;
+            res();
+          }, 380);
+        });
+        this.encounterFlashEl.hidden = true;
+      }
+
+      if (token !== this.encounterToken) return false;
+      audio.playBGM('battle');
+      return true;
+    } finally {
+      if (token === this.encounterToken) {
+        this.encounterTransitioning = false;
+        this.syncOverworldPause();
+      }
     }
-    audio.playBGM('battle');
   }
 
   async startWildEncounter(biomeId) {
-    if (this.battle.active) return;
+    if (this.battle.active || this.encounterTransitioning) return;
     if (!storage.ensureHealthyParty()) return;
     const wild = rollWildPokemon(biomeId, this.getAverageTeamLevel());
     if (!wild) return;
 
-    await this.triggerEncounterTransition();
+    const ready = await this.triggerEncounterTransition();
+    if (!ready || this.battle.active) return;
     this.battle.start({
       enemy: wild,
       biomeId,
       isShrine: false,
       shrineData: null,
     });
+    this.syncOverworldPause();
   }
 
   async startShrineEncounter(shrine) {
-    if (this.battle.active) return;
+    if (this.battle.active || this.encounterTransitioning) return;
     if (!storage.ensureHealthyParty()) return;
     const guardian = createPokemon(shrine.guardianId, shrine.level, shrine.biome);
-    await this.triggerEncounterTransition();
+    const ready = await this.triggerEncounterTransition();
+    if (!ready || this.battle.active) return;
     this.battle.start({
       enemy: guardian,
       biomeId: 'shrine',
       isShrine: true,
       shrineData: shrine,
     });
+    this.syncOverworldPause();
   }
 
   handleBattleEnd(result) {
@@ -620,6 +721,7 @@ class GameApp {
     }
 
     this.refreshHud();
+    this.blurFocusedControl();
     this.syncOverworldPause();
   }
 
@@ -641,6 +743,7 @@ class GameApp {
   }
 
   openPokedex(tab = 'dex') {
+    if (this.battle.active || this.encounterTransitioning) return;
     this.pokedex.open(tab);
     this.syncOverworldPause();
   }
@@ -659,18 +762,46 @@ class GameApp {
   closeSettings() {
     if (!this.settingsModalEl) return;
     this.settingsModalEl.hidden = true;
+    this.blurFocusedControl();
     this.syncOverworldPause();
+  }
+
+  getDiagnostics() {
+    return {
+      loopRafActive: this.loopRafId !== null,
+      loopStartCount: this.loopStartCount,
+      measuredFps: Number(this.measuredFps.toFixed(2)),
+      encounterTransitioning: this.encounterTransitioning,
+      battle: this.battle?.getDiagnostics?.() || null,
+      audio: this.audio?.getDiagnostics?.() || null,
+    };
   }
 
   loop(nowMs) {
     const dt = Math.min(0.05, Math.max(0, (nowMs - this.lastFrameTime) / 1000));
     this.lastFrameTime = nowMs;
 
-    const dir = this.input.getDirection();
-    this.overworld.update(dt, dir);
-    this.overworld.render(nowMs);
+    this.fpsFrameCount += 1;
+    const windowElapsed = nowMs - this.fpsSampleStart;
+    if (windowElapsed >= 1000) {
+      this.measuredFps = (this.fpsFrameCount * 1000) / windowElapsed;
+      this.fpsFrameCount = 0;
+      this.fpsSampleStart = nowMs;
+      if (this.cabinetEl) {
+        this.cabinetEl.dataset.diagnostics = JSON.stringify(this.getDiagnostics());
+      }
+    }
 
-    requestAnimationFrame((t) => this.loop(t));
+    this.syncOverworldPause();
+
+    const battleShowing = this.battle.active && !this.battle.screenEl?.hidden;
+    if (!battleShowing) {
+      const dir = this.input.getDirection();
+      this.overworld.update(dt, dir);
+      this.overworld.render(nowMs);
+    }
+
+    this.loopRafId = requestAnimationFrame((t) => this.loop(t));
   }
 }
 
