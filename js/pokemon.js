@@ -1,4 +1,13 @@
-import { SPECIES, MOVES, TYPE_CHART, TYPES, BIOMES, getSpriteUrls } from './config.js';
+import {
+  SPECIES,
+  MOVES,
+  TYPE_CHART,
+  TYPES,
+  BIOMES,
+  EVOLUTIONS,
+  EVOLUTION_ITEMS,
+  getSpriteUrls,
+} from './config.js';
 
 function makeUid() {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -8,7 +17,16 @@ function makeUid() {
 }
 
 export class Pokemon {
-  constructor({ uid = makeUid(), speciesId, level = 5, xp = 0, hp = null, caughtBiome = 'wild', movePp = null }) {
+  constructor({
+    uid = makeUid(),
+    speciesId,
+    level = 5,
+    xp = 0,
+    hp = null,
+    caughtBiome = 'wild',
+    movePp = null,
+    isShiny = false,
+  }) {
     const species = SPECIES[speciesId];
     if (!species) {
       throw new Error(`Unknown Pokémon speciesId: ${speciesId}`);
@@ -18,6 +36,7 @@ export class Pokemon {
     this.level = Math.max(1, Math.min(50, Number(level) || 5));
     this.xp = Math.max(0, Number(xp) || 0);
     this.caughtBiome = caughtBiome;
+    this.isShiny = Boolean(isShiny);
 
     this.maxHp = 20;
     this.atk = 10;
@@ -34,6 +53,50 @@ export class Pokemon {
       const saved = movePp && typeof movePp === 'object' ? Number(movePp[moveId]) : NaN;
       this.movePp[moveId] = Number.isFinite(saved) ? Math.max(0, Math.min(maxPp, Math.round(saved))) : maxPp;
     }
+
+    this.resetBattleState();
+  }
+
+  resetBattleState() {
+    this.battleStages = { atk: 0, def: 0, spd: 0 };
+    this.shieldTurns = 0;
+  }
+
+  applyStageBoost(stat, delta = 1) {
+    if (!this.battleStages || typeof this.battleStages !== 'object') {
+      this.battleStages = { atk: 0, def: 0, spd: 0 };
+    }
+    const key = ['atk', 'def', 'spd'].includes(stat) ? stat : 'atk';
+    const prev = Number(this.battleStages[key]) || 0;
+    const step = Number.isFinite(Number(delta)) ? Math.round(Number(delta)) : 0;
+    const next = Math.max(-4, Math.min(4, prev + step));
+    this.battleStages[key] = next;
+    return { stat: key, stage: next, changed: next !== prev };
+  }
+
+  getStageMultiplier(stat) {
+    const stage = Number(this.battleStages?.[stat]) || 0;
+    if (stage === 0) return 1.0;
+    if (stage > 0) return 1 + stage * 0.25;
+    return 1 / (1 - stage * 0.25);
+  }
+
+  getEffectiveAtk() {
+    const stage = Number(this.battleStages?.atk) || 0;
+    if (stage === 0) return this.atk;
+    return Math.max(1, Math.round(this.atk * this.getStageMultiplier('atk')));
+  }
+
+  getEffectiveDef() {
+    const stage = Number(this.battleStages?.def) || 0;
+    if (stage === 0) return this.def;
+    return Math.max(1, Math.round(this.def * this.getStageMultiplier('def')));
+  }
+
+  getEffectiveSpd() {
+    const stage = Number(this.battleStages?.spd) || 0;
+    if (stage === 0) return this.spd;
+    return Math.max(1, Math.round(this.spd * this.getStageMultiplier('spd')));
   }
 
   get species() {
@@ -133,6 +196,79 @@ export class Pokemon {
     return this.species.movePool.some((moveId) => this.getMovePp(moveId).current > 0);
   }
 
+  getPendingLevelEvolution() {
+    const rules = EVOLUTIONS[this.speciesId] || [];
+    for (const rule of rules) {
+      if (Number.isFinite(Number(rule.minLevel)) && this.level >= rule.minLevel && SPECIES[rule.to]) {
+        return {
+          fromId: this.speciesId,
+          toId: rule.to,
+          toSpecies: SPECIES[rule.to],
+          minLevel: rule.minLevel,
+        };
+      }
+    }
+    return null;
+  }
+
+  getAvailableItemEvolutions(bagGems = {}) {
+    const rules = EVOLUTIONS[this.speciesId] || [];
+    const gems = bagGems && typeof bagGems === 'object' ? bagGems : {};
+    return rules
+      .filter((rule) => rule.item && EVOLUTION_ITEMS[rule.item] && SPECIES[rule.to])
+      .map((rule) => ({
+        item: rule.item,
+        itemInfo: EVOLUTION_ITEMS[rule.item],
+        toId: rule.to,
+        toSpecies: SPECIES[rule.to],
+        canUse: (Number(gems[rule.item]) || 0) > 0,
+      }));
+  }
+
+  evolve(toId) {
+    const targetId = Number(toId);
+    const targetSpecies = SPECIES[targetId];
+    if (!targetSpecies) {
+      throw new Error(`Unknown evolution target speciesId: ${toId}`);
+    }
+
+    const oldSpeciesId = this.speciesId;
+    const oldName = this.name;
+    const oldMax = this.maxHp;
+    const oldPoolSet = new Set(this.species.movePool);
+    const prevPp = this.movePp || {};
+
+    this.speciesId = targetId;
+    this.recalculateStats();
+
+    if (this.hp > 0) {
+      this.hp = Math.min(this.maxHp, this.hp + Math.max(4, this.maxHp - oldMax));
+    }
+
+    const nextMovePp = {};
+    const unlockedMoves = [];
+    for (const moveId of targetSpecies.movePool) {
+      const maxPp = MOVES[moveId]?.pp || 20;
+      if (oldPoolSet.has(moveId) && Number.isFinite(Number(prevPp[moveId]))) {
+        nextMovePp[moveId] = Math.max(0, Math.min(maxPp, Math.round(Number(prevPp[moveId]))));
+      } else {
+        nextMovePp[moveId] = maxPp;
+        if (!oldPoolSet.has(moveId)) {
+          unlockedMoves.push(moveId);
+        }
+      }
+    }
+    this.movePp = nextMovePp;
+
+    return {
+      oldSpeciesId,
+      newSpeciesId: targetId,
+      oldName,
+      newName: targetSpecies.name,
+      unlockedMoves,
+    };
+  }
+
   toJSON() {
     return {
       uid: this.uid,
@@ -141,6 +277,7 @@ export class Pokemon {
       xp: this.xp,
       hp: this.hp,
       caughtBiome: this.caughtBiome,
+      isShiny: Boolean(this.isShiny),
       movePp: { ...this.movePp },
     };
   }
@@ -150,22 +287,33 @@ export class Pokemon {
   }
 }
 
-export function createPokemon(speciesId, level = 5, biome = 'wild') {
-  return new Pokemon({ speciesId, level, caughtBiome: biome });
+export function createPokemon(speciesId, level = 5, biome = 'wild', options = {}) {
+  return new Pokemon({
+    speciesId,
+    level,
+    caughtBiome: biome,
+    isShiny: Boolean(options?.isShiny),
+  });
 }
 
 export function createStarterPokemon(speciesId) {
   return new Pokemon({ speciesId, level: 5, caughtBiome: 'starter' });
 }
 
-export function rollWildPokemon(biomeId, avgTeamLevel = 5) {
+export function rollWildPokemon(biomeId, avgTeamLevel = 5, options = {}) {
   const biome = BIOMES[biomeId];
   if (!biome || !biome.encounters.length) return null;
 
-  const totalWeight = biome.encounters.reduce((sum, entry) => sum + entry.weight, 0);
+  const isRarePatch = Boolean(options?.isRarePatch);
+  const weightedPool = biome.encounters.map((entry) => ({
+    id: entry.id,
+    weight: isRarePatch ? Math.max(1, Math.round(1000 / Math.max(4, entry.weight))) : entry.weight,
+  }));
+
+  const totalWeight = weightedPool.reduce((sum, entry) => sum + entry.weight, 0);
   let roll = Math.random() * totalWeight;
-  let pickedId = biome.encounters[0].id;
-  for (const entry of biome.encounters) {
+  let pickedId = weightedPool[0].id;
+  for (const entry of weightedPool) {
     roll -= entry.weight;
     if (roll <= 0) {
       pickedId = entry.id;
@@ -175,8 +323,18 @@ export function rollWildPokemon(biomeId, avgTeamLevel = 5) {
 
   const [minLv, maxLv] = biome.levelRange;
   const targetCenter = Math.max(minLv, Math.min(maxLv, Math.round(avgTeamLevel * 0.85)));
-  const span = Math.max(minLv, Math.min(maxLv, targetCenter + Math.floor(Math.random() * 3) - 1));
-  return createPokemon(pickedId, span, biomeId);
+  const rareBoost = isRarePatch ? 1 + Math.floor(Math.random() * 2) : 0;
+  const levelBonus = Number.isFinite(Number(options?.levelBonus)) ? Math.round(Number(options.levelBonus)) : 0;
+  const maxAllowed = Math.min(50, maxLv + rareBoost + Math.max(0, levelBonus));
+  const span = Math.max(
+    minLv,
+    Math.min(maxAllowed, targetCenter + Math.floor(Math.random() * 3) - 1 + rareBoost + levelBonus),
+  );
+
+  const shinyChance = isRarePatch ? 1 / 6 : 0.05;
+  const isShiny = options?.forceShiny !== undefined ? Boolean(options.forceShiny) : Math.random() < shinyChance;
+
+  return createPokemon(pickedId, Math.max(1, Math.min(50, span)), biomeId, { isShiny });
 }
 
 export function getTypeEffectiveness(moveType, defenderType) {
@@ -186,13 +344,42 @@ export function getTypeEffectiveness(moveType, defenderType) {
 }
 
 export function calculateDamage(attacker, defender, move, options = {}) {
+  const rawMaxHp = Number(attacker?.maxHp);
+  const safeMaxHp = Number.isFinite(rawMaxHp) && rawMaxHp > 0 ? rawMaxHp : 20;
+
   if (move?.category === 'heal') {
-    const rawMaxHp = Number(attacker?.maxHp);
-    const safeMaxHp = Number.isFinite(rawMaxHp) && rawMaxHp > 0 ? rawMaxHp : 20;
     const heal = Math.max(8, Math.round(safeMaxHp * 0.38));
     return {
       category: 'heal',
       heal,
+      damage: 0,
+      effectiveness: 1,
+      isCrit: false,
+      missed: false,
+    };
+  }
+
+  if (move?.category === 'buff') {
+    return {
+      category: 'buff',
+      buffStat: move.buffStat || 'atk',
+      buffStages: Number.isFinite(Number(move.buffStages)) ? Number(move.buffStages) : 1,
+      grantShield: false,
+      heal: 0,
+      damage: 0,
+      effectiveness: 1,
+      isCrit: false,
+      missed: false,
+    };
+  }
+
+  if (move?.category === 'shield') {
+    return {
+      category: 'shield',
+      buffStat: move.buffStat || 'def',
+      buffStages: Number.isFinite(Number(move.buffStages)) ? Number(move.buffStages) : 1,
+      grantShield: true,
+      heal: Math.max(4, Math.round(safeMaxHp * 0.12)),
       damage: 0,
       effectiveness: 1,
       isCrit: false,
@@ -221,13 +408,17 @@ export function calculateDamage(attacker, defender, move, options = {}) {
     ? Number(options.fixedVariance)
     : 0.9 + Math.random() * 0.2;
 
+  const rawAtk = typeof attacker?.getEffectiveAtk === 'function' ? attacker.getEffectiveAtk() : attacker?.atk;
+  const rawDef = typeof defender?.getEffectiveDef === 'function' ? defender.getEffectiveDef() : defender?.def;
+
   const safeLv = Number.isFinite(Number(attacker?.level)) ? Math.max(1, Number(attacker.level)) : 1;
-  const safeAtk = Number.isFinite(Number(attacker?.atk)) ? Math.max(1, Number(attacker.atk)) : 1;
-  const safeDef = Number.isFinite(Number(defender?.def)) ? Math.max(1, Number(defender.def)) : 1;
+  const safeAtk = Number.isFinite(Number(rawAtk)) ? Math.max(1, Number(rawAtk)) : 1;
+  const safeDef = Number.isFinite(Number(rawDef)) ? Math.max(1, Number(rawDef)) : 1;
   const safePower = Number.isFinite(Number(move?.power)) ? Math.max(0, Number(move.power)) : 0;
 
   const basePower = (((2 * safeLv) / 5 + 2) * safePower * (safeAtk / safeDef)) / 18 + 2;
-  const damage = Math.max(1, Math.round(basePower * stab * effectiveness * critMult * variance));
+  const shieldMult = (Number(defender?.shieldTurns) || 0) > 0 ? 0.65 : 1;
+  const damage = Math.max(1, Math.round(basePower * stab * effectiveness * critMult * variance * shieldMult));
 
   return {
     category: 'attack',
@@ -272,9 +463,28 @@ export function generateSilhouetteDataUri(species, back = false) {
   return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
 }
 
-export function attachPokemonSprite(imgEl, speciesOrId, { back = false, timeoutMs = 2000 } = {}) {
+export function attachPokemonSprite(imgEl, speciesOrMon, options = {}) {
   if (!imgEl) return Promise.resolve();
-  const species = typeof speciesOrId === 'object' ? speciesOrId : SPECIES[Number(speciesOrId)];
+  const { back = false, timeoutMs = 2000 } = options || {};
+
+  let species = null;
+  let inferredShiny = false;
+  if (speciesOrMon && typeof speciesOrMon === 'object') {
+    inferredShiny = Boolean(speciesOrMon.isShiny);
+    if (speciesOrMon.species && speciesOrMon.species.id) {
+      species = speciesOrMon.species;
+    } else if (speciesOrMon.speciesId !== undefined) {
+      species = SPECIES[Number(speciesOrMon.speciesId)] || null;
+    } else if (speciesOrMon.id !== undefined) {
+      species = SPECIES[Number(speciesOrMon.id)] || speciesOrMon;
+    }
+  } else if (speciesOrMon !== undefined && speciesOrMon !== null) {
+    species = SPECIES[Number(speciesOrMon)] || null;
+  }
+
+  const shiny = Boolean(options?.shiny ?? inferredShiny);
+  imgEl.classList.toggle('is-shiny-sprite', shiny);
+
   const inlineFallback = generateSilhouetteDataUri(species || null, back);
 
   if (!species) {
@@ -288,12 +498,12 @@ export function attachPokemonSprite(imgEl, speciesOrId, { back = false, timeoutM
   imgEl.dataset.loadToken = token;
   imgEl.alt = species.name;
 
-  const urls = getSpriteUrls(species.id, back);
+  const urls = getSpriteUrls(species.id, back, shiny);
   const localSvg = `./assets/fallback/${species.type}.svg`;
   const candidates = [urls.animated, urls.static, localSvg, inlineFallback];
 
   // Immediately render local fallback sprite when empty or switching species so images never flash blank or stale
-  const nextSpeciesKey = `${species.id}:${back ? 'back' : 'front'}`;
+  const nextSpeciesKey = `${species.id}:${back ? 'back' : 'front'}:${shiny ? 'shiny' : 'std'}`;
   if (!imgEl.getAttribute('src') || imgEl.dataset.speciesKey !== nextSpeciesKey) {
     imgEl.dataset.speciesKey = nextSpeciesKey;
     imgEl.onerror = () => {
