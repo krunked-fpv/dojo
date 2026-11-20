@@ -1,13 +1,21 @@
 import {
+  BADGES,
+  BIOMES,
+  EVOLUTION_ITEMS,
+  FIELD_QUESTS,
   GAME_META,
+  SHRINES,
   SPECIES,
   STARTER_IDS,
   TRAINERS,
   TYPES,
+  getBiomeAt,
+  getBiomeDiscoveryStats,
+  getCompassGuidance,
 } from './config.js';
 import { attachPokemonSprite, createPokemon, rollWildPokemon } from './pokemon.js';
 import { storage } from './storage.js';
-import { audio } from './audio.js';
+import { THEMES, audio } from './audio.js';
 import { InputController } from './input.js';
 import { OverworldEngine, drawTrainerPortrait } from './overworld.js';
 import { BattleEngine } from './battle.js';
@@ -34,6 +42,10 @@ class GameApp {
     this.hudSettingsBtn = document.getElementById('hud-btn-settings');
 
     this.biomeBannerEl = document.getElementById('biome-banner');
+    this.compassHudEl = document.getElementById('compass-hud');
+    this.compassArrowEl = document.getElementById('compass-arrow');
+    this.compassGoalEl = document.getElementById('compass-goal');
+    this.compassSubEl = document.getElementById('compass-biome-progress');
     this.interactPillEl = document.getElementById('interact-pill');
     this.worldDialogueEl = document.getElementById('world-dialogue');
     this.worldDialogueTextEl = document.getElementById('world-dialogue-text');
@@ -49,6 +61,7 @@ class GameApp {
     this.settingMuteBtn = document.getElementById('setting-mute-btn');
     this.settingCrtBtn = document.getElementById('setting-crt-btn');
     this.settingPadBtn = document.getElementById('setting-pad-btn');
+    this.settingPaceBtn = document.getElementById('setting-pace-btn');
     this.settingSwitchBtn = document.getElementById('setting-switch-trainer-btn');
 
     this.resetTrainerBtn = document.getElementById('reset-trainer-btn');
@@ -58,6 +71,10 @@ class GameApp {
     this.resetStatusEl = document.getElementById('reset-status-msg');
 
     this.dialogueOpen = false;
+    this.manualBattlePad = false;
+    this._wasInBattle = false;
+    this._wasModalOpen = false;
+    this._lastCompassHidden = null;
     this.biomeBannerTimer = null;
     this.badgeToastTimer = null;
     this.resetRedirectTimer = null;
@@ -78,7 +95,11 @@ class GameApp {
       storage,
       audio,
       onTeamChanged: () => this.refreshHud(),
-      onClose: () => this.syncOverworldPause(),
+      onBadgesUnlocked: (badges) => this.showBadgeToast(badges),
+      onClose: () => {
+        this.syncControlVisibility();
+        this.syncOverworldPause();
+      },
     });
 
     this.battle = new BattleEngine({
@@ -91,8 +112,11 @@ class GameApp {
 
     this.overworld = new OverworldEngine(document.getElementById('overworld-canvas'), {
       getProfile: () => storage.getActiveProfile(),
-      onStepSaved: (x, y, dir, incSteps) => storage.updatePosition(x, y, dir, incSteps),
-      onWildEncounter: (biomeId) => this.startWildEncounter(biomeId),
+      onStepSaved: (x, y, dir, incSteps) => {
+        storage.updatePosition(x, y, dir, incSteps);
+        this.updateCompassHud();
+      },
+      onWildEncounter: (biomeId, encounterMeta = {}) => this.startWildEncounter(biomeId, encounterMeta),
       onInteract: (target) => this.handleWorldInteract(target),
       onHealSpot: () => this.handleHealSpot(false),
       onBiomeChange: (biome, announce) => this.handleBiomeChange(biome, announce),
@@ -150,6 +174,51 @@ class GameApp {
       const labels = { auto: '🎮 Auto', show: '🎮 Always On', hide: '🎮 Hidden' };
       this.settingPadBtn.textContent = labels[settings.showTouchPad] || '🎮 Auto';
     }
+    if (this.settingPaceBtn) {
+      const paceLabels = { cinema: '🎬 Cinema', classic: '⚡ Classic', fast: '🚀 Fast' };
+      const pace = settings.battlePace || 'cinema';
+      this.settingPaceBtn.textContent = paceLabels[pace] || '🎬 Cinema';
+    }
+    this.syncControlVisibility();
+  }
+
+  syncControlVisibility() {
+    const inBattle = Boolean(this.battle?.active || this.encounterTransitioning);
+    const modalOpen = Boolean(this.pokedex?.isOpen() || this.isSettingsOpen());
+    if (!inBattle) {
+      this.manualBattlePad = false;
+    }
+
+    const becameInBattle = inBattle && !this._wasInBattle;
+    const becameModalOpen = modalOpen && !this._wasModalOpen;
+    this._wasInBattle = inBattle;
+    this._wasModalOpen = modalOpen;
+
+    if (typeof document !== 'undefined' && document.body) {
+      document.body.classList.toggle('in-battle', inBattle);
+      document.body.classList.toggle('modal-open', modalOpen);
+      document.body.classList.toggle('manual-battle-pad', inBattle && this.manualBattlePad);
+    }
+
+    if (becameInBattle || becameModalOpen) {
+      this.input.clearAll();
+    }
+
+    if (this.hudPadBtn) {
+      const settings = storage.getSettings();
+      const active = inBattle ? this.manualBattlePad : settings.showTouchPad === 'show';
+      this.hudPadBtn.classList.toggle('is-active', active);
+      const nextTitle = inBattle
+        ? (this.manualBattlePad ? 'Hide On-Screen Gamepad in Battle' : 'Show On-Screen Gamepad in Battle')
+        : ({
+            auto: 'Gamepad Mode: Auto (Tap to cycle)',
+            show: 'Gamepad Mode: Always On (Tap to cycle)',
+            hide: 'Gamepad Mode: Hidden (Tap to cycle)',
+          }[settings.showTouchPad] || 'Toggle On-Screen Gamepad');
+      if (this.hudPadBtn.title !== nextTitle) {
+        this.hudPadBtn.title = nextTitle;
+      }
+    }
   }
 
   applyTrainerTheme(trainerId) {
@@ -190,16 +259,27 @@ class GameApp {
       this.openPokedex('team');
     });
 
+    this.compassHudEl?.addEventListener('click', () => {
+      audio.playMenuBlip(680);
+      this.openPokedex('guide');
+    });
+
     this.hudMuteBtn?.addEventListener('click', () => this.toggleMute());
     this.settingMuteBtn?.addEventListener('click', () => this.toggleMute());
 
     this.hudPadBtn?.addEventListener('click', () => {
       audio.playMenuBlip(640);
-      const current = storage.getSettings().showTouchPad;
-      const order = ['auto', 'show', 'hide'];
-      const next = order[(order.indexOf(current) + 1) % order.length];
-      storage.updateSettings({ showTouchPad: next });
-      this.applySettings();
+      const inBattle = Boolean(this.battle?.active || this.encounterTransitioning);
+      if (inBattle) {
+        this.manualBattlePad = !this.manualBattlePad;
+        this.syncControlVisibility();
+      } else {
+        const current = storage.getSettings().showTouchPad;
+        const order = ['auto', 'show', 'hide'];
+        const next = order[(order.indexOf(current) + 1) % order.length];
+        storage.updateSettings({ showTouchPad: next });
+        this.applySettings();
+      }
       this.blurFocusedControl();
     });
 
@@ -209,6 +289,16 @@ class GameApp {
       const order = ['auto', 'show', 'hide'];
       const next = order[(order.indexOf(current) + 1) % order.length];
       storage.updateSettings({ showTouchPad: next });
+      this.applySettings();
+      this.blurFocusedControl();
+    });
+
+    this.settingPaceBtn?.addEventListener('click', () => {
+      audio.playMenuBlip(640);
+      const current = storage.getSettings().battlePace || 'cinema';
+      const order = ['cinema', 'classic', 'fast'];
+      const next = order[(order.indexOf(current) + 1) % order.length];
+      storage.updateSettings({ battlePace: next });
       this.applySettings();
       this.blurFocusedControl();
     });
@@ -408,11 +498,22 @@ class GameApp {
 
   showBootScreen() {
     this.cancelEncounterTransition();
+    if (this.battle?.active) {
+      this.battle.stop({ outcome: 'escaped', faintedAll: false });
+    }
+    this.pokedex?.close?.();
+    if (this.isSettingsOpen()) {
+      this.settingsModalEl.hidden = true;
+    }
+    this.manualBattlePad = false;
+    this.input.clearAll();
     this.overworld.setActive(false);
     this.bootScreenEl.hidden = false;
     this.starterScreenEl.hidden = true;
     this.gameShellEl.hidden = true;
     this.closeDialogue();
+    this.syncControlVisibility();
+    this.updateCompassHud();
 
     drawTrainerPortrait(document.getElementById('portrait-violet'), 'violet');
     drawTrainerPortrait(document.getElementById('portrait-ozias'), 'ozias');
@@ -441,6 +542,8 @@ class GameApp {
     this.bootScreenEl.hidden = true;
     this.starterScreenEl.hidden = false;
     this.gameShellEl.hidden = true;
+    this.syncControlVisibility();
+    this.updateCompassHud();
 
     this.starterGreetingEl.textContent = `Welcome, ${trainer.name}! Choose your first partner Pokémon!`;
     this.starterCardsEl.innerHTML = '';
@@ -504,14 +607,19 @@ class GameApp {
     this.refreshHud();
 
     this.overworld.setActive(true);
+    this.syncControlVisibility();
     this.syncOverworldPause();
-    audio.playBGM('overworld');
+
+    const startBiome = getBiomeAt(profile.pos.x, profile.pos.y);
+    const startTheme = startBiome && THEMES[startBiome.id] ? startBiome.id : 'overworld';
+    audio.playBGM(startTheme);
+    this.updateCompassHud();
 
     if (isBrandNew) {
       const lead = profile.team[0];
       const trainerName = TRAINERS[profile.trainerId]?.name || 'Trainer';
       this.openDialogue(
-        `${trainerName} & ${lead?.name || 'Partner'} set out on Starlight Island! Explore North to Whispering Forest, East to Crystal Cavern, or South to Sapphire Lagoon!`
+        `${trainerName} & ${lead?.name || 'Partner'} set out on Starlight Island! Follow the Starlight Compass to Whispering Forest, Crystal Cavern, Sapphire Lagoon, Ember Caldera, and Starfall Peak!`
       );
     }
   }
@@ -522,7 +630,7 @@ class GameApp {
 
     const lead = profile.team[0];
     if (lead) {
-      this.hudLeadLabelEl.textContent = `Lv.${lead.level} ${lead.name}`;
+      this.hudLeadLabelEl.textContent = `Lv.${lead.level} ${lead.isShiny ? '✨ ' : ''}${lead.name}`;
       const pct = Math.max(0, Math.min(100, Math.round((lead.hp / Math.max(1, lead.maxHp)) * 100)));
       this.hudLeadHpEl.style.width = `${pct}%`;
       this.hudLeadHpEl.style.backgroundColor = pct <= 20 ? '#ef4444' : pct <= 50 ? '#f59e0b' : '#10b981';
@@ -531,13 +639,102 @@ class GameApp {
     const totalSpecies = Object.keys(SPECIES).length;
     const caughtCount = Object.keys(profile.pokedex.caught).length;
     this.hudDexBtn.textContent = `📖 Dex ${caughtCount}/${totalSpecies}`;
-    this.hudBadgesBtn.textContent = `🏅 ${profile.badges.length}/6`;
+    this.hudBadgesBtn.textContent = `🏅 ${profile.badges.length}/${BADGES.length}`;
+    this.updateCompassHud();
+  }
+
+  formatCompassDirection(guidance, profile) {
+    if (!guidance) return '🧭 Explore';
+    if (guidance.distance === 0) return '✨ Here';
+    if (typeof guidance.arrowDir === 'string' && /[↑↓←→↗↘↙↖]/.test(guidance.arrowDir) && /[A-Za-z]/.test(guidance.arrowDir)) {
+      return guidance.arrowDir;
+    }
+    if (Number.isFinite(guidance.targetX) && Number.isFinite(guidance.targetY) && profile?.pos) {
+      const dx = guidance.targetX - profile.pos.x;
+      const dy = guidance.targetY - profile.pos.y;
+      if (Math.abs(dx) + Math.abs(dy) <= 1) return '✨ Here';
+      const angle = Math.atan2(dy, dx) * (180 / Math.PI);
+      if (angle >= -22.5 && angle < 22.5) return '→ East';
+      if (angle >= 22.5 && angle < 67.5) return '↘ SE';
+      if (angle >= 67.5 && angle < 112.5) return '↓ South';
+      if (angle >= 112.5 && angle < 157.5) return '↙ SW';
+      if (angle >= 157.5 || angle < -157.5) return '← West';
+      if (angle >= -157.5 && angle < -112.5) return '↖ NW';
+      if (angle >= -112.5 && angle < -67.5) return '↑ North';
+      return '↗ NE';
+    }
+    return guidance.arrowDir || '🧭 Go';
+  }
+
+  isCompassHidden() {
+    return Boolean(
+      !storage.getActiveProfile() ||
+      this.gameShellEl?.hidden ||
+      this.battle?.active ||
+      this.encounterTransitioning ||
+      this.dialogueOpen ||
+      this.pokedex?.isOpen() ||
+      this.isSettingsOpen()
+    );
+  }
+
+  updateCompassVisibility() {
+    if (!this.compassHudEl) return;
+    const shouldHide = this.isCompassHidden();
+    if (this._lastCompassHidden !== shouldHide) {
+      this._lastCompassHidden = shouldHide;
+      this.compassHudEl.hidden = shouldHide;
+      if (!shouldHide) {
+        this.updateCompassHud();
+      }
+    }
+  }
+
+  updateCompassHud() {
+    if (!this.compassHudEl) return;
+    const shouldHide = this.isCompassHidden();
+    this._lastCompassHidden = shouldHide;
+    this.compassHudEl.hidden = shouldHide;
+    if (shouldHide) return;
+
+    const profile = storage.getActiveProfile();
+    if (!profile) return;
+
+    const guidance = typeof getCompassGuidance === 'function' ? getCompassGuidance(profile, SPECIES) : null;
+    const currentBiome = getBiomeAt(profile.pos.x, profile.pos.y) || BIOMES.village;
+    const stats = typeof getBiomeDiscoveryStats === 'function' && currentBiome
+      ? getBiomeDiscoveryStats(profile, currentBiome.id)
+      : null;
+
+    const dirLabel = this.formatCompassDirection(guidance, profile);
+    if (this.compassArrowEl) {
+      this.compassArrowEl.textContent = guidance?.icon || '🧭';
+    }
+    if (this.compassGoalEl) {
+      const goalTitle = guidance?.title || 'Explore Starlight Island';
+      this.compassGoalEl.textContent = `${dirLabel} • ${goalTitle}`;
+    }
+    if (this.compassSubEl) {
+      const totalSpecies = Object.keys(SPECIES).length;
+      const totalCaught = Object.keys(profile.pokedex.caught).length;
+      const totalShrines = Object.keys(SHRINES).length;
+      if (stats && stats.totalSpecies > 0) {
+        const chestPart = stats.chestsTotal > 0 ? ` • 📦 ${stats.chestsOpened}/${stats.chestsTotal}` : '';
+        const hasShrine = Object.values(SHRINES).some((s) => s.biome === currentBiome.id);
+        const shrinePart = hasShrine ? ` • ${stats.shrineCleared ? '⛩️ ✓' : '⛩️ Open'}` : '';
+        this.compassSubEl.textContent = `${currentBiome.icon} Dex ${stats.caught}/${stats.totalSpecies}${chestPart}${shrinePart}`;
+      } else {
+        this.compassSubEl.textContent = `${currentBiome?.icon || '🏡'} Dex ${totalCaught}/${totalSpecies} • Shrines ${profile.shrinesCleared.length}/${totalShrines}`;
+      }
+    }
   }
 
   syncOverworldPause() {
     if (this.worldDialogueEl && this.worldDialogueEl.hidden && this.dialogueOpen) {
       this.dialogueOpen = false;
     }
+    this.syncControlVisibility();
+    this.updateCompassVisibility();
     const paused = (
       this.dialogueOpen ||
       this.encounterTransitioning ||
@@ -568,21 +765,25 @@ class GameApp {
   }
 
   handleBiomeChange(biome, announce) {
-    if (!this.biomeBannerEl) return;
-    this.biomeBannerEl.textContent = `${biome.icon} ${biome.name}`;
-    if (!announce) {
-      this.biomeBannerEl.hidden = false;
-      clearTimeout(this.biomeBannerTimer);
-      this.biomeBannerTimer = setTimeout(() => {
-        this.biomeBannerEl.hidden = true;
-      }, 2200);
-      return;
+    if (biome?.id) {
+      storage.recordBiomeVisited?.(biome.id);
+      const themeId = THEMES[biome.id] ? biome.id : 'overworld';
+      if (!this.battle.active && !this.encounterTransitioning && this.gameShellEl && !this.gameShellEl.hidden) {
+        if (audio.currentTheme !== themeId) {
+          audio.playBGM(themeId);
+        }
+      }
     }
+
+    this.updateCompassHud();
+
+    if (!this.biomeBannerEl || !biome) return;
+    this.biomeBannerEl.textContent = `${biome.icon} ${biome.name}`;
     this.biomeBannerEl.hidden = false;
     clearTimeout(this.biomeBannerTimer);
     this.biomeBannerTimer = setTimeout(() => {
       this.biomeBannerEl.hidden = true;
-    }, 2400);
+    }, announce ? 2400 : 2200);
   }
 
   handleInteractHint(target) {
@@ -593,6 +794,59 @@ class GameApp {
     }
     this.interactPillEl.textContent = target.label;
     this.interactPillEl.hidden = false;
+  }
+
+  formatRewardSummary(rewards = {}) {
+    const parts = [];
+    if (rewards.potions) parts.push(`+${rewards.potions} Berry Potion${rewards.potions > 1 ? 's' : ''}`);
+    if (rewards.greatBalls) parts.push(`+${rewards.greatBalls} Great Ball${rewards.greatBalls > 1 ? 's' : ''}`);
+    if (rewards.gems && typeof rewards.gems === 'object') {
+      for (const [gemId, count] of Object.entries(rewards.gems)) {
+        if (count > 0) {
+          const item = EVOLUTION_ITEMS?.[gemId];
+          parts.push(`+${count} ${item?.icon || '💎'} ${item?.name || gemId}`);
+        }
+      }
+    }
+    return parts.join(', ');
+  }
+
+  handleNpcInteract(npc) {
+    if (!npc) return;
+    storage.markNpcTalked?.(npc.id);
+    const profile = storage.getActiveProfile();
+    const quests = Array.isArray(FIELD_QUESTS) ? FIELD_QUESTS : Object.values(FIELD_QUESTS || {});
+    const quest = quests.find((q) => (npc.questId && q.id === npc.questId) || q.npcId === npc.id) || null;
+
+    if (quest && profile) {
+      if (profile.questsCompleted?.includes(quest.id)) {
+        this.openDialogue(`${npc.name}: "${quest.completeDialogue || npc.greeting}"`);
+        this.refreshHud();
+        return;
+      }
+      if (quest.check?.(profile)) {
+        const res = storage.completeQuest?.(quest.id, quest.rewards || {});
+        audio.playLevelUp();
+        this.overworld.refreshInteractHint();
+        this.refreshHud();
+        if (res?.newBadges?.length) {
+          this.showBadgeToast(res.newBadges);
+        }
+        const rewardText = this.formatRewardSummary(quest.rewards);
+        const msg = quest.completeDialogue
+          ? `✨ Quest Complete (${quest.title})! ${npc.name}: "${quest.completeDialogue}"${rewardText ? ` [${rewardText}]` : ''}`
+          : `✨ Quest Complete: ${quest.title}!${rewardText ? ` Earned ${rewardText}!` : ''}`;
+        this.openDialogue(msg);
+        return;
+      }
+      const hint = typeof quest.progressText === 'function' ? quest.progressText(profile) : quest.description;
+      this.openDialogue(`${npc.name}: "${npc.greeting}" — Quest [${quest.title}]: ${hint}`);
+      this.refreshHud();
+      return;
+    }
+
+    this.openDialogue(`${npc.name}: "${npc.greeting}"`);
+    this.refreshHud();
   }
 
   handleWorldInteract(target) {
@@ -607,6 +861,7 @@ class GameApp {
         audio.playLevelUp();
         storage.addRewards(chest.rewards);
         this.overworld.refreshInteractHint();
+        this.refreshHud();
         this.openDialogue(chest.message);
       } else {
         this.openDialogue('This treasure chest has already been opened!');
@@ -618,6 +873,15 @@ class GameApp {
         this.openDialogue(shrine.clearedText);
       } else {
         this.startShrineEncounter(shrine);
+      }
+    } else if (target.type === 'npc') {
+      this.handleNpcInteract(target.data);
+    } else if (target.type === 'landmark') {
+      const lm = target.data;
+      if (typeof lm === 'string') {
+        this.openDialogue(lm);
+      } else if (lm) {
+        this.openDialogue(`${lm.icon || '🗿'} ${lm.name}: ${lm.description}`);
       }
     }
   }
@@ -644,7 +908,9 @@ class GameApp {
   async triggerEncounterTransition() {
     const token = ++this.encounterToken;
     this.encounterTransitioning = true;
+    this.manualBattlePad = false;
     this.input.clearAll();
+    this.syncControlVisibility();
     this.syncOverworldPause();
     audio.stopBGM();
     audio.playEncounterAlert();
@@ -670,26 +936,30 @@ class GameApp {
     } finally {
       if (token === this.encounterToken) {
         this.encounterTransitioning = false;
+        this.syncControlVisibility();
         this.syncOverworldPause();
       }
     }
   }
 
-  async startWildEncounter(biomeId) {
+  async startWildEncounter(biomeId, encounterMeta = {}) {
     if (this.battle.active || this.encounterTransitioning) return;
     if (!storage.ensureHealthyParty()) return;
-    const wild = rollWildPokemon(biomeId, this.getAverageTeamLevel());
+    const wild = rollWildPokemon(biomeId, this.getAverageTeamLevel(), encounterMeta);
     if (!wild) return;
 
     const ready = await this.triggerEncounterTransition();
     if (!ready || this.battle.active) return;
+    this.manualBattlePad = false;
     this.battle.start({
       enemy: wild,
       biomeId,
       isShrine: false,
       shrineData: null,
     });
+    this.syncControlVisibility();
     this.syncOverworldPause();
+    this.updateCompassHud();
   }
 
   async startShrineEncounter(shrine) {
@@ -698,17 +968,20 @@ class GameApp {
     const guardian = createPokemon(shrine.guardianId, shrine.level, shrine.biome);
     const ready = await this.triggerEncounterTransition();
     if (!ready || this.battle.active) return;
+    this.manualBattlePad = false;
     this.battle.start({
       enemy: guardian,
       biomeId: 'shrine',
       isShrine: true,
       shrineData: shrine,
     });
+    this.syncControlVisibility();
     this.syncOverworldPause();
+    this.updateCompassHud();
   }
 
   handleBattleEnd(result) {
-    audio.playBGM('overworld');
+    this.manualBattlePad = false;
 
     if (result.faintedAll) {
       storage.updatePosition(GAME_META.spawn.x, GAME_META.spawn.y, 'down', false);
@@ -720,8 +993,13 @@ class GameApp {
       this.overworld.syncFromProfile();
     }
 
+    const profile = storage.getActiveProfile();
+    const bId = profile ? getBiomeAt(profile.pos.x, profile.pos.y).id : 'overworld';
+    audio.playBGM(THEMES[bId] ? bId : 'overworld');
+
     this.refreshHud();
     this.blurFocusedControl();
+    this.syncControlVisibility();
     this.syncOverworldPause();
   }
 
@@ -745,6 +1023,7 @@ class GameApp {
   openPokedex(tab = 'dex') {
     if (this.battle.active || this.encounterTransitioning) return;
     this.pokedex.open(tab);
+    this.syncControlVisibility();
     this.syncOverworldPause();
   }
 
@@ -756,6 +1035,7 @@ class GameApp {
     if (!this.settingsModalEl) return;
     if (this.resetStatusEl) this.resetStatusEl.textContent = '';
     this.settingsModalEl.hidden = false;
+    this.syncControlVisibility();
     this.syncOverworldPause();
   }
 
@@ -763,6 +1043,7 @@ class GameApp {
     if (!this.settingsModalEl) return;
     this.settingsModalEl.hidden = true;
     this.blurFocusedControl();
+    this.syncControlVisibility();
     this.syncOverworldPause();
   }
 

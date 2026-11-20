@@ -75,10 +75,10 @@ button {
     display: flex;
     align-items: center;
     justify-content: center;
-    padding: 10px;
+    padding: clamp(6px, 1dvh, 10px);
   }
   .app-cabinet {
-    height: min(95dvh, 760px);
+    height: min(96dvh, 840px);
     border-radius: 22px;
     border: 3px solid rgba(255, 255, 255, 0.15);
     overflow: hidden;
@@ -540,6 +540,12 @@ button {
   border-color: var(--trainer-accent);
 }
 
+.hud-icon-btn.is-active {
+  background: var(--trainer-accent-dark);
+  border-color: var(--trainer-accent);
+  box-shadow: 0 0 12px var(--trainer-accent-soft), 0 2px 0 #090d1a;
+}
+
 .hud-pill:active,
 .hud-icon-btn:active {
   transform: translateY(1px);
@@ -593,6 +599,103 @@ button {
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
   pointer-events: none;
   animation: pop-in 200ms ease;
+}
+
+.compass-hud {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  z-index: 9;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: min(270px, calc(100% - 20px));
+  padding: 6px 11px;
+  border-radius: 14px;
+  border: 1.5px solid rgba(255, 255, 255, 0.22);
+  background: rgba(10, 15, 32, 0.78);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  color: #f8fafc;
+  text-align: left;
+  cursor: pointer;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.42);
+  transition: transform 120ms ease, border-color 140ms ease, background 140ms ease;
+}
+
+.compass-hud:hover {
+  border-color: var(--trainer-accent);
+  background: rgba(15, 23, 42, 0.9);
+  transform: translateY(-1px);
+}
+
+.compass-hud:active {
+  transform: translateY(1px);
+}
+
+.compass-arrow {
+  width: 28px;
+  height: 28px;
+  border-radius: 9px;
+  background: var(--trainer-accent-soft);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1rem;
+  flex-shrink: 0;
+}
+
+.compass-copy {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.compass-goal {
+  font-size: 0.76rem;
+  font-weight: 900;
+  color: #fef08a;
+  line-height: 1.2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.compass-sub {
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: #cbd5e1;
+  line-height: 1.2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+@media (max-width: 680px) {
+  .compass-hud {
+    top: 8px;
+    left: 8px;
+    padding: 5px 9px;
+    gap: 6px;
+    max-width: min(230px, calc(100% - 16px));
+  }
+  .compass-arrow {
+    width: 24px;
+    height: 24px;
+    font-size: 0.88rem;
+  }
+  .compass-goal {
+    font-size: 0.71rem;
+  }
+  .compass-sub {
+    font-size: 0.63rem;
+  }
+  .biome-banner {
+    top: 56px;
+    font-size: 0.78rem;
+    padding: 5px 12px;
+  }
 }
 
 .interact-pill {
@@ -1222,4 +1325,374 @@ button {
   font-size: 0.78rem;
   font-weight: 700;
   color: #fde047;
+}
+
+/* --- Evolutions, Gems, Shimmers & Island Guide --- */
+.gem-bag-strip {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.gem-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: rgba(30, 41, 59, 0.9);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  font-size: 0.78rem;
+}
+
+.team-pill-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.shiny-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: linear-gradient(135deg, rgba(250, 204, 21, 0.28), rgba(232, 121, 249, 0.28));
+  border: 1px solid #fde047;
+  color: #fef08a;
+  font-size: 0.68rem;
+  font-weight: 900;
+}
+
+.team-card.is-shiny-card,
+.box-card.is-shiny-card {
+  border-color: rgba(250, 204, 21, 0.55);
+  box-shadow: inset 0 0 18px rgba(250, 204, 21, 0.1);
+}
+
+.team-card-top img.is-shiny-sprite,
+.box-card img.is-shiny-sprite {
+  filter: drop-shadow(0 0 7px rgba(253, 224, 71, 0.75));
+}
+
+.evo-btn-row {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.evolve-btn {
+  width: 100%;
+  padding: 7px 10px;
+  border-radius: 10px;
+  border: 2px solid #fef08a;
+  background: linear-gradient(110deg, #eab308 0%, #f97316 45%, #ec4899 100%);
+  background-size: 200% 100%;
+  color: #ffffff;
+  font-weight: 900;
+  font-size: 0.78rem;
+  cursor: pointer;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 3px 0 #854d0e, 0 0 14px rgba(250, 204, 21, 0.45);
+  animation: evo-shimmer 2.4s ease-in-out infinite;
+}
+
+.evolve-btn:hover {
+  filter: brightness(1.08);
+}
+
+.evolve-btn:active {
+  transform: translateY(2px);
+  box-shadow: 0 1px 0 #854d0e;
+}
+
+@keyframes evo-shimmer {
+  0%, 100% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+}
+
+.evo-hint-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.evo-hint-pill {
+  font-size: 0.69rem;
+  font-weight: 700;
+  color: #cbd5e1;
+  background: rgba(15, 23, 42, 0.75);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 999px;
+  padding: 2px 8px;
+}
+
+.evo-celebration-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  margin-bottom: 12px;
+  border-radius: 14px;
+  background: linear-gradient(135deg, rgba(126, 34, 206, 0.45), rgba(234, 179, 8, 0.25));
+  border: 2px solid #fde047;
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.4);
+  animation: pop-in 220ms ease;
+}
+
+.evo-celebration-eyebrow {
+  font-size: 0.68rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  color: #fde047;
+  margin-bottom: 2px;
+}
+
+.evo-celebration-banner p {
+  margin: 4px 0 0;
+  font-size: 0.78rem;
+  color: #e2e8f0;
+}
+
+.dex-evo-chain {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.76rem;
+  color: #cbd5e1;
+}
+
+.dex-evo-label {
+  font-weight: 800;
+  color: #e2e8f0;
+}
+
+.dex-evo-chip {
+  padding: 3px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--trainer-accent);
+  background: var(--trainer-accent-soft);
+  color: #ffffff;
+  font-weight: 800;
+  font-size: 0.73rem;
+  cursor: pointer;
+}
+
+.dex-evo-chip:hover {
+  background: var(--trainer-accent-dark);
+}
+
+.guide-layout {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.guide-compass-card {
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: linear-gradient(140deg, rgba(30, 41, 59, 0.95), rgba(15, 23, 42, 0.96));
+  border: 2px solid var(--trainer-accent);
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.35);
+}
+
+.guide-compass-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.guide-compass-badge {
+  font-size: 0.68rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  color: #fde047;
+}
+
+.guide-compass-dir {
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: var(--trainer-accent-soft);
+  border: 1px solid var(--trainer-accent);
+  font-size: 0.74rem;
+  font-weight: 900;
+  color: #ffffff;
+}
+
+.guide-compass-title {
+  margin: 6px 0 8px;
+  font-size: 1.02rem;
+  color: #ffffff;
+}
+
+.guide-compass-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  font-size: 0.78rem;
+  color: #cbd5e1;
+}
+
+.guide-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(225px, 1fr));
+  gap: 10px;
+}
+
+.biome-progress-card {
+  padding: 10px 12px;
+  border-radius: 13px;
+  background: #1a233a;
+  border: 2px solid rgba(255, 255, 255, 0.12);
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.biome-progress-card.is-visited {
+  border-color: rgba(56, 189, 248, 0.45);
+}
+
+.biome-progress-card.is-cleared {
+  border-color: rgba(74, 222, 128, 0.65);
+}
+
+.biome-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  font-size: 0.88rem;
+}
+
+.biome-lv-pill {
+  font-size: 0.7rem;
+  font-weight: 800;
+  color: #fde047;
+  background: rgba(15, 23, 42, 0.75);
+  border-radius: 999px;
+  padding: 2px 7px;
+  white-space: nowrap;
+}
+
+.biome-card-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 0.75rem;
+  color: #cbd5e1;
+}
+
+.biome-status-tag {
+  font-weight: 800;
+  color: #94a3b8;
+}
+
+.biome-status-tag.is-cleared {
+  color: #4ade80;
+}
+
+.biome-progress-track {
+  width: 100%;
+  height: 6px;
+  border-radius: 999px;
+  background: #0f172a;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+}
+
+.biome-progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--trainer-accent), #38bdf8);
+  transition: width 220ms ease;
+}
+
+.quests-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.quest-card {
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: #1a233a;
+  border: 1.5px solid rgba(255, 255, 255, 0.14);
+}
+
+.quest-card.is-ready {
+  border-color: #fde047;
+  background: linear-gradient(135deg, rgba(234, 179, 8, 0.16), #1a233a);
+}
+
+.quest-card.is-done {
+  border-color: rgba(74, 222, 128, 0.55);
+  opacity: 0.86;
+}
+
+.quest-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 0.86rem;
+}
+
+.quest-status-pill {
+  font-size: 0.7rem;
+  font-weight: 800;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.85);
+  color: #fde047;
+  white-space: nowrap;
+}
+
+.quest-card.is-done .quest-status-pill {
+  color: #4ade80;
+}
+
+.quest-desc {
+  margin: 5px 0 6px;
+  font-size: 0.78rem;
+  color: #cbd5e1;
+}
+
+.quest-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.quest-progress-text {
+  font-size: 0.73rem;
+  font-weight: 800;
+  color: #93c5fd;
+}
+
+.quest-reward-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.quest-reward-chip {
+  font-size: 0.71rem;
+  font-weight: 800;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: #fef08a;
 }

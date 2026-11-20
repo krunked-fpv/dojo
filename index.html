@@ -85,8 +85,8 @@
         </div>
 
         <div class="hud-actions">
-          <button id="hud-btn-dex" type="button" class="hud-pill" title="Open Pokédex &amp; Team (P)">📖 Dex 1/18</button>
-          <button id="hud-btn-badges" type="button" class="hud-pill" title="View Elemental Badges">🏅 0/6</button>
+          <button id="hud-btn-dex" type="button" class="hud-pill" title="Open Pokédex &amp; Team (P)">📖 Dex 1/54</button>
+          <button id="hud-btn-badges" type="button" class="hud-pill" title="View Elemental Badges">🏅 0/8</button>
           <button id="hud-btn-mute" type="button" class="hud-icon-btn" title="Toggle Sound">🔊</button>
           <button id="hud-btn-pad" type="button" class="hud-icon-btn" title="Toggle On-Screen Gamepad">🎮</button>
           <button id="hud-btn-settings" type="button" class="hud-icon-btn" title="Settings &amp; Trainer Switch">⚙️</button>
@@ -96,6 +96,14 @@
       <!-- Main Viewport (Overworld + Battle Overlay) -->
       <div class="viewport-stage">
         <canvas id="overworld-canvas" width="480" height="352" class="overworld-canvas"></canvas>
+
+        <button id="compass-hud" type="button" class="compass-hud" hidden title="Tap to open Island Guide">
+          <span id="compass-arrow" class="compass-arrow">🧭</span>
+          <div class="compass-copy">
+            <span id="compass-goal" class="compass-goal">Explore Starlight Island</span>
+            <span id="compass-biome-progress" class="compass-sub">Dex 0/54 • Shrines 0/5</span>
+          </div>
+        </button>
 
         <div id="biome-banner" class="biome-banner" hidden>🌲 Whispering Forest</div>
 
@@ -136,6 +144,7 @@
                 <div class="hp-track">
                   <div id="enemy-hp-fill" class="hp-fill is-high"></div>
                 </div>
+                <div id="enemy-stages" class="stage-badges-row"></div>
               </div>
 
               <div class="fighter-mount fighter-mount-enemy">
@@ -170,6 +179,7 @@
                 <div class="xp-track">
                   <div id="player-xp-fill" class="xp-fill"></div>
                 </div>
+                <div id="player-stages" class="stage-badges-row"></div>
               </div>
             </div>
           </div>
@@ -240,6 +250,7 @@
             <button id="pokedex-tab-dex" type="button" class="tab-btn is-active">📖 Pokédex</button>
             <button id="pokedex-tab-team" type="button" class="tab-btn">⚡ Team &amp; Box</button>
             <button id="pokedex-tab-badges" type="button" class="tab-btn">🏅 Badges</button>
+            <button id="pokedex-tab-guide" type="button" class="tab-btn">🧭 Guide</button>
           </div>
           <button id="pokedex-close-btn" type="button" class="close-btn" aria-label="Close">✕</button>
         </div>
@@ -277,6 +288,14 @@
               <p>Auto shows on tablets/phones, or force On/Off</p>
             </div>
             <button id="setting-pad-btn" type="button" class="setting-toggle-btn">🎮 Auto</button>
+          </div>
+
+          <div class="setting-row">
+            <div>
+              <strong>Battle Animation Pace</strong>
+              <p>Savor every attack in Cinema mode, or speed up battles</p>
+            </div>
+            <button id="setting-pace-btn" type="button" class="setting-toggle-btn">🎬 Cinema</button>
           </div>
 
           <div class="setting-row">
