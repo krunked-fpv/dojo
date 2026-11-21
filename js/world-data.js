@@ -61,6 +61,9 @@ export const BIOMES = {
       { id: 133, weight: 18 },
       { id: 25, weight: 14 },
       { id: 11, weight: 8 },
+      { id: 39, weight: 14 },
+      { id: 179, weight: 14 },
+      { id: 143, weight: 6 },
     ],
   },
   cave: {
@@ -75,6 +78,8 @@ export const BIOMES = {
       { id: 63, weight: 16 },
       { id: 92, weight: 14 },
       { id: 95, weight: 8 },
+      { id: 180, weight: 12 },
+      { id: 93, weight: 8 },
     ],
   },
   water: {
@@ -89,6 +94,8 @@ export const BIOMES = {
       { id: 58, weight: 16 },
       { id: 129, weight: 14 },
       { id: 131, weight: 10 },
+      { id: 116, weight: 16 },
+      { id: 117, weight: 8 },
     ],
   },
   volcano: {
@@ -102,6 +109,7 @@ export const BIOMES = {
       { id: 58, weight: 18 },
       { id: 126, weight: 20 },
       { id: 74, weight: 16 },
+      { id: 181, weight: 8 },
     ],
   },
   peak: {
@@ -151,14 +159,14 @@ const CHAR_TO_TILE = {
 // 52 columns x 38 rows cohesive island linking Village, Forest, Cavern, Lagoon, Ember Caldera & Starfall Peak
 const RAW_MAP = [
   'TTTTTTTTTTTTTTTTTTTT################################',
-  'T..,,,,..T..,,,,..T##ppccccc#cccccc##vvvvaaaLLLLvvv#',
+  'T..,,,,..T..,,,,.CT##ppcccCc#cccccc##vvvvaaaLLLLvvv#',
   'T.,,,,,,....,,,,..T#pccccccp#cppppp##vCvaaaLLvvLLvv#',
   'T..C,,,..T..,,,S..T#cp###ccp#cp##Sp##vvvvaaLviSivLv#',
   'T..,,,,..T..,,,r..T#cp#ppccp#cp##rpi#aaaaavLvvrvvLv#',
   'T....====...=rrr..T#cpppccccpppccrprraaaaavLLBBLLLL#',
   'T.,,====,,,,====,.T##ccc######cccppi#vvvvvaaaaraavv#',
   'T.,,==,,,T..==,,,,T#ccccccppccccccp##vvvvvLLaaaarav#',
-  'T..===..==!===..,.T#pccccc#pcccccpp####vvLLaLaaaarv#',
+  'T..===..==!===..,.T#pccccc#pcccccpp####vvLLaLaaaarS#',
   'TTTi====iTTTTTTTTTT#ppcccc#pp####pp##vvvaaaaaaavvvv#',
   'T..*====*.........T##pccccccp#pp#pp##vvaaaLLLLaaavv#',
   'T.RRRR..*..RRRR..*T#pp###ccpp#ppCpp##vvaaLLBBLLaaav#',
@@ -170,7 +178,7 @@ const RAW_MAP = [
   'T.......==........T########pp######i#vvvvaaarrrvvLv#',
   'TTTTi..===..iTTTTTTTssssssspp##ssssT#######irr#i####',
   'Tssss..===..ssssssTsssssssspp##ssssTIfffffnnrrnnfffI',
-  'Tss..ssss!==ssss..sssswwwssssppwwssTInnnffnnffnnfffI',
+  'Tss..ssss!==ssss..sssswwwssssppwwssTInSnffnnffnnfffI',
   'TsswwwwsssssssswwwwsswwwwwwsssswwssTInnnnnffffffnnfI',
   'Tsswwww~~BBBB~~wwwwss~~BBBB~~wwwwssiIfffnffff+ffnCII',
   'Tssw~~~~~ssss~~wwww~~~~srSsss~BBBBrrrffff!fffffffffI',
@@ -184,7 +192,7 @@ const RAW_MAP = [
   'T~wwssssss*ssssswwBBBBBBBBrffffffffffnffffffIffnnffI',
   'T~wwwsssss*sssswww~~~wwwwwIfffnnnnffffffrfffIfffrrrI',
   'T~~wwwwsssssswwww~~~~wwwwwInnnIInnnfffffrrriSiIfrffI',
-  'T~~~wwwwwswwwww~~~~~~wwwwwInnCIInnnfffnnffrrrrrffnfI',
+  'T~~~wwwwwswwwww~~~~~~wwwwwInnCIInnnfffnnffrrrrrffCfI',
   'T~~~~~~wwwww~~~~~~~~~~~~~~InnnffnnnnnnnnfffffffffnnI',
   'T~~~~~~~~~~~~~~~~~~~~~~~~~IfffffffffffffnffffffffnnI',
   'TTTTTTTTTTTTTTTTTTTTTTTTTTIIIIIIIIIIIIIIIIIIIIIIIIII',
@@ -263,6 +271,26 @@ export const SHRINES = {
     intro: 'The Guardian Articuno descends in a flurry of starlit frost! Triumph to claim the Aurora Badge!',
     clearedText: 'Aurora ribbons shimmer softly above Starfall Shrine. You carry its celestial blessing!',
   },
+  '50,8': {
+    id: 'thunder_shrine',
+    name: 'Thunder Roost Shrine',
+    biome: 'volcano',
+    guardianId: 145,
+    level: 14,
+    badgeId: 'tempest',
+    intro: 'The Guardian Zapdos crackles atop Thunder Roost with golden stormlight! Triumph to earn the Sky Tempest Badge!',
+    clearedText: 'Crisp electric sparks hum peacefully around Thunder Roost Shrine. Your Sky Tempest Badge shines!',
+  },
+  '38,20': {
+    id: 'starlight_shrine',
+    name: 'Starlight Sanctum',
+    biome: 'peak',
+    guardianId: 151,
+    level: 18,
+    badgeId: 'celestial',
+    intro: 'The mythical Guardian Mew floats in an aurora halo at Starlight Sanctum! Prove your heart to claim the Celestial Mythic Crown!',
+    clearedText: 'Starlight Sanctum shimmers with timeless cosmic grace. You hold Mew’s celestial blessing!',
+  },
 };
 
 export const CHESTS = {
@@ -272,6 +300,20 @@ export const CHESTS = {
     label: 'Forest Berry Stash',
     rewards: { potions: 3, greatBalls: 2 },
     message: '{trainer} opened the Forest Stash and found 3 Berry Potions + 2 Great Balls!',
+  },
+  '17,1': {
+    id: 'forest_chest_leaf',
+    biome: 'forest',
+    label: 'Emerald Canopy Chest',
+    rewards: { potions: 2, greatBalls: 2, gems: { leaf_gem: 1 } },
+    message: '{trainer} opened the Emerald Canopy Chest and found a Verdant Gem 🍃 + 2 Berry Potions + 2 Great Balls!',
+  },
+  '26,1': {
+    id: 'cave_chest_star',
+    biome: 'cave',
+    label: 'Starlight Vault Chest',
+    rewards: { potions: 2, greatBalls: 1, starBalls: 2 },
+    message: '{trainer} opened the Starlight Vault Chest and found 2 🌟 Star Balls + 1 Great Ball + 2 Berry Potions!',
   },
   '32,11': {
     id: 'cave_chest',
@@ -314,6 +356,13 @@ export const CHESTS = {
     label: 'Moonbeam Ice Chest',
     rewards: { potions: 2, greatBalls: 3, gems: { moon_gem: 1 } },
     message: '{trainer} opened the Moonbeam Ice Chest and found a Starlight Gem 🌙 + 2 Berry Potions + 3 Great Balls!',
+  },
+  '49,34': {
+    id: 'peak_chest_ice',
+    biome: 'peak',
+    label: 'Frost Crystal Chest',
+    rewards: { potions: 2, greatBalls: 2, gems: { ice_gem: 1 } },
+    message: '{trainer} opened the Frost Crystal Chest and found an Aurora Gem ❄️ + 2 Berry Potions + 2 Great Balls!',
   },
 };
 
@@ -408,6 +457,36 @@ export const NPCS = {
     greeting: 'Look at the aurora ribbons dancing above Starfall Peak, {trainer}! Catch Seel or Dratini—or clear Starfall Shrine—to earn a Spark Gem!',
     questId: 'quest_peak_aurora',
   },
+  '5,16': {
+    id: 'npc_celeste',
+    name: 'Stylist Celeste',
+    role: 'Island Stylist',
+    biome: 'village',
+    palette: {
+      outfitPrimary: '#ec4899',
+      outfitSecondary: '#fef08a',
+      hair: '#6b21a8',
+      skin: '#fde2c8',
+      hat: '#be185d',
+    },
+    greeting: 'Looking sharp, {trainer}! Visit 4 regions, catch 6 species, or evolve a partner—and tap your HUD portrait anytime to customize your outfit!',
+    questId: 'quest_celeste_style',
+  },
+  '37,32': {
+    id: 'npc_yuki',
+    name: 'Sculptor Yuki',
+    role: 'Aurora Ice Sculptor',
+    biome: 'peak',
+    palette: {
+      outfitPrimary: '#0891b2',
+      outfitSecondary: '#e0f2fe',
+      hair: '#cbd5e1',
+      skin: '#fde2c8',
+      hat: '#155e75',
+    },
+    greeting: 'The frost glitters like spun starlight, {trainer}! Befriend 2 Peak, Ice, or Dragon Pokémon—or clear Starfall Shrine—for an Aurora Gem!',
+    questId: 'quest_yuki_peak',
+  },
 };
 
 function countCaughtFromList(profile, ids) {
@@ -415,12 +494,13 @@ function countCaughtFromList(profile, ids) {
   return ids.filter((id) => Boolean(caught[id])).length;
 }
 
-const FOREST_QUEST_IDS = [10, 11, 16, 25, 43, 133];
-const CAVE_QUEST_IDS = [35, 37, 63, 74, 92, 95];
-const WATER_QUEST_IDS = [54, 58, 60, 120, 129, 131];
+const FOREST_QUEST_IDS = [10, 11, 16, 25, 39, 43, 133, 143, 179];
+const CAVE_QUEST_IDS = [35, 37, 63, 74, 92, 93, 95, 180];
+const WATER_QUEST_IDS = [54, 58, 60, 116, 117, 120, 129, 131];
 const VOLCANO_CORE_IDS = [77, 126];
-const VOLCANO_ALL_IDS = [77, 37, 58, 126, 74];
+const VOLCANO_ALL_IDS = [77, 37, 58, 126, 74, 181];
 const PEAK_CORE_IDS = [86, 147, 148];
+const YUKI_PEAK_IDS = [86, 87, 144, 147, 148, 149, 151, 230, 471];
 
 export const FIELD_QUESTS = [
   {
@@ -519,7 +599,143 @@ export const FIELD_QUESTS = [
     },
     completeDialogue: 'Marvelous Pokédex research, {trainer}! Professor Willow rewarded you with a Starlight Gem 🌙, 3 Great Balls, and 2 Berry Potions!',
   },
+  {
+    id: 'quest_celeste_style',
+    npcId: 'npc_celeste',
+    title: 'Starlight Fashion Trailblazer',
+    description: 'Explore 4+ island regions, catch 6 unique species, or evolve a partner Pokémon.',
+    rewards: { starBalls: 2, gems: { leaf_gem: 1 } },
+    check(profile) {
+      const visited = (profile?.biomesVisited || []).length;
+      const caught = Object.keys(profile?.pokedex?.caught || {}).length;
+      const evos = profile?.stats?.evolutions || 0;
+      return visited >= 4 || evos >= 1 || caught >= 6;
+    },
+    progressText(profile) {
+      const visited = Math.min(4, (profile?.biomesVisited || []).length);
+      const caught = Math.min(6, Object.keys(profile?.pokedex?.caught || {}).length);
+      return `${visited}/4 regions visited or ${caught}/6 species caught (or evolve 1 Pokémon)`;
+    },
+    completeDialogue: 'Fabulous adventuring, {trainer}! Stylist Celeste presented you with 2 🌟 Star Balls and a Verdant Gem 🍃!',
+  },
+  {
+    id: 'quest_yuki_peak',
+    npcId: 'npc_yuki',
+    title: 'Crystal Ice Sculptor',
+    description: 'Catch 2 Peak, Ice, or Dragon Pokémon, or clear the Starfall Shrine.',
+    rewards: { starBalls: 1, gems: { ice_gem: 1 } },
+    check(profile) {
+      if (profile?.shrinesCleared?.includes('peak_shrine')) return true;
+      return countCaughtFromList(profile, YUKI_PEAK_IDS) >= 2;
+    },
+    progressText(profile) {
+      if (profile?.shrinesCleared?.includes('peak_shrine')) return 'Starfall Shrine cleared!';
+      const n = Math.min(2, countCaughtFromList(profile, YUKI_PEAK_IDS));
+      return `${n}/2 Peak/Ice/Dragon species caught`;
+    },
+    completeDialogue: 'Chiseled like starlit crystal, {trainer}! Sculptor Yuki gifted you 1 🌟 Star Ball and an Aurora Gem ❄️!',
+  },
 ];
+
+export const RIVAL_TRAINERS = {
+  '11,5': {
+    id: 'rival_leo',
+    name: 'Forest Ranger Leo',
+    role: 'Whispering Forest Challenger',
+    biome: 'forest',
+    palette: {
+      outfitPrimary: '#15803d',
+      outfitSecondary: '#fde047',
+      hair: '#78350f',
+      skin: '#f6cfa9',
+      hat: '#166534',
+      accent: '#4ade80',
+    },
+    party: [
+      { speciesId: 17, level: 7 },
+      { speciesId: 44, level: 8 },
+    ],
+    rewards: { greatBalls: 2, potions: 2, gems: { leaf_gem: 1 } },
+    rematchRewards: { greatBalls: 1, potions: 1 },
+    intro: 'Hey {trainer}! Ready to test your teamwork under the forest canopy? Let’s battle!',
+    rematchIntro: 'Back for a woodland rematch, {trainer}? My partners trained hard!',
+    winText: 'Awesome teamwork, {trainer}! Forest Ranger Leo gifted you a Verdant Gem 🍃 and Ranger supplies!',
+    rematchWinText: 'Sharp strategy, {trainer}! Leo shared bonus Ranger supplies after a great rematch!',
+  },
+  '31,8': {
+    id: 'rival_aria',
+    name: 'Crystal Ace Aria',
+    role: 'Crystal Cavern Challenger',
+    biome: 'cave',
+    palette: {
+      outfitPrimary: '#7e22ce',
+      outfitSecondary: '#22d3ee',
+      hair: '#1e1b4b',
+      skin: '#fde2c8',
+      hat: '#581c87',
+      accent: '#e879f9',
+    },
+    party: [
+      { speciesId: 64, level: 10 },
+      { speciesId: 196, level: 11 },
+    ],
+    rewards: { greatBalls: 2, gems: { moon_gem: 1 } },
+    rematchRewards: { greatBalls: 1 },
+    intro: 'The crystals shimmer when strong trainers meet, {trainer}! Show me your sparkle!',
+    rematchIntro: 'The cavern echoes with our rematch spirit, {trainer}!',
+    winText: 'Dazzling victory, {trainer}! Crystal Ace Aria rewarded you with a Starlight Gem 🌙 and Great Balls!',
+    rematchWinText: 'Brilliant battle, {trainer}! Aria handed you a Great Ball for another stellar duel!',
+  },
+  '7,30': {
+    id: 'rival_kai',
+    name: 'Tide Captain Kai',
+    role: 'Sapphire Lagoon Challenger',
+    biome: 'water',
+    palette: {
+      outfitPrimary: '#0369a1',
+      outfitSecondary: '#fde047',
+      hair: '#0f172a',
+      skin: '#f6cfa9',
+      hat: '#0284c7',
+      accent: '#38bdf8',
+    },
+    party: [
+      { speciesId: 61, level: 10 },
+      { speciesId: 117, level: 12 },
+    ],
+    rewards: { starBalls: 1, gems: { water_gem: 1 } },
+    rematchRewards: { greatBalls: 2 },
+    intro: 'Ahoy, {trainer}! Think your crew can ride the Sapphire Lagoon waves? Battle stations!',
+    rematchIntro: 'High tide rematch, {trainer}! Let’s make a splash!',
+    winText: 'Smooth sailing, {trainer}! Tide Captain Kai gifted you a 🌟 Star Ball and a Tide Gem 💧!',
+    rematchWinText: 'First-mate form, {trainer}! Kai shared extra Great Balls from his sea chest!',
+  },
+  '45,14': {
+    id: 'rival_blaze',
+    name: 'Caldera Champion Blaze',
+    role: 'Ember Caldera Challenger',
+    biome: 'volcano',
+    palette: {
+      outfitPrimary: '#c2410c',
+      outfitSecondary: '#fef08a',
+      hair: '#450a0a',
+      skin: '#fde2c8',
+      hat: '#9a3412',
+      accent: '#fb923c',
+    },
+    party: [
+      { speciesId: 59, level: 14 },
+      { speciesId: 181, level: 15 },
+      { speciesId: 471, level: 16 },
+    ],
+    rewards: { starBalls: 2, gems: { ice_gem: 1 } },
+    rematchRewards: { starBalls: 1, potions: 2 },
+    intro: 'Welcome to Ember Caldera, {trainer}! Show me if your team can outshine fire, thunder, and frost!',
+    rematchIntro: 'Ready to turn up the heat again, {trainer}? Let’s clash at full power!',
+    winText: 'Unstoppable spirit, {trainer}! Caldera Champion Blaze awarded you 2 🌟 Star Balls and an Aurora Gem ❄️!',
+    rematchWinText: 'True Champion caliber, {trainer}! Blaze gifted you a 🌟 Star Ball and Berry Potions!',
+  },
+};
 
 export const LANDMARKS = {
   '16,11': {
@@ -572,7 +788,7 @@ export function isTileWalkableAt(x, y) {
   if (!Number.isInteger(x) || !Number.isInteger(y)) return false;
   if (x < 0 || y < 0 || x >= WORLD_COLS || y >= WORLD_ROWS) return false;
   const key = `${x},${y}`;
-  if (NPCS[key] || LANDMARKS[key]) return false;
+  if (NPCS[key] || LANDMARKS[key] || RIVAL_TRAINERS[key]) return false;
   const tile = WORLD_MAP[y]?.[x];
   return tile !== undefined && !SOLID_TILES.has(tile);
 }
@@ -691,7 +907,7 @@ export function getCompassGuidance(profile, speciesMap = null) {
   const npcsTalked = new Set(profile?.npcsTalked || []);
   const shrinesCleared = new Set(profile?.shrinesCleared || []);
   const caughtCount = Object.keys(profile?.pokedex?.caught || {}).length;
-  const totalSpecies = speciesMap ? Object.keys(speciesMap).length : 54;
+  const totalSpecies = speciesMap ? Object.keys(speciesMap).length : 74;
 
   let goal = null;
 
@@ -745,6 +961,24 @@ export function getCompassGuidance(profile, speciesMap = null) {
     goal = {
       icon: '❄️',
       title: 'Starfall Shrine (SE Peak)',
+      targetBiomeId: 'peak',
+      targetX: pos.x,
+      targetY: pos.y,
+    };
+  } else if (!shrinesCleared.has('thunder_shrine')) {
+    const pos = findEntryCoords(SHRINES, (s) => s.id === 'thunder_shrine');
+    goal = {
+      icon: '🌩️',
+      title: 'Thunder Roost Shrine (NE Cliff)',
+      targetBiomeId: 'volcano',
+      targetX: pos.x,
+      targetY: pos.y,
+    };
+  } else if (!shrinesCleared.has('starlight_shrine')) {
+    const pos = findEntryCoords(SHRINES, (s) => s.id === 'starlight_shrine');
+    goal = {
+      icon: '👑',
+      title: 'Starlight Sanctum (Peak Summit)',
       targetBiomeId: 'peak',
       targetX: pos.x,
       targetY: pos.y,
