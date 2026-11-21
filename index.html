@@ -72,7 +72,7 @@
       <!-- Top HUD -->
       <header class="hud-bar">
         <div class="hud-left">
-          <canvas id="hud-portrait" width="40" height="40" class="hud-portrait"></canvas>
+          <canvas id="hud-portrait" width="40" height="40" class="hud-portrait" role="button" tabindex="0" title="Customize Trainer Style" aria-label="Customize Trainer Style"></canvas>
           <div class="hud-trainer-meta">
             <span id="hud-trainer-name" class="hud-trainer-name">Violet</span>
             <span id="hud-lead-label" class="hud-lead-label">Lv.5 Bulbasaur</span>
@@ -85,8 +85,8 @@
         </div>
 
         <div class="hud-actions">
-          <button id="hud-btn-dex" type="button" class="hud-pill" title="Open Pokédex &amp; Team (P)">📖 Dex 1/54</button>
-          <button id="hud-btn-badges" type="button" class="hud-pill" title="View Elemental Badges">🏅 0/8</button>
+          <button id="hud-btn-dex" type="button" class="hud-pill" title="Open Pokédex &amp; Team (P)">📖 Dex 1/74</button>
+          <button id="hud-btn-badges" type="button" class="hud-pill" title="View Elemental Badges">🏅 0/10</button>
           <button id="hud-btn-mute" type="button" class="hud-icon-btn" title="Toggle Sound">🔊</button>
           <button id="hud-btn-pad" type="button" class="hud-icon-btn" title="Toggle On-Screen Gamepad">🎮</button>
           <button id="hud-btn-settings" type="button" class="hud-icon-btn" title="Settings &amp; Trainer Switch">⚙️</button>
@@ -101,7 +101,7 @@
           <span id="compass-arrow" class="compass-arrow">🧭</span>
           <div class="compass-copy">
             <span id="compass-goal" class="compass-goal">Explore Starlight Island</span>
-            <span id="compass-biome-progress" class="compass-sub">Dex 0/54 • Shrines 0/5</span>
+            <span id="compass-biome-progress" class="compass-sub">Dex 0/74 • Shrines 0/7</span>
           </div>
         </button>
 
@@ -190,6 +190,7 @@
               <div id="battle-actions" class="battle-actions">
                 <button id="battle-btn-ball" type="button" class="battle-act-btn is-ball">🔴 Poké Ball ∞</button>
                 <button id="battle-btn-great" type="button" class="battle-act-btn is-great">🔵 Great Ball (3)</button>
+                <button id="battle-btn-star" type="button" class="battle-act-btn is-star">🌟 Star Ball (1)</button>
                 <button id="battle-btn-potion" type="button" class="battle-act-btn is-potion">🍓 Potion (5)</button>
                 <button id="battle-btn-team" type="button" class="battle-act-btn">🔄 Team</button>
                 <button id="battle-btn-run" type="button" class="battle-act-btn">👟 Run</button>
@@ -251,6 +252,7 @@
             <button id="pokedex-tab-team" type="button" class="tab-btn">⚡ Team &amp; Box</button>
             <button id="pokedex-tab-badges" type="button" class="tab-btn">🏅 Badges</button>
             <button id="pokedex-tab-guide" type="button" class="tab-btn">🧭 Guide</button>
+            <button id="pokedex-tab-trainer" type="button" class="tab-btn">🎨 Style</button>
           </div>
           <button id="pokedex-close-btn" type="button" class="close-btn" aria-label="Close">✕</button>
         </div>

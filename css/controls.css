@@ -352,3 +352,31 @@ body.in-battle.manual-battle-pad .touch-controls {
     display: none;
   }
 }
+
+/* Keep 6-button Battle Actions in 2 compact rows across Chromebook & tablet viewports */
+#battle-actions.battle-actions {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 5px;
+}
+
+#battle-actions.battle-actions .battle-act-btn {
+  grid-column: span 1;
+  min-width: 0;
+  padding: 6px 4px;
+  font-size: clamp(0.64rem, 1.35vw, 0.74rem);
+}
+
+@media (max-height: 640px) {
+  .battle-deck {
+    padding: 7px 10px 8px;
+    gap: 6px;
+  }
+  .battle-log {
+    min-height: 40px;
+    padding: 7px 26px 7px 10px;
+    font-size: 0.82rem;
+  }
+  #battle-actions.battle-actions .battle-act-btn {
+    padding: 5px 4px;
+  }
+}

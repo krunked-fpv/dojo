@@ -5,15 +5,37 @@ import {
   EVOLUTIONS,
   FIELD_QUESTS,
   MOVES,
+  RIVAL_TRAINERS,
   SHRINES,
   SPECIES,
+  TRAINER_ACCESSORIES,
+  TRAINER_STYLES,
+  TRAINERS,
   TYPES,
   getBiomeDiscoveryStats,
   getCompassGuidance,
+  resolveTrainerLook,
 } from './config.js';
 import { attachPokemonSprite } from './pokemon.js';
+import { drawTrainerPortrait } from './overworld.js';
 
 const BIOME_ORDER = ['village', 'forest', 'cave', 'water', 'volcano', 'peak'];
+
+const FALLBACK_STYLES = {
+  default: { id: 'default', name: 'Signature Outfit', icon: '⭐', outfitPrimary: '#a855f7', outfitSecondary: '#f472b6', accent: '#c084fc' },
+  royal: { id: 'royal', name: 'Starlight Royal', icon: '👑', outfitPrimary: '#6366f1', outfitSecondary: '#fde047', accent: '#818cf8' },
+  aurora: { id: 'aurora', name: 'Aurora Frost', icon: '❄️', outfitPrimary: '#0ea5e9', outfitSecondary: '#a5f3fc', accent: '#38bdf8' },
+  ember: { id: 'ember', name: 'Ember Explorer', icon: '🔥', outfitPrimary: '#ea580c', outfitSecondary: '#fde047', accent: '#fb923c' },
+  ranger: { id: 'ranger', name: 'Emerald Ranger', icon: '🌿', outfitPrimary: '#16a34a', outfitSecondary: '#fde047', accent: '#4ade80' },
+  nebula: { id: 'nebula', name: 'Cosmic Nebula', icon: '🌌', outfitPrimary: '#7e22ce', outfitSecondary: '#22d3ee', accent: '#e879f9' },
+};
+
+const FALLBACK_ACCESSORIES = {
+  cap: { id: 'cap', name: 'Adventure Cap', icon: '🧢' },
+  crown: { id: 'crown', name: 'Starlight Crown', icon: '👑' },
+  wizard: { id: 'wizard', name: 'Mystic Hat', icon: '🧙' },
+  headband: { id: 'headband', name: 'Thunder Headband', icon: '🎀' },
+};
 
 function resolveDexSpeciesId(raw) {
   if (typeof raw === 'number') {
@@ -126,6 +148,7 @@ function formatRewardsList(rewards = {}) {
   const chips = [];
   if (rewards.potions) chips.push(`🍓 ${rewards.potions} Potion${rewards.potions > 1 ? 's' : ''}`);
   if (rewards.greatBalls) chips.push(`🔵 ${rewards.greatBalls} Great Ball${rewards.greatBalls > 1 ? 's' : ''}`);
+  if (rewards.starBalls) chips.push(`🌟 ${rewards.starBalls} Star Ball${rewards.starBalls > 1 ? 's' : ''}`);
   if (rewards.gems && typeof rewards.gems === 'object') {
     for (const [gemId, count] of Object.entries(rewards.gems)) {
       if (count > 0) {
@@ -161,11 +184,12 @@ function formatCompassArrow(guidance, profile) {
 }
 
 export class PokedexUI {
-  constructor({ storage, audio, onTeamChanged, onBadgesUnlocked, onClose }) {
+  constructor({ storage, audio, onTeamChanged, onBadgesUnlocked, onAppearanceChanged, onClose }) {
     this.storage = storage;
     this.audio = audio;
     this.onTeamChanged = onTeamChanged;
     this.onBadgesUnlocked = onBadgesUnlocked;
+    this.onAppearanceChanged = onAppearanceChanged;
     this.onClose = onClose;
 
     this.modalEl = document.getElementById('pokedex-modal');
@@ -177,12 +201,15 @@ export class PokedexUI {
       team: document.getElementById('pokedex-tab-team'),
       badges: document.getElementById('pokedex-tab-badges'),
       guide: document.getElementById('pokedex-tab-guide'),
+      trainer: document.getElementById('pokedex-tab-trainer'),
     };
 
     this.activeTab = 'dex';
+    this.dexFilter = 'all';
     this.selectedSpeciesId = null;
     this.swapBoxIndex = null;
     this.evoBanner = null;
+    this.editingNicknameUid = null;
 
     this.bindUI();
   }
@@ -205,6 +232,10 @@ export class PokedexUI {
         this.activeTab = tab;
         this.swapBoxIndex = null;
         this.evoBanner = null;
+        this.editingNicknameUid = null;
+        if (tab === 'dex') {
+          this.dexFilter = 'all';
+        }
         this.render();
       });
     });
@@ -218,6 +249,10 @@ export class PokedexUI {
     this.activeTab = tab;
     this.swapBoxIndex = null;
     this.evoBanner = null;
+    this.editingNicknameUid = null;
+    if (tab === 'dex') {
+      this.dexFilter = 'all';
+    }
     if (this.modalEl) {
       this.modalEl.hidden = false;
     }
@@ -227,6 +262,7 @@ export class PokedexUI {
   close() {
     const wasOpen = this.isOpen();
     this.evoBanner = null;
+    this.editingNicknameUid = null;
     if (this.modalEl) {
       this.modalEl.hidden = true;
     }
@@ -252,6 +288,8 @@ export class PokedexUI {
       this.renderTeam(profile);
     } else if (this.activeTab === 'guide') {
       this.renderGuide(profile);
+    } else if (this.activeTab === 'trainer') {
+      this.renderTrainer(profile);
     } else {
       this.renderBadges(profile);
     }
@@ -320,7 +358,32 @@ export class PokedexUI {
     const caughtCount = allSpecies.filter((sp) => (caughtMap.get(sp.id) || 0) > 0).length;
     const seenCount = allSpecies.filter((sp) => seenSet.has(sp.id)).length;
 
-    if (!this.selectedSpeciesId || !SPECIES[this.selectedSpeciesId]) {
+    const filterDefs = [
+      { id: 'all', label: `All (${allSpecies.length})` },
+      { id: 'caught', label: `Caught (${caughtCount})` },
+      { id: 'uncaught', label: `Need to Catch (${allSpecies.length - caughtCount})` },
+      { id: 'forest', label: '🌲 Forest' },
+      { id: 'cave', label: '💎 Cave' },
+      { id: 'water', label: '🌊 Lagoon' },
+      { id: 'volcano', label: '🌋 Caldera' },
+      { id: 'peak', label: '❄️ Peak' },
+      { id: 'starter', label: '🌟 Starters' },
+    ];
+    if (!filterDefs.some((f) => f.id === this.dexFilter)) {
+      this.dexFilter = 'all';
+    }
+
+    const filteredSpecies = allSpecies.filter((sp) => {
+      const isCaught = (caughtMap.get(sp.id) || 0) > 0;
+      if (this.dexFilter === 'all') return true;
+      if (this.dexFilter === 'caught') return isCaught;
+      if (this.dexFilter === 'uncaught') return !isCaught;
+      return sp.biome === this.dexFilter;
+    });
+
+    if (filteredSpecies.length > 0 && !filteredSpecies.some((sp) => sp.id === this.selectedSpeciesId)) {
+      this.selectedSpeciesId = filteredSpecies[0].id;
+    } else if (!this.selectedSpeciesId || !SPECIES[this.selectedSpeciesId]) {
       this.selectedSpeciesId = allSpecies[0].id;
     }
 
@@ -337,10 +400,34 @@ export class PokedexUI {
     `;
     wrap.appendChild(header);
 
+    const filterBar = document.createElement('div');
+    filterBar.className = 'dex-filter-bar';
+    for (const f of filterDefs) {
+      const pill = document.createElement('button');
+      pill.type = 'button';
+      pill.dataset.filter = f.id;
+      pill.className = `dex-filter-pill ${this.dexFilter === f.id ? 'is-active' : ''}`;
+      pill.textContent = f.label;
+      pill.addEventListener('click', () => {
+        this.audio.playMenuBlip(680);
+        this.dexFilter = f.id;
+        this.render();
+      });
+      filterBar.appendChild(pill);
+    }
+    wrap.appendChild(filterBar);
+
     const grid = document.createElement('div');
     grid.className = 'dex-grid';
 
-    for (const sp of allSpecies) {
+    if (filteredSpecies.length === 0) {
+      const emptyNote = document.createElement('p');
+      emptyNote.className = 'empty-note dex-empty-note';
+      emptyNote.textContent = '✨ No Pokémon match this filter yet — keep exploring Starlight Island!';
+      grid.appendChild(emptyNote);
+    }
+
+    for (const sp of filteredSpecies) {
       const isCaught = (caughtMap.get(sp.id) || 0) > 0;
       const isSeen = isCaught || seenSet.has(sp.id);
       const typeInfo = TYPES[sp.type] || TYPES.normal;
@@ -533,11 +620,13 @@ export class PokedexUI {
       `<span class="gem-chip" title="${gem.name}: ${gem.description}">${gem.icon} <strong>${gems[gem.id] || 0}</strong></span>`
     )).join('');
 
+    const starBalls = profile.bag?.starBalls || 0;
     const bagBar = document.createElement('div');
     bagBar.className = 'dex-summary-bar';
     bagBar.innerHTML = `
       <span>🍓 Potions: <strong>${profile.bag.potions}</strong></span>
       <span>🔵 Great Balls: <strong>${profile.bag.greatBalls}</strong></span>
+      <span>🌟 Star Balls: <strong>${starBalls}</strong></span>
       <span>🔴 Poké Balls: <strong>∞</strong></span>
       <span class="gem-bag-strip">💎 Gems: ${gemBadgesHtml || 'None'}</span>
     `;
@@ -572,7 +661,13 @@ export class PokedexUI {
       const notice = document.createElement('div');
       notice.className = 'swap-notice';
       const boxMon = profile.box[this.swapBoxIndex];
-      notice.innerHTML = `<span>Select a Team slot below to swap with <strong>${boxMon?.name} (Lv.${boxMon?.level})</strong></span>`;
+      const swapLabel = document.createElement('span');
+      swapLabel.textContent = 'Select a Team slot below to swap with ';
+      const strongSwap = document.createElement('strong');
+      strongSwap.textContent = `${boxMon?.displayName || boxMon?.name} (Lv.${boxMon?.level})`;
+      swapLabel.appendChild(strongSwap);
+      notice.appendChild(swapLabel);
+
       const cancelSwap = document.createElement('button');
       cancelSwap.type = 'button';
       cancelSwap.className = 'mini-btn';
@@ -592,11 +687,16 @@ export class PokedexUI {
 
     const teamGrid = document.createElement('div');
     teamGrid.className = 'team-grid';
+    let focusNicknameInput = null;
 
     profile.team.forEach((mon, idx) => {
       const typeInfo = TYPES[mon.type] || TYPES.normal;
       const hpPct = Math.round((mon.hp / Math.max(1, mon.maxHp)) * 100);
       const xpPct = Math.min(100, Math.round((mon.xp / Math.max(1, mon.xpToNext)) * 100));
+      const displayName = mon.displayName || mon.name;
+      const isNicknamed = Boolean(mon.nickname && mon.nickname !== mon.name);
+      const bond = Number.isFinite(Number(mon.bond)) ? Number(mon.bond) : 20;
+      const isBestBuddy = bond >= 60;
 
       const card = document.createElement('div');
       card.className = `team-card ${idx === 0 ? 'is-lead' : ''} ${mon.isShiny ? 'is-shiny-card' : ''}`;
@@ -610,22 +710,102 @@ export class PokedexUI {
 
       const meta = document.createElement('div');
       meta.className = 'team-card-meta';
-      const shinyTag = mon.isShiny ? '<span class="shiny-badge">✨ Shimmer</span>' : '';
-      meta.innerHTML = `
-        <div class="team-card-title">
-          <strong>${mon.name}</strong>
-          <span class="team-lv">Lv.${mon.level}</span>
-        </div>
-        <div class="team-pill-row">
-          <span class="type-pill" style="background:${typeInfo.bg};border-color:${typeInfo.color}">${typeInfo.icon} ${typeInfo.label}</span>
-          ${shinyTag}
-        </div>
+
+      const titleRow = document.createElement('div');
+      titleRow.className = 'team-card-title';
+      const titleNameWrap = document.createElement('span');
+      titleNameWrap.className = 'team-name-wrap';
+      const titleStrong = document.createElement('strong');
+      titleStrong.textContent = displayName;
+      titleNameWrap.appendChild(titleStrong);
+      if (isNicknamed) {
+        const subSpecies = document.createElement('span');
+        subSpecies.className = 'team-species-sub';
+        subSpecies.textContent = `(${mon.name})`;
+        titleNameWrap.appendChild(subSpecies);
+      }
+      const lvSpan = document.createElement('span');
+      lvSpan.className = 'team-lv';
+      lvSpan.textContent = `Lv.${mon.level}`;
+      titleRow.appendChild(titleNameWrap);
+      titleRow.appendChild(lvSpan);
+      meta.appendChild(titleRow);
+
+      const pillRow = document.createElement('div');
+      pillRow.className = 'team-pill-row';
+      pillRow.innerHTML = `
+        <span class="type-pill" style="background:${typeInfo.bg};border-color:${typeInfo.color}">${typeInfo.icon} ${typeInfo.label}</span>
+        ${mon.isShiny ? '<span class="shiny-badge">✨ Shimmer</span>' : ''}
+        <span class="bond-badge ${isBestBuddy ? 'is-best-buddy' : ''}">${isBestBuddy ? '💖 Best Buddy • +Crit' : `♥ Bond ${bond}`}</span>
+      `;
+      meta.appendChild(pillRow);
+
+      const barsWrap = document.createElement('div');
+      barsWrap.innerHTML = `
         <div class="team-bar-row">HP ${mon.hp}/${mon.maxHp}</div>
         <div class="hp-track"><div class="hp-fill ${hpPct <= 22 ? 'is-low' : hpPct <= 50 ? 'is-mid' : ''}" style="width:${hpPct}%"></div></div>
         <div class="xp-track"><div class="xp-fill" style="width:${xpPct}%"></div></div>
       `;
+      meta.appendChild(barsWrap);
+
       top.appendChild(meta);
       card.appendChild(top);
+
+      if (this.editingNicknameUid === mon.uid && this.swapBoxIndex === null) {
+        const nickForm = document.createElement('form');
+        nickForm.className = 'nickname-edit-form';
+        const nickInput = document.createElement('input');
+        nickInput.type = 'text';
+        nickInput.className = 'nickname-input';
+        nickInput.maxLength = 14;
+        nickInput.value = mon.nickname || '';
+        nickInput.placeholder = mon.name;
+        nickInput.setAttribute('aria-label', `Nickname for ${mon.name}`);
+
+        const saveBtn = document.createElement('button');
+        saveBtn.type = 'submit';
+        saveBtn.className = 'mini-btn is-accent nickname-save-btn';
+        saveBtn.textContent = 'Save';
+
+        const resetBtn = document.createElement('button');
+        resetBtn.type = 'button';
+        resetBtn.className = 'mini-btn nickname-clear-btn';
+        resetBtn.title = 'Reset to species name';
+        resetBtn.textContent = 'Reset';
+        resetBtn.addEventListener('click', () => {
+          this.storage.setPokemonNickname?.(mon.uid, '');
+          this.editingNicknameUid = null;
+          this.audio?.playMenuBlip?.(640);
+          this.onTeamChanged?.();
+          this.render();
+        });
+
+        const cancelBtn = document.createElement('button');
+        cancelBtn.type = 'button';
+        cancelBtn.className = 'mini-btn nickname-cancel-btn';
+        cancelBtn.textContent = 'Cancel';
+        cancelBtn.addEventListener('click', () => {
+          this.editingNicknameUid = null;
+          this.audio?.playMenuBlip?.(520);
+          this.render();
+        });
+
+        nickForm.addEventListener('submit', (e) => {
+          e.preventDefault();
+          this.storage.setPokemonNickname?.(mon.uid, nickInput.value);
+          this.editingNicknameUid = null;
+          this.audio?.playMenuBlip?.(760);
+          this.onTeamChanged?.();
+          this.render();
+        });
+
+        nickForm.appendChild(nickInput);
+        nickForm.appendChild(saveBtn);
+        nickForm.appendChild(resetBtn);
+        nickForm.appendChild(cancelBtn);
+        card.appendChild(nickForm);
+        focusNicknameInput = nickInput;
+      }
 
       const { ready: evoReady, hints: evoHints } = this.getMonEvolutionOptions(mon, gems);
       if (evoReady.length > 0 && this.swapBoxIndex === null) {
@@ -688,6 +868,22 @@ export class PokedexUI {
           actions.appendChild(leadPill);
         }
 
+        const actionBtnsRight = document.createElement('div');
+        actionBtnsRight.className = 'team-card-actions-right';
+
+        if (this.editingNicknameUid !== mon.uid) {
+          const nickBtn = document.createElement('button');
+          nickBtn.type = 'button';
+          nickBtn.className = 'mini-btn nickname-edit-btn';
+          nickBtn.textContent = '✏️ Nickname';
+          nickBtn.addEventListener('click', () => {
+            this.audio?.playMenuBlip?.(680);
+            this.editingNicknameUid = mon.uid;
+            this.render();
+          });
+          actionBtnsRight.appendChild(nickBtn);
+        }
+
         if (mon.hp < mon.maxHp && profile.bag.potions > 0) {
           const healBtn = document.createElement('button');
           healBtn.type = 'button';
@@ -702,8 +898,10 @@ export class PokedexUI {
               this.render();
             }
           });
-          actions.appendChild(healBtn);
+          actionBtnsRight.appendChild(healBtn);
         }
+
+        actions.appendChild(actionBtnsRight);
       }
 
       card.appendChild(actions);
@@ -725,12 +923,62 @@ export class PokedexUI {
       const boxGrid = document.createElement('div');
       boxGrid.className = 'box-grid';
       profile.box.forEach((mon, boxIdx) => {
+        const typeInfo = TYPES[mon.type] || TYPES.normal;
+        const displayName = mon.displayName || mon.name;
+        const isNicknamed = Boolean(mon.nickname && mon.nickname !== mon.name);
+        const { ready: boxEvoReady } = this.getMonEvolutionOptions(mon, gems);
+        const isEvoReady = boxEvoReady.length > 0;
+
         const card = document.createElement('div');
-        card.className = `box-card ${this.swapBoxIndex === boxIdx ? 'is-selected' : ''} ${mon.isShiny ? 'is-shiny-card' : ''}`;
+        card.className = [
+          'box-card',
+          this.swapBoxIndex === boxIdx ? 'is-selected' : '',
+          mon.isShiny ? 'is-shiny-card' : '',
+          isEvoReady ? 'is-evo-ready' : '',
+        ].filter(Boolean).join(' ');
+
+        const topRow = document.createElement('div');
+        topRow.className = 'box-card-top';
+
         const img = document.createElement('img');
         attachPokemonSprite(img, mon, { back: false, shiny: Boolean(mon.isShiny), timeoutMs: 1800 });
-        const label = document.createElement('div');
-        label.innerHTML = `<strong>${mon.isShiny ? '✨ ' : ''}${mon.name}</strong><small>Lv.${mon.level}</small>`;
+
+        const info = document.createElement('div');
+        info.className = 'box-card-info';
+        const nameLine = document.createElement('strong');
+        nameLine.textContent = `${mon.isShiny ? '✨ ' : ''}${displayName}${isNicknamed ? ` (${mon.name})` : ''}`;
+        const lvLine = document.createElement('small');
+        lvLine.textContent = `Lv.${mon.level}`;
+        const pillLine = document.createElement('div');
+        pillLine.className = 'box-card-pills';
+        pillLine.innerHTML = `
+          <span class="type-pill" style="background:${typeInfo.bg};border-color:${typeInfo.color}">${typeInfo.icon} ${typeInfo.label}</span>
+          ${mon.isShiny ? '<span class="shiny-badge">✨ Shimmer</span>' : ''}
+        `;
+        info.appendChild(nameLine);
+        info.appendChild(lvLine);
+        info.appendChild(pillLine);
+
+        topRow.appendChild(img);
+        topRow.appendChild(info);
+        card.appendChild(topRow);
+
+        if (isEvoReady && this.swapBoxIndex === null) {
+          const evoRow = document.createElement('div');
+          evoRow.className = 'evo-btn-row';
+          for (const opt of boxEvoReady) {
+            const evoBtn = document.createElement('button');
+            evoBtn.type = 'button';
+            evoBtn.className = 'evolve-btn box-evolve-btn';
+            evoBtn.textContent = opt.label;
+            evoBtn.addEventListener('click', () => this.triggerInModalEvolution(mon, opt));
+            evoRow.appendChild(evoBtn);
+          }
+          card.appendChild(evoRow);
+        }
+
+        const actionsRow = document.createElement('div');
+        actionsRow.className = 'box-card-actions';
         const swapBtn = document.createElement('button');
         swapBtn.type = 'button';
         swapBtn.className = 'mini-btn';
@@ -740,9 +988,9 @@ export class PokedexUI {
           this.swapBoxIndex = boxIdx;
           this.render();
         });
-        card.appendChild(img);
-        card.appendChild(label);
-        card.appendChild(swapBtn);
+        actionsRow.appendChild(swapBtn);
+        card.appendChild(actionsRow);
+
         boxGrid.appendChild(card);
       });
       wrap.appendChild(boxGrid);
@@ -750,6 +998,10 @@ export class PokedexUI {
 
     this.bodyEl.innerHTML = '';
     this.bodyEl.appendChild(wrap);
+    if (focusNicknameInput) {
+      focusNicknameInput.focus();
+      focusNicknameInput.select();
+    }
   }
 
   renderGuide(profile) {
@@ -763,6 +1015,8 @@ export class PokedexUI {
     const totalShrines = Object.keys(SHRINES).length;
     const quests = Array.isArray(FIELD_QUESTS) ? FIELD_QUESTS : Object.values(FIELD_QUESTS || {});
     const doneQuests = quests.filter((q) => profile.questsCompleted?.includes(q.id)).length;
+    const rivalsList = Object.values(RIVAL_TRAINERS || {}).filter(Boolean);
+    const rivalsDefeated = rivalsList.filter((r) => profile.rivalsDefeated?.includes(r.id)).length;
 
     const guidance = typeof getCompassGuidance === 'function' ? getCompassGuidance(profile, SPECIES) : null;
     const dirText = formatCompassArrow(guidance, profile);
@@ -780,6 +1034,7 @@ export class PokedexUI {
         ${targetBiome ? `<span>📍 Destination: <strong>${targetBiome.icon} ${targetBiome.name}</strong></span>` : ''}
         <span>📖 Dex: <strong>${caughtCount}/${totalSpecies}</strong></span>
         <span>⛩️ Shrines: <strong>${(profile.shrinesCleared || []).length}/${totalShrines}</strong></span>
+        <span>⚔️ Rivals: <strong>${rivalsDefeated}/${rivalsList.length}</strong></span>
         <span>📜 Quests: <strong>${doneQuests}/${quests.length}</strong></span>
       </div>
     `;
@@ -809,7 +1064,8 @@ export class PokedexUI {
       const stats = typeof getBiomeDiscoveryStats === 'function'
         ? getBiomeDiscoveryStats(profile, biome.id)
         : null;
-      const shrine = Object.values(SHRINES).find((s) => s.biome === biome.id) || null;
+      const biomeShrines = Object.values(SHRINES).filter((s) => s.biome === biome.id);
+      const biomeRival = rivalsList.find((r) => r.biome === biome.id) || null;
       const visited = Boolean(profile.biomesVisited?.includes(biome.id) || biome.id === 'village');
       const lvRange = Array.isArray(biome.levelRange) ? `Lv.${biome.levelRange[0]}–${biome.levelRange[1]}` : 'Safe Zone';
       const totalBiomeSp = stats?.totalSpecies ?? biome.encounters?.length ?? 0;
@@ -832,8 +1088,12 @@ export class PokedexUI {
       const chestRow = stats && stats.chestsTotal > 0
         ? `<span>📦 Chests ${stats.chestsOpened}/${stats.chestsTotal}</span>`
         : '';
-      const shrineRow = shrine
-        ? `<span>⛩️ ${shrine.name}: ${stats?.shrineCleared ? 'Cleared ✓' : `Guardian Lv.${shrine.level}`}</span>`
+      const shrineRow = biomeShrines.map((sh) => {
+        const cleared = Boolean(profile.shrinesCleared?.includes(sh.id));
+        return `<span>⛩️ ${sh.name}: ${cleared ? 'Cleared ✓' : `Guardian Lv.${sh.level}`}</span>`;
+      }).join('');
+      const rivalRow = biomeRival
+        ? `<span>⚔️ ${biomeRival.name}: ${profile.rivalsDefeated?.includes(biomeRival.id) ? 'Defeated ✓ (Rematchable)' : 'Ready to Duel!'}</span>`
         : '';
 
       card.innerHTML = `
@@ -846,12 +1106,41 @@ export class PokedexUI {
           ${dexRow}
           ${chestRow}
           ${shrineRow}
+          ${rivalRow}
         </div>
         ${totalBiomeSp > 0 ? `<div class="biome-progress-track"><div class="biome-progress-fill" style="width:${pct}%"></div></div>` : ''}
       `;
       biomeGrid.appendChild(card);
     }
     wrap.appendChild(biomeGrid);
+
+    if (rivalsList.length > 0) {
+      const rivalHeading = document.createElement('h3');
+      rivalHeading.className = 'section-heading';
+      rivalHeading.textContent = `Rival Trainers (${rivalsDefeated}/${rivalsList.length})`;
+      wrap.appendChild(rivalHeading);
+
+      const rivalGrid = document.createElement('div');
+      rivalGrid.className = 'guide-grid';
+      for (const rival of rivalsList) {
+        const defeated = Boolean(profile.rivalsDefeated?.includes(rival.id));
+        const biomeInfo = BIOMES[rival.biome];
+        const partyCount = Array.isArray(rival.party) ? rival.party.length : 1;
+        const rewardChips = formatRewardsList(defeated ? (rival.rematchRewards || rival.rewards) : rival.rewards);
+        const rCard = document.createElement('div');
+        rCard.className = `quest-card ${defeated ? 'is-done' : ''}`;
+        rCard.innerHTML = `
+          <div class="quest-card-head">
+            <strong>${defeated ? '🏆' : '⚔️'} ${rival.name}</strong>
+            <span class="quest-status-pill">${defeated ? 'Defeated ✓ (+2 Lv Rematch)' : `${partyCount} Pokémon`}</span>
+          </div>
+          <p class="quest-desc">${biomeInfo ? `${biomeInfo.icon} ${biomeInfo.name}` : 'Starlight Island'} • ${defeated ? 'Challenge again anytime for bonus items!' : 'Talk to challenge this rival!'}</p>
+          ${rewardChips.length ? `<div class="quest-reward-row">${rewardChips.map((c) => `<span class="quest-reward-chip">${c}</span>`).join('')}</div>` : ''}
+        `;
+        rivalGrid.appendChild(rCard);
+      }
+      wrap.appendChild(rivalGrid);
+    }
 
     const questHeading = document.createElement('h3');
     questHeading.className = 'section-heading';
@@ -941,5 +1230,146 @@ export class PokedexUI {
     wrap.appendChild(grid);
     this.bodyEl.innerHTML = '';
     this.bodyEl.appendChild(wrap);
+  }
+
+  renderTrainer(profile) {
+    const wrap = document.createElement('div');
+    wrap.className = 'trainer-studio-layout';
+
+    const appearance = profile.appearance || { styleId: 'default', accessory: 'cap', cape: false };
+    const trainerInfo = TRAINERS?.[profile.trainerId] || TRAINERS?.violet || { name: 'Trainer', emblem: '★', tagline: 'Starlight Explorer' };
+    const stylesMap = TRAINER_STYLES && Object.keys(TRAINER_STYLES).length ? TRAINER_STYLES : FALLBACK_STYLES;
+    const accMap = TRAINER_ACCESSORIES && Object.keys(TRAINER_ACCESSORIES).length ? TRAINER_ACCESSORIES : FALLBACK_ACCESSORIES;
+    const styles = Object.values(stylesMap);
+    const accessories = Object.values(accMap);
+
+    const currentStyle = stylesMap[appearance.styleId] || styles[0];
+    const currentAcc = accMap[appearance.accessory] || accessories[0];
+
+    const hero = document.createElement('div');
+    hero.className = 'trainer-studio-hero';
+
+    const previewWrap = document.createElement('div');
+    previewWrap.className = 'trainer-studio-preview-wrap';
+    const previewCanvas = document.createElement('canvas');
+    previewCanvas.id = 'trainer-studio-preview';
+    previewCanvas.width = 112;
+    previewCanvas.height = 112;
+    previewCanvas.className = 'trainer-studio-preview';
+    previewWrap.appendChild(previewCanvas);
+
+    const heroInfo = document.createElement('div');
+    heroInfo.className = 'trainer-studio-hero-info';
+    heroInfo.innerHTML = `
+      <span class="trainer-badge-tag">${trainerInfo.emblem || '★'} ${trainerInfo.name.toUpperCase()}</span>
+      <h3 class="trainer-studio-title">${trainerInfo.name}'s Style Studio</h3>
+      <p class="trainer-studio-sub">${currentStyle?.icon || '⭐'} ${currentStyle?.name || 'Signature Outfit'} • ${currentAcc?.icon || '🧢'} ${currentAcc?.name || 'Adventure Cap'}</p>
+    `;
+
+    const capeBtn = document.createElement('button');
+    capeBtn.id = 'trainer-cape-toggle';
+    capeBtn.type = 'button';
+    capeBtn.className = `cape-toggle-btn ${appearance.cape ? 'is-active' : ''}`;
+    capeBtn.textContent = `🦸 Starlight Cape: ${appearance.cape ? 'ON' : 'OFF'}`;
+    capeBtn.addEventListener('click', () => {
+      const updated = this.storage.updateAppearance?.({ cape: !appearance.cape }) || { ...appearance, cape: !appearance.cape };
+      this.audio?.playMenuBlip?.(760);
+      drawTrainerPortrait(previewCanvas, profile.trainerId, updated);
+      this.onAppearanceChanged?.();
+      this.render();
+    });
+    heroInfo.appendChild(capeBtn);
+
+    hero.appendChild(previewWrap);
+    hero.appendChild(heroInfo);
+    wrap.appendChild(hero);
+
+    const styleHeading = document.createElement('h3');
+    styleHeading.className = 'section-heading';
+    styleHeading.textContent = 'Outfit Palette';
+    wrap.appendChild(styleHeading);
+
+    const styleGrid = document.createElement('div');
+    styleGrid.className = 'style-chip-grid';
+    for (const style of styles) {
+      const look = typeof resolveTrainerLook === 'function'
+        ? resolveTrainerLook(profile.trainerId, { ...appearance, styleId: style.id })
+        : style;
+      const primary = look?.outfitPrimary || style.outfitPrimary || '#a855f7';
+      const secondary = look?.outfitSecondary || style.outfitSecondary || '#f472b6';
+
+      const chip = document.createElement('button');
+      chip.type = 'button';
+      chip.dataset.styleId = style.id;
+      chip.className = `style-chip ${appearance.styleId === style.id ? 'is-active' : ''}`;
+      chip.innerHTML = `
+        <span class="style-swatch-pair" aria-hidden="true">
+          <span class="style-swatch" style="background:${primary}"></span>
+          <span class="style-swatch" style="background:${secondary}"></span>
+        </span>
+        <span class="style-chip-label">${style.icon || '🎨'} ${style.name}</span>
+      `;
+      chip.addEventListener('click', () => {
+        const updated = this.storage.updateAppearance?.({ styleId: style.id }) || { ...appearance, styleId: style.id };
+        this.audio?.playMenuBlip?.(720);
+        drawTrainerPortrait(previewCanvas, profile.trainerId, updated);
+        this.onAppearanceChanged?.();
+        this.render();
+      });
+      styleGrid.appendChild(chip);
+    }
+    wrap.appendChild(styleGrid);
+
+    const accHeading = document.createElement('h3');
+    accHeading.className = 'section-heading';
+    accHeading.textContent = 'Headgear & Accessory';
+    wrap.appendChild(accHeading);
+
+    const accGrid = document.createElement('div');
+    accGrid.className = 'accessory-chip-grid';
+    for (const acc of accessories) {
+      const chip = document.createElement('button');
+      chip.type = 'button';
+      chip.dataset.accessoryId = acc.id;
+      chip.className = `accessory-chip ${appearance.accessory === acc.id ? 'is-active' : ''}`;
+      chip.innerHTML = `<span class="accessory-chip-icon">${acc.icon || '🧢'}</span><span>${acc.name}</span>`;
+      chip.addEventListener('click', () => {
+        const updated = this.storage.updateAppearance?.({ accessory: acc.id }) || { ...appearance, accessory: acc.id };
+        this.audio?.playMenuBlip?.(740);
+        drawTrainerPortrait(previewCanvas, profile.trainerId, updated);
+        this.onAppearanceChanged?.();
+        this.render();
+      });
+      accGrid.appendChild(chip);
+    }
+    wrap.appendChild(accGrid);
+
+    const allSpecies = Object.values(SPECIES);
+    const { caughtMap } = getReconciledDexState(profile, this.storage);
+    const caughtCount = allSpecies.filter((sp) => (caughtMap.get(sp.id) || 0) > 0).length;
+    const totalShrines = Object.keys(SHRINES || {}).length;
+    const totalRivals = Object.keys(RIVAL_TRAINERS || {}).length;
+    const rivalsDefeated = (profile.rivalsDefeated || []).length;
+
+    const statsHeading = document.createElement('h3');
+    statsHeading.className = 'section-heading';
+    statsHeading.textContent = 'Trainer Adventure Stats';
+    wrap.appendChild(statsHeading);
+
+    const statsCard = document.createElement('div');
+    statsCard.className = 'trainer-stats-grid';
+    statsCard.innerHTML = `
+      <div class="trainer-stat-card"><span>👣 Steps</span><strong>${profile.stats?.steps || 0}</strong></div>
+      <div class="trainer-stat-card"><span>🏆 Wins</span><strong>${profile.stats?.battlesWon || 0}</strong></div>
+      <div class="trainer-stat-card"><span>📖 Dex</span><strong>${caughtCount}/${allSpecies.length}</strong></div>
+      <div class="trainer-stat-card"><span>⛩️ Shrines</span><strong>${(profile.shrinesCleared || []).length}/${totalShrines}</strong></div>
+      <div class="trainer-stat-card"><span>⚔️ Rivals</span><strong>${rivalsDefeated}/${totalRivals}</strong></div>
+      <div class="trainer-stat-card"><span>✨ Starlight Shimmers</span><strong>${profile.stats?.shiniesFound || 0}</strong></div>
+    `;
+    wrap.appendChild(statsCard);
+
+    this.bodyEl.innerHTML = '';
+    this.bodyEl.appendChild(wrap);
+    drawTrainerPortrait(previewCanvas, profile.trainerId, appearance);
   }
 }
