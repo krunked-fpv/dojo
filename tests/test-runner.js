@@ -20,6 +20,7 @@ import {
   WORLD_COLS,
   WORLD_MAP,
   WORLD_ROWS,
+  getBiomeAt,
   getBiomeDiscoveryStats,
   getCompassGuidance,
   getSpriteUrls,
@@ -35,7 +36,14 @@ import {
   getTypeEffectiveness,
   rollWildPokemon,
 } from '../js/pokemon.js';
-import { STORAGE_KEY, StorageManager, storage } from '../js/storage.js';
+import {
+  STORAGE_KEY,
+  StorageManager,
+  isSpeciesCaught,
+  isSpeciesSeen,
+  storage,
+  syncProfilePokedex,
+} from '../js/storage.js';
 import { AudioEngine, THEMES } from '../js/audio.js';
 import { BATTLE_STATES, BattleEngine } from '../js/battle.js';
 
@@ -1300,6 +1308,395 @@ function buildTestSuites() {
               }
               if (!wasOverworldActive) {
                 app.audio?.stopBGM?.();
+              }
+              app.syncOverworldPause();
+            }
+          },
+        },
+      ],
+    },
+    {
+      name: '16. Pokédex Discovered State & Retroactive Team/Box/Lineage Sync',
+      tests: [
+        {
+          name: 'Hydrates legacy/desynced saves, recovers team/box/starter/non-wild lineages & shrines, and renders accurate PokedexUI & HUD counts',
+          fn() {
+            const app = window.__starlightApp;
+            assert(Boolean(app), 'GameApp mounted');
+
+            const prevRawSave = window.localStorage.getItem(STORAGE_KEY);
+            const wasBootHidden = app.bootScreenEl.hidden;
+            const wasStarterHidden = app.starterScreenEl.hidden;
+            const wasShellHidden = app.gameShellEl.hidden;
+            const wasOverworldActive = app.overworld.active;
+
+            try {
+              const ivysaur = createPokemon(2, 12, 'starter');
+              const raichu = createPokemon(26, 16, 'forest');
+              const lapras = createPokemon(131, 10, 'water');
+              const eevee = createPokemon(133, 7, 'forest');
+              const metapod = createPokemon(11, 7, 'forest');
+
+              const legacyPayload = {
+                version: 1,
+                activeTrainerId: 'violet',
+                profiles: {
+                  violet: {
+                    trainerId: 'violet',
+                    starterId: 1,
+                    pos: { x: 8, y: 15, dir: 'down' },
+                    team: [ivysaur.toJSON(), raichu.toJSON()],
+                    box: [lapras.toJSON(), eevee.toJSON(), metapod.toJSON()],
+                    pokedex: {
+                      seen: ['16', '999'],
+                      caught: {
+                        '025': 1,
+                        '999': 1,
+                        '10': 0,
+                      },
+                    },
+                    shrinesCleared: ['volcano_shrine'],
+                    badges: ['magma'],
+                    stats: { battlesWon: 5, totalCaught: 0, steps: 88 },
+                  },
+                },
+              };
+
+              window.localStorage.setItem(STORAGE_KEY, JSON.stringify(legacyPayload));
+              const hydratedStore = new StorageManager(STORAGE_KEY);
+              const v = hydratedStore.getProfile('violet');
+
+              // Caught retroactive sync: 1 (starter/pre-evo), 2 (team), 25 ("025"/pre-evo), 26 (team), 131 (box), 133 (box), 11 (box)
+              for (const expectedCaughtId of [1, 2, 11, 25, 26, 131, 133]) {
+                assertEqual(isSpeciesCaught(v, expectedCaughtId), true, `species #${expectedCaughtId} marked caught`);
+                assertEqual(isSpeciesSeen(v, expectedCaughtId), true, `caught species #${expectedCaughtId} marked seen`);
+                assertGreater(v.pokedex.caught[expectedCaughtId], 0, `pokedex.caught[${expectedCaughtId}] >= 1`);
+              }
+
+              // Seen retroactive sync: "16" Pidgey + volcano_shrine Guardian #146 Moltres
+              assertEqual(isSpeciesSeen(v, 16), true, 'string seen "16" normalized to Pidgey #16');
+              assertEqual(isSpeciesSeen(v, 146), true, 'cleared volcano_shrine marks Moltres #146 seen');
+              assertEqual(isSpeciesCaught(v, 16), false, 'Pidgey #16 remains uncaught');
+              assertEqual(isSpeciesCaught(v, 146), false, 'Moltres #146 remains uncaught');
+
+              // Invalid & zero-count stripping, and wild-encounter Metapod #11 must NOT mark Caterpie #10
+              assertEqual(v.pokedex.caught[999], undefined, 'invalid #999 stripped from caught');
+              assertEqual(v.pokedex.caught[10], undefined, 'zero-count #10 stripped from caught');
+              assertEqual(v.pokedex.seen.includes(999), false, 'invalid #999 stripped from seen');
+              assertEqual(isSpeciesCaught(v, 10), false, 'wild-encounter Metapod #11 does not falsely mark Caterpie #10 caught');
+              assertEqual(isSpeciesSeen(v, 10), false, 'wild-encounter Metapod #11 does not falsely mark Caterpie #10 seen');
+              assert(v.stats.totalCaught >= 7, `stats.totalCaught repaired (${v.stats.totalCaught} >= 7)`);
+
+              // Pure non-wild lineage recovery check without starterId=1 or "025" in caught
+              const lineageProfile = {
+                trainerId: 'violet',
+                starterId: 4,
+                team: [createPokemon(2, 12), createPokemon(26, 16)],
+                box: [createPokemon(134, 14), createPokemon(11, 7), createPokemon(148, 16)],
+                pokedex: { seen: { '16': true, '999': true, '10': false }, caught: [4] },
+                shrinesCleared: [],
+                stats: { totalCaught: 0 },
+              };
+              const lineageRes = syncProfilePokedex(lineageProfile);
+              assertEqual(lineageRes.changed, true, 'syncProfilePokedex reports changed on normalization');
+              assertEqual(isSpeciesCaught(lineageProfile, 1), true, 'Ivysaur #2 recovers Bulbasaur #1');
+              assertEqual(isSpeciesCaught(lineageProfile, 25), true, 'Raichu #26 recovers Pikachu #25');
+              assertEqual(isSpeciesCaught(lineageProfile, 133), true, 'Vaporeon #134 recovers Eevee #133');
+              assertEqual(isSpeciesCaught(lineageProfile, 10), false, 'Metapod #11 does not recover wild Caterpie #10');
+              assertEqual(isSpeciesCaught(lineageProfile, 147), false, 'Dragonair #148 does not recover wild Dratini #147');
+              assertEqual(isSpeciesSeen(lineageProfile, 16), true, 'object-map seen {"16": true} normalized');
+              assertEqual(isSpeciesSeen(lineageProfile, 999), false, 'invalid #999 stripped from object-map seen');
+
+              // recordSeen invalid guard
+              hydratedStore.selectTrainer('violet');
+              hydratedStore.recordSeen(999, false);
+              assertEqual(v.pokedex.seen.includes(999), false, 'recordSeen ignores invalid species 999');
+
+              // Live PokedexUI & HUD count reconciliation
+              storage.state = storage.load();
+              storage.selectTrainer('violet');
+              app.bootScreenEl.hidden = true;
+              app.starterScreenEl.hidden = true;
+              app.gameShellEl.hidden = false;
+              app.applyTrainerTheme('violet');
+              app.refreshHud();
+
+              assert(
+                app.hudDexBtn.textContent.includes('Dex 7/54'),
+                `HUD Dex pill displays reconciled 7/54, got "${app.hudDexBtn.textContent}"`,
+              );
+
+              app.openPokedex('dex');
+              const summaryText = document.querySelector('.dex-summary-bar')?.textContent || '';
+              assert(summaryText.includes('Caught: 7/54'), `Dex summary shows Caught: 7/54, got "${summaryText}"`);
+              assert(summaryText.includes('Seen: 9/54'), `Dex summary shows Seen: 9/54, got "${summaryText}"`);
+
+              const cards = Array.from(document.querySelectorAll('.dex-grid .dex-card'));
+              assertEqual(cards.length, 54, '54 Pokédex cards rendered');
+              assertEqual(cards.filter((c) => c.classList.contains('is-caught')).length, 7, '7 .is-caught cards rendered');
+              assertEqual(cards.filter((c) => c.classList.contains('is-seen')).length, 2, '2 .is-seen cards rendered');
+              assertEqual(cards.filter((c) => c.classList.contains('is-unknown')).length, 45, '45 .is-unknown cards rendered');
+
+              const cardById = new Map();
+              for (const card of cards) {
+                const numText = card.querySelector('.dex-num')?.textContent?.trim() || '';
+                const id = Number(numText.replace('#', ''));
+                cardById.set(id, card);
+              }
+
+              for (const discoveredId of [1, 2, 11, 16, 25, 26, 131, 133, 146]) {
+                const card = cardById.get(discoveredId);
+                assert(Boolean(card), `card for #${discoveredId} exists`);
+                assertEqual(card.classList.contains('is-unknown'), false, `card #${discoveredId} is not .is-unknown`);
+                const nameText = card.querySelector('.dex-name')?.textContent?.trim() || '';
+                assertEqual(nameText, SPECIES[discoveredId].name, `card #${discoveredId} shows species name`);
+                assert(nameText !== '???', `card #${discoveredId} never shows ???`);
+                const sprite = card.querySelector('img.dex-sprite');
+                assert(Boolean(sprite), `card #${discoveredId} renders img.dex-sprite`);
+                assertEqual(sprite.classList.contains('is-silhouette'), false, `card #${discoveredId} sprite is not blacked-out .is-silhouette`);
+                if (discoveredId === 16 || discoveredId === 146) {
+                  assertEqual(sprite.classList.contains('is-seen-sprite'), true, `seen card #${discoveredId} uses .is-seen-sprite`);
+                } else {
+                  assertEqual(sprite.classList.contains('is-caught-sprite'), true, `caught card #${discoveredId} uses .is-caught-sprite`);
+                }
+              }
+
+              // Click seen-only Moltres #146 and verify detail panel
+              cardById.get(146).click();
+              const detailHeadMoltres = document.querySelector('.dex-detail-head')?.textContent || '';
+              const detailSpriteMoltres = document.querySelector('.dex-detail-sprite');
+              assert(detailHeadMoltres.includes('Moltres'), `Moltres detail shows species name, got "${detailHeadMoltres}"`);
+              assert(!detailHeadMoltres.includes('Undiscovered'), 'Moltres detail never says Undiscovered');
+              assert(Boolean(detailSpriteMoltres), 'Moltres detail renders sprite');
+              assertEqual(detailSpriteMoltres.classList.contains('is-silhouette'), false, 'Moltres detail sprite is not .is-silhouette');
+              assertEqual(detailSpriteMoltres.classList.contains('is-seen-sprite'), true, 'Moltres detail sprite uses .is-seen-sprite');
+
+              // Click undiscovered Caterpie #10 and verify Unknown type pill
+              cardById.get(10).click();
+              const detailHeadCaterpie = document.querySelector('.dex-detail-head')?.textContent || '';
+              assert(detailHeadCaterpie.includes('Undiscovered Pokémon'), `Undiscovered detail shows Undiscovered Pokémon, got "${detailHeadCaterpie}"`);
+              assert(detailHeadCaterpie.includes('Unknown'), `Undiscovered detail hides elemental type with Unknown pill, got "${detailHeadCaterpie}"`);
+
+              // Guide tab Dex header matches Pokédex tab
+              app.openPokedex('guide');
+              const guideText = document.querySelector('.guide-compass-stats')?.textContent || '';
+              assert(guideText.includes('Dex: 7/54'), `Guide tab shows matching Dex: 7/54, got "${guideText}"`);
+            } finally {
+              app.pokedex.close();
+              if (prevRawSave === null) {
+                window.localStorage.removeItem(STORAGE_KEY);
+              } else {
+                window.localStorage.setItem(STORAGE_KEY, prevRawSave);
+              }
+              storage.state = storage.load();
+              app.bootScreenEl.hidden = wasBootHidden;
+              app.starterScreenEl.hidden = wasStarterHidden;
+              app.gameShellEl.hidden = wasShellHidden;
+              app.overworld.setActive(wasOverworldActive);
+              if (!wasOverworldActive) {
+                app.audio?.stopBGM?.();
+              }
+              if (!wasBootHidden) {
+                app.showBootScreen();
+              } else {
+                app.refreshHud();
+              }
+              app.syncOverworldPause();
+            }
+          },
+        },
+      ],
+    },
+    {
+      name: '17. Overworld Lead Pokémon Follower, Lead Slot Swaps & Biome Transition Persistence',
+      tests: [
+        {
+          name: 'Follower spawns behind trainer, trails steps, ignores wall bumps, swaps on 180-deg turnarounds, tracks lead/slot/evo changes, and persists across biomes',
+          fn() {
+            const app = window.__starlightApp;
+            assert(Boolean(app), 'GameApp mounted');
+
+            const prevRawSave = window.localStorage.getItem(STORAGE_KEY);
+            const wasBootHidden = app.bootScreenEl.hidden;
+            const wasStarterHidden = app.starterScreenEl.hidden;
+            const wasShellHidden = app.gameShellEl.hidden;
+            const wasOverworldActive = app.overworld.active;
+
+            try {
+              window.localStorage.removeItem(STORAGE_KEY);
+              storage.state = storage.load();
+              storage.selectTrainer('violet');
+              storage.chooseStarter(1); // Bulbasaur Lv.5
+
+              const profile = storage.getActiveProfile();
+              const bulba = profile.team[0];
+              bulba.level = 10;
+              bulba.recalculateStats();
+
+              const shinyPika = createPokemon(25, 8, 'forest', { isShiny: true });
+              const lapras = createPokemon(131, 9, 'water');
+              storage.recordCaught(shinyPika);
+              profile.box.push(lapras);
+              storage.save();
+
+              app.dialogueOpen = false;
+              app.encounterTransitioning = false;
+              app.pokedex.close();
+              app.closeSettings();
+              if (app.battle.active) app.battle.stop({ outcome: 'escaped', faintedAll: false });
+
+              app.bootScreenEl.hidden = true;
+              app.starterScreenEl.hidden = true;
+              app.gameShellEl.hidden = false;
+              app.applyTrainerTheme('violet');
+
+              profile.pos = { x: 8, y: 15, dir: 'down' };
+              app.overworld.followerInitialized = false;
+              app.overworld.setActive(true);
+              app.overworld.setPaused(false);
+              app.refreshHud();
+
+              // 1. Spawns behind trainer facing down -> (8, 14)
+              const fStart = app.overworld.getFollowerState();
+              assertEqual(fStart.active, true, 'follower active when team[0] exists');
+              assertEqual(fStart.speciesId, profile.team[0].speciesId, 'follower speciesId matches team[0]');
+              assertEqual(fStart.uid, bulba.uid, 'follower uid matches team[0]');
+              assertEqual(fStart.x, 8, 'initial follower X behind down-facing trainer');
+              assertEqual(fStart.y, 14, 'initial follower Y behind down-facing trainer');
+
+              // 2. Smoothly trails vacated tile on valid step (8,15) -> (9,15)
+              app.overworld.tryStartMove('right');
+              assertEqual(app.overworld.moving, true, 'trainer step started right to (9,15)');
+              assertEqual(app.overworld.followerMoving, true, 'follower step started into vacated tile');
+              app.overworld.update(app.overworld.moveDuration * 0.5, null);
+              const fMid = app.overworld.getFollowerState();
+              assertEqual(fMid.moving, true, 'follower moving mid-step');
+              assertGreater(fMid.renderY, 14, 'follower renderY interpolates smoothly toward 15');
+              app.overworld.update(app.overworld.moveDuration, null);
+              const fStepped = app.overworld.getFollowerState();
+              assertEqual(profile.pos.x, 9, 'trainer arrived at x=9');
+              assertEqual(profile.pos.y, 15, 'trainer arrived at y=15');
+              assertEqual(fStepped.x, 8, 'follower trailed to vacated x=8');
+              assertEqual(fStepped.y, 15, 'follower trailed to vacated y=15');
+
+              // 3. Wall bump does NOT stack follower onto trainer
+              profile.pos = { x: 1, y: 15, dir: 'left' };
+              app.overworld.followerInitialized = false;
+              app.overworld.syncFromProfile();
+              assertEqual(app.overworld.getFollowerState().x, 2, 'follower placed at (2,15) behind left-facing trainer');
+              assertEqual(isTileWalkableAt(0, 15), false, '(0,15) is solid border tree');
+              app.overworld.tryStartMove('left');
+              app.overworld.update(0.05, null);
+              assertEqual(app.overworld.moving, false, 'wall bump does not move trainer');
+              assertEqual(profile.pos.x, 1, 'trainer stays at x=1 on wall bump');
+              assertEqual(app.overworld.getFollowerState().x, 2, 'follower does not stack onto trainer on wall bump');
+              assertEqual(app.overworld.getFollowerState().y, 15, 'follower remains at y=15 on wall bump');
+
+              // 4. 180-deg turnaround swap in narrow 1-tile corridor (18,15) without blocking isTileWalkable
+              assertEqual(isTileWalkableAt(18, 14), false, '(18,14) corridor north wall is solid');
+              assertEqual(isTileWalkableAt(18, 16), false, '(18,16) corridor south wall is solid');
+              assertEqual(isTileWalkableAt(17, 15), true, '(17,15) corridor west tile is walkable');
+              assertEqual(isTileWalkableAt(19, 15), true, '(19,15) corridor east tile is walkable');
+
+              profile.pos = { x: 18, y: 15, dir: 'right' };
+              app.overworld.followerInitialized = false;
+              app.overworld.syncFromProfile();
+              assertEqual(app.overworld.getFollowerState().x, 17, 'follower starts behind at (17,15) in 1-tile corridor');
+              assertEqual(app.overworld.isTileWalkable(17, 15), true, 'follower tile never blocks isTileWalkable');
+
+              app.overworld.tryStartMove('left');
+              assertEqual(app.overworld.moving, true, '180-deg turnaround step into follower tile succeeds');
+              app.overworld.update(app.overworld.moveDuration + 0.05, null);
+              const fSwapped = app.overworld.getFollowerState();
+              assertEqual(profile.pos.x, 17, 'trainer swapped to (17,15)');
+              assertEqual(fSwapped.x, 18, 'follower cleanly swapped to (18,15)');
+              assertEqual(fSwapped.y, 15, 'follower stays in corridor y=15');
+              assertEqual(fSwapped.dir, 'right', 'follower faces trainer vacated tile direction');
+
+              // 5. Auto-update on setLeadPokemon, swapTeamWithBox(0, 0), and evolvePokemon
+              assertEqual(storage.setLeadPokemon(1), true, 'setLeadPokemon(1) moves shiny Pikachu to slot 0');
+              app.overworld.update(0.016, null);
+              const fLeadSwap = app.overworld.getFollowerState();
+              assertEqual(fLeadSwap.speciesId, 25, 'follower auto-updates to Pikachu #25 after setLeadPokemon');
+              assertEqual(fLeadSwap.uid, shinyPika.uid, 'follower uid matches shiny Pikachu');
+              assertEqual(fLeadSwap.isShiny, true, 'follower isShiny tracks shiny lead');
+
+              assertEqual(storage.swapTeamWithBox(0, 0), true, 'swapTeamWithBox(0, 0) swaps Lapras into slot 0');
+              app.overworld.update(0.016, null);
+              const fBoxSwap = app.overworld.getFollowerState();
+              assertEqual(fBoxSwap.speciesId, 131, 'follower auto-updates to Lapras #131 after box swap');
+              assertEqual(fBoxSwap.uid, lapras.uid, 'follower uid matches Lapras');
+              assertEqual(fBoxSwap.isShiny, false, 'follower isShiny resets to false for non-shiny Lapras');
+
+              assertEqual(storage.setLeadPokemon(1), true, 'return Bulbasaur Lv.10 to slot 0');
+              const evoRes = storage.evolvePokemon(bulba.uid, 2);
+              assert(Boolean(evoRes?.evolution), 'Bulbasaur evolved to Ivysaur #2');
+              app.refreshHud();
+              const fEvolved = app.overworld.getFollowerState();
+              assertEqual(fEvolved.speciesId, 2, 'follower updates to Ivysaur #2 after evolution + refreshHud/syncFollower');
+              assertEqual(fEvolved.uid, bulba.uid, 'follower uid remains Bulbasaur/Ivysaur uid');
+
+              // Render pass runs cleanly with follower active
+              app.overworld.render(performance.now());
+
+              // 6. Seamless biome transitions (village -> forest, village -> cave, village -> water) & post-battle syncFromProfile preservation
+              const checkBiomeStep = (startPos, stepDir, fromBiome, toBiome, expectedTrainer, expectedFollower) => {
+                profile.pos = { ...startPos };
+                app.overworld.followerInitialized = false;
+                app.overworld.syncFromProfile();
+                assertEqual(getBiomeAt(profile.pos.x, profile.pos.y).id, fromBiome, `starts in ${fromBiome}`);
+                assertEqual(app.overworld.getFollowerState().biomeId, fromBiome, `follower starts in ${fromBiome}`);
+                app.overworld.tryStartMove(stepDir);
+                assertEqual(app.overworld.moving, true, `step ${stepDir} started across ${fromBiome} -> ${toBiome}`);
+                app.overworld.update(app.overworld.moveDuration + 0.05, null);
+                const state = app.overworld.getFollowerState();
+                assertEqual(profile.pos.x, expectedTrainer.x, `${fromBiome}->${toBiome} trainer X`);
+                assertEqual(profile.pos.y, expectedTrainer.y, `${fromBiome}->${toBiome} trainer Y`);
+                assertEqual(state.biomeId, toBiome, `follower biomeId transitioned to ${toBiome}`);
+                assertEqual(state.speciesId, 2, `follower speciesId persisted across ${fromBiome} -> ${toBiome}`);
+                assertEqual(state.x, expectedFollower.x, `${fromBiome}->${toBiome} follower X`);
+                assertEqual(state.y, expectedFollower.y, `${fromBiome}->${toBiome} follower Y`);
+              };
+
+              checkBiomeStep({ x: 6, y: 10, dir: 'up' }, 'up', 'village', 'forest', { x: 6, y: 9 }, { x: 6, y: 10 });
+              checkBiomeStep({ x: 19, y: 15, dir: 'right' }, 'right', 'village', 'cave', { x: 20, y: 15 }, { x: 19, y: 15 });
+              checkBiomeStep({ x: 8, y: 17, dir: 'down' }, 'down', 'village', 'water', { x: 8, y: 18 }, { x: 8, y: 17 });
+
+              // Turn right & step to (9, 18) so follower is to trainer's left at (8, 18), then face down and call syncFromProfile()
+              app.overworld.tryStartMove('right');
+              app.overworld.update(app.overworld.moveDuration + 0.05, null);
+              profile.pos.dir = 'down';
+              app.overworld.syncFromProfile();
+              const postBattleState = app.overworld.getFollowerState();
+              assertEqual(postBattleState.x, 8, 'post-battle syncFromProfile preserves adjacent follower X at (8,18)');
+              assertEqual(postBattleState.y, 18, 'post-battle syncFromProfile preserves adjacent follower Y at (8,18)');
+              assertEqual(postBattleState.biomeId, 'water', 'post-battle follower preserves water biome');
+            } finally {
+              if (app.battle.active) {
+                app.battle.stop({ outcome: 'escaped', faintedAll: false });
+              }
+              app.pokedex.close();
+              app.closeSettings();
+              if (prevRawSave === null) {
+                window.localStorage.removeItem(STORAGE_KEY);
+              } else {
+                window.localStorage.setItem(STORAGE_KEY, prevRawSave);
+              }
+              storage.state = storage.load();
+              app.dialogueOpen = false;
+              app.encounterTransitioning = false;
+              app.bootScreenEl.hidden = wasBootHidden;
+              app.starterScreenEl.hidden = wasStarterHidden;
+              app.gameShellEl.hidden = wasShellHidden;
+              app.overworld.followerInitialized = false;
+              app.overworld.setActive(wasOverworldActive);
+              if (!wasOverworldActive) {
+                app.audio?.stopBGM?.();
+              }
+              if (!wasBootHidden) {
+                app.showBootScreen();
+              } else {
+                app.refreshHud();
               }
               app.syncOverworldPause();
             }
