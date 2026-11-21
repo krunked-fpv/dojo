@@ -463,6 +463,8 @@ export function generateSilhouetteDataUri(species, back = false) {
   return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
 }
 
+const resolvedSpriteCache = new Map();
+
 export function attachPokemonSprite(imgEl, speciesOrMon, options = {}) {
   if (!imgEl) return Promise.resolve();
   const { back = false, timeoutMs = 2000 } = options || {};
@@ -489,6 +491,7 @@ export function attachPokemonSprite(imgEl, speciesOrMon, options = {}) {
 
   if (!species) {
     imgEl.alt = 'Wild Pokémon';
+    imgEl.onload = null;
     imgEl.onerror = null;
     imgEl.src = inlineFallback;
     return Promise.resolve();
@@ -498,15 +501,35 @@ export function attachPokemonSprite(imgEl, speciesOrMon, options = {}) {
   imgEl.dataset.loadToken = token;
   imgEl.alt = species.name;
 
+  const nextSpeciesKey = `${species.id}:${back ? 'back' : 'front'}:${shiny ? 'shiny' : 'std'}`;
+  if (resolvedSpriteCache.has(nextSpeciesKey)) {
+    const cachedUrl = resolvedSpriteCache.get(nextSpeciesKey);
+    imgEl.dataset.speciesKey = nextSpeciesKey;
+    imgEl.onload = null;
+    imgEl.onerror = () => {
+      resolvedSpriteCache.delete(nextSpeciesKey);
+      imgEl.onerror = null;
+      imgEl.src = inlineFallback;
+    };
+    imgEl.src = cachedUrl;
+    return Promise.resolve();
+  }
+
   const urls = getSpriteUrls(species.id, back, shiny);
   const localSvg = `./assets/fallback/${species.type}.svg`;
-  const candidates = [urls.animated, urls.static, localSvg, inlineFallback];
+  const totalBudgetMs = Math.max(50, Number(timeoutMs) || 2000);
+  const animatedBudgetMs = Math.max(25, Math.round(totalBudgetMs * 0.55));
+  const remoteCandidates = [
+    { url: urls.animated, capMs: animatedBudgetMs },
+    { url: urls.static, capMs: null },
+  ];
 
+  let placeholderErrored = false;
   // Immediately render local fallback sprite when empty or switching species so images never flash blank or stale
-  const nextSpeciesKey = `${species.id}:${back ? 'back' : 'front'}:${shiny ? 'shiny' : 'std'}`;
   if (!imgEl.getAttribute('src') || imgEl.dataset.speciesKey !== nextSpeciesKey) {
     imgEl.dataset.speciesKey = nextSpeciesKey;
     imgEl.onerror = () => {
+      placeholderErrored = true;
       imgEl.onerror = null;
       imgEl.src = inlineFallback;
     };
@@ -515,24 +538,25 @@ export function attachPokemonSprite(imgEl, speciesOrMon, options = {}) {
 
   return new Promise((resolve) => {
     let settled = false;
-    let index = 0;
+    const startTime = Date.now();
 
-    const finishWithFallback = () => {
-      if (settled) return;
-      settled = true;
-      if (imgEl.dataset.loadToken === token) {
-        imgEl.onload = null;
-        imgEl.onerror = null;
-        imgEl.src = inlineFallback;
+    const abortStale = () => {
+      if (!settled) {
+        settled = true;
+        resolve();
       }
-      resolve();
     };
 
     const finishSuccess = (loadedUrl) => {
       if (settled) return;
       settled = true;
       if (imgEl.dataset.loadToken === token) {
+        if (/^https?:\/\//i.test(loadedUrl)) {
+          resolvedSpriteCache.set(nextSpeciesKey, loadedUrl);
+        }
+        imgEl.onload = null;
         imgEl.onerror = () => {
+          resolvedSpriteCache.delete(nextSpeciesKey);
           imgEl.onerror = null;
           imgEl.src = inlineFallback;
         };
@@ -541,73 +565,82 @@ export function attachPokemonSprite(imgEl, speciesOrMon, options = {}) {
       resolve();
     };
 
-    const timer = setTimeout(() => {
-      if (imgEl.dataset.loadToken === token && (!imgEl.complete || imgEl.naturalWidth === 0)) {
-        finishWithFallback();
-      } else if (!settled) {
-        settled = true;
+    const finalizeAfterRemoteFailure = () => {
+      if (settled) return;
+      settled = true;
+      if (imgEl.dataset.loadToken !== token) {
         resolve();
+        return;
       }
-    }, Math.max(50, Number(timeoutMs) || 2000));
-
-    const abortStale = () => {
-      clearTimeout(timer);
-      if (!settled) {
-        settled = true;
+      const currentSrc = imgEl.getAttribute('src') || '';
+      if (placeholderErrored || currentSrc.startsWith('data:image/svg+xml')) {
+        imgEl.onload = null;
+        imgEl.onerror = null;
+        if (!currentSrc.startsWith('data:image/svg+xml')) {
+          imgEl.src = inlineFallback;
+        }
         resolve();
+        return;
       }
+      if (imgEl.complete && imgEl.naturalWidth > 0) {
+        resolve();
+        return;
+      }
+      imgEl.onload = null;
+      imgEl.onerror = null;
+      imgEl.src = inlineFallback;
+      resolve();
     };
 
-    const tryNext = () => {
+    const tryRemote = (stepIdx) => {
       if (imgEl.dataset.loadToken !== token) {
         abortStale();
         return;
       }
-      if (index >= candidates.length - 1) {
-        clearTimeout(timer);
-        finishWithFallback();
+      if (stepIdx >= remoteCandidates.length) {
+        finalizeAfterRemoteFailure();
         return;
       }
 
-      const nextUrl = candidates[index++];
-      if (typeof Image !== 'undefined') {
-        const probe = new Image();
-        probe.onload = () => {
-          if (imgEl.dataset.loadToken !== token) {
-            abortStale();
-            return;
-          }
-          clearTimeout(timer);
-          finishSuccess(nextUrl);
-        };
-        probe.onerror = () => {
-          if (imgEl.dataset.loadToken !== token) {
-            abortStale();
-            return;
-          }
-          tryNext();
-        };
-        probe.src = nextUrl;
-      } else {
-        imgEl.onload = () => {
-          if (imgEl.dataset.loadToken !== token) {
-            abortStale();
-            return;
-          }
-          clearTimeout(timer);
-          finishSuccess(nextUrl);
-        };
-        imgEl.onerror = () => {
-          if (imgEl.dataset.loadToken !== token) {
-            abortStale();
-            return;
-          }
-          tryNext();
-        };
-        imgEl.src = nextUrl;
+      const elapsed = Date.now() - startTime;
+      const remaining = totalBudgetMs - elapsed;
+      if (remaining <= 0) {
+        finalizeAfterRemoteFailure();
+        return;
       }
+
+      const { url, capMs } = remoteCandidates[stepIdx];
+      const probeBudgetMs = capMs === null ? remaining : Math.min(capMs, remaining);
+      const target = typeof Image !== 'undefined' ? new Image() : imgEl;
+      let probeDone = false;
+      let probeTimer = null;
+
+      const finishProbe = (succeeded) => {
+        if (probeDone) return;
+        probeDone = true;
+        if (probeTimer !== null) {
+          clearTimeout(probeTimer);
+          probeTimer = null;
+        }
+        target.onload = null;
+        target.onerror = null;
+        if (imgEl.dataset.loadToken !== token) {
+          abortStale();
+          return;
+        }
+        if (succeeded) {
+          finishSuccess(url);
+        } else {
+          tryRemote(stepIdx + 1);
+        }
+      };
+
+      probeTimer = setTimeout(() => finishProbe(false), probeBudgetMs);
+      target.onload = () => finishProbe(true);
+      target.onerror = () => finishProbe(false);
+      target.src = url;
     };
 
-    tryNext();
+    tryRemote(0);
   });
 }
