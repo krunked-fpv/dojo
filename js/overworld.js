@@ -1,3 +1,4 @@
+import * as Config from './config.js';
 import { GAME_META, SPECIES, TRAINERS, TYPES, getSpriteUrls } from './config.js';
 import { generateSilhouetteDataUri } from './pokemon.js';
 import {
@@ -5,6 +6,7 @@ import {
   FIELD_QUESTS,
   LANDMARKS,
   NPCS,
+  RIVAL_TRAINERS,
   SHRINES,
   SIGNPOSTS,
   TILE,
@@ -15,6 +17,70 @@ import {
   getBiomeAt,
   isTileWalkableAt,
 } from './world-data.js';
+
+const FALLBACK_TRAINER_STYLES = {
+  default: null,
+  royal: {
+    outfitPrimary: '#7e22ce',
+    outfitSecondary: '#facc15',
+    accent: '#c084fc',
+    accentDark: '#581c87',
+    accentSoft: 'rgba(192, 132, 252, 0.25)',
+  },
+  aurora: {
+    outfitPrimary: '#0891b2',
+    outfitSecondary: '#a5f3fc',
+    accent: '#38bdf8',
+    accentDark: '#164e63',
+    accentSoft: 'rgba(56, 189, 248, 0.25)',
+  },
+  ember: {
+    outfitPrimary: '#ea580c',
+    outfitSecondary: '#fde047',
+    accent: '#fb923c',
+    accentDark: '#9a3412',
+    accentSoft: 'rgba(251, 146, 60, 0.25)',
+  },
+  ranger: {
+    outfitPrimary: '#15803d',
+    outfitSecondary: '#bef264',
+    accent: '#4ade80',
+    accentDark: '#14532d',
+    accentSoft: 'rgba(74, 222, 128, 0.25)',
+  },
+  nebula: {
+    outfitPrimary: '#312e81',
+    outfitSecondary: '#f472b6',
+    accent: '#818cf8',
+    accentDark: '#1e1b4b',
+    accentSoft: 'rgba(129, 140, 248, 0.25)',
+  },
+};
+
+function getResolvedTrainerLook(trainerId, appearance = null) {
+  if (typeof Config.resolveTrainerLook === 'function') {
+    return Config.resolveTrainerLook(trainerId, appearance);
+  }
+  const base = TRAINERS[trainerId] || TRAINERS.violet;
+  const styleId = appearance?.styleId && Object.prototype.hasOwnProperty.call(FALLBACK_TRAINER_STYLES, appearance.styleId)
+    ? appearance.styleId
+    : 'default';
+  const style = FALLBACK_TRAINER_STYLES[styleId];
+  const accessory = ['cap', 'crown', 'wizard', 'headband'].includes(appearance?.accessory)
+    ? appearance.accessory
+    : 'cap';
+  return {
+    ...base,
+    styleId,
+    outfitPrimary: style?.outfitPrimary || base.outfitPrimary,
+    outfitSecondary: style?.outfitSecondary || base.outfitSecondary,
+    accent: style?.accent || base.accent,
+    accentDark: style?.accentDark || base.accentDark,
+    accentSoft: style?.accentSoft || base.accentSoft,
+    accessory,
+    cape: Boolean(appearance?.cape),
+  };
+}
 
 const ENCOUNTER_TILE_BIOME = {
   [TILE.TALL_GRASS]: 'forest',
@@ -38,12 +104,12 @@ function hash2d(x, y) {
   return n - Math.floor(n);
 }
 
-export function drawTrainerPortrait(canvas, trainerId) {
+export function drawTrainerPortrait(canvas, trainerId, appearance = null) {
   if (!canvas) return;
   const ctx = canvas.getContext('2d');
   if (!ctx) return;
   ctx.imageSmoothingEnabled = false;
-  const trainer = TRAINERS[trainerId] || TRAINERS.violet;
+  const look = getResolvedTrainerLook(trainerId, appearance);
   const w = canvas.width;
   const h = canvas.height;
   ctx.clearRect(0, 0, w, h);
@@ -53,30 +119,40 @@ export function drawTrainerPortrait(canvas, trainerId) {
   ctx.scale(s, s);
 
   // Soft glow background circle
-  ctx.fillStyle = trainer.accentSoft;
+  ctx.fillStyle = look.accentSoft;
   ctx.beginPath();
   ctx.arc(18, 19, 15, 0, Math.PI * 2);
   ctx.fill();
+  if (look.styleId !== 'default' || look.cape) {
+    ctx.strokeStyle = look.accent;
+    ctx.lineWidth = 1;
+    ctx.stroke();
+  }
+
+  // Optional flowing Starlight Cape behind shoulders
+  if (look.cape) {
+    ctx.fillStyle = look.accentDark;
+    ctx.beginPath();
+    ctx.moveTo(8, 22);
+    ctx.lineTo(28, 22);
+    ctx.lineTo(31, 33);
+    ctx.lineTo(5, 33);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = look.outfitSecondary;
+    ctx.fillRect(8, 22, 20, 2);
+  }
 
   // Hair / Back
-  ctx.fillStyle = trainer.hair;
+  ctx.fillStyle = look.hair;
   ctx.fillRect(10, 8, 16, 14);
   if (trainerId === 'violet') {
     ctx.fillRect(9, 12, 3, 10);
     ctx.fillRect(24, 12, 3, 10);
   }
 
-  // Cap
-  ctx.fillStyle = trainer.outfitPrimary;
-  ctx.fillRect(9, 6, 18, 6);
-  ctx.fillStyle = trainer.outfitSecondary;
-  ctx.fillRect(11, 10, 14, 3);
-  // Cap badge
-  ctx.fillStyle = '#fef08a';
-  ctx.fillRect(16, 7, 4, 3);
-
   // Face
-  ctx.fillStyle = trainer.skin;
+  ctx.fillStyle = look.skin;
   ctx.fillRect(11, 12, 14, 10);
 
   // Eyes
@@ -91,13 +167,58 @@ export function drawTrainerPortrait(canvas, trainerId) {
   ctx.fillStyle = '#f43f5e';
   ctx.fillRect(16, 19, 4, 1);
 
+  // Accessory / Headgear
+  if (look.accessory === 'crown') {
+    ctx.fillStyle = '#eab308';
+    ctx.fillRect(10, 8, 16, 4);
+    ctx.fillStyle = '#facc15';
+    ctx.fillRect(10, 4, 3, 4);
+    ctx.fillRect(16, 3, 4, 5);
+    ctx.fillRect(23, 4, 3, 4);
+    ctx.fillStyle = '#fef08a';
+    ctx.fillRect(17, 4, 2, 2);
+    ctx.fillStyle = look.accent || '#38bdf8';
+    ctx.fillRect(17, 9, 2, 2);
+  } else if (look.accessory === 'wizard') {
+    ctx.fillStyle = look.accentDark;
+    ctx.fillRect(5, 10, 26, 3);
+    ctx.fillRect(10, 6, 16, 4);
+    ctx.fillRect(13, 2, 10, 4);
+    ctx.fillRect(16, 0, 4, 3);
+    ctx.fillStyle = look.outfitSecondary;
+    ctx.fillRect(10, 8, 16, 2);
+    ctx.fillStyle = '#fef08a';
+    ctx.fillRect(17, 4, 2, 2);
+    ctx.fillRect(16, 5, 4, 1);
+  } else if (look.accessory === 'headband') {
+    ctx.fillStyle = look.outfitSecondary;
+    ctx.fillRect(9, 9, 18, 3);
+    ctx.fillStyle = look.accent;
+    ctx.fillRect(27, 10, 3, 2);
+    ctx.fillRect(28, 12, 3, 2);
+    ctx.fillStyle = '#fef08a';
+    ctx.fillRect(16, 9, 4, 2);
+  } else {
+    // Default Adventure Cap
+    ctx.fillStyle = look.outfitPrimary;
+    ctx.fillRect(9, 6, 18, 6);
+    ctx.fillStyle = look.outfitSecondary;
+    ctx.fillRect(11, 10, 14, 3);
+    ctx.fillStyle = '#fef08a';
+    ctx.fillRect(16, 7, 4, 3);
+  }
+
   // Outfit shoulders
-  ctx.fillStyle = trainer.outfitPrimary;
+  ctx.fillStyle = look.outfitPrimary;
   ctx.fillRect(9, 22, 18, 10);
-  ctx.fillStyle = trainer.outfitSecondary;
+  ctx.fillStyle = look.outfitSecondary;
   ctx.fillRect(13, 22, 10, 5);
   ctx.fillStyle = '#fef08a';
   ctx.fillRect(17, 24, 2, 2);
+  if (look.cape) {
+    ctx.fillRect(10, 22, 2, 2);
+    ctx.fillRect(24, 22, 2, 2);
+  }
 
   ctx.restore();
 }
@@ -158,16 +279,18 @@ export class OverworldEngine {
     this._followerSpriteCache = new Map();
 
     this.particles = [];
+    this.ripples = [];
     this.rustleTile = null;
     this.rarePatches = [];
     this.rarePatchSpawnCooldown = 1.0;
 
-    this.ambientMotes = Array.from({ length: 22 }, (_, i) => ({
+    this.ambientMotes = Array.from({ length: 26 }, (_, i) => ({
       seed: i * 1.73,
       xFrac: ((i * 37) % 100) / 100,
       yFrac: ((i * 61) % 100) / 100,
       speed: 0.45 + (i % 4) * 0.2,
       size: i % 3 === 0 ? 2 : 1.5,
+      variant: i % 2,
     }));
 
     if (typeof ResizeObserver !== 'undefined' && this.canvas?.parentElement) {
@@ -240,7 +363,7 @@ export class OverworldEngine {
   }
 
   _spawnFollowerChangePuff(profile) {
-    const accent = TRAINERS[profile?.trainerId]?.accent || '#c084fc';
+    const accent = getResolvedTrainerLook(profile?.trainerId, profile?.appearance).accent || '#c084fc';
     this.spawnParticles(this.followerX, this.followerY, '#fde047', 4, true);
     this.spawnParticles(this.followerX, this.followerY, accent, 2, true);
   }
@@ -354,6 +477,7 @@ export class OverworldEngine {
     this.stepsSinceBattle = 4;
     this.encounterTileStreak = 0;
     this.particles = [];
+    this.ripples = [];
     this.rarePatchSpawnCooldown = 0;
     this.refreshRarePatches(profile, 0);
 
@@ -503,6 +627,15 @@ export class OverworldEngine {
         data: NPCS[key],
       };
     }
+    if (RIVAL_TRAINERS[key]) {
+      const rival = RIVAL_TRAINERS[key];
+      return {
+        type: 'rival',
+        key,
+        label: `⚔️ Battle ${rival.name}`,
+        data: rival,
+      };
+    }
     if (LANDMARKS[key]) {
       return {
         type: 'landmark',
@@ -552,6 +685,18 @@ export class OverworldEngine {
     }
   }
 
+  spawnStepRipple(tx, ty) {
+    const tile = WORLD_MAP[ty]?.[tx];
+    if (tile === TILE.SHALLOW_WATER) {
+      this.ripples.push({ x: tx, y: ty, kind: 'water', life: 0, maxLife: 0.62 });
+    } else if (tile === TILE.SNOW_GRASS || tile === TILE.SNOW_PATH) {
+      this.ripples.push({ x: tx, y: ty, kind: 'snow', life: 0, maxLife: 0.68 });
+    }
+    if (this.ripples.length > 14) {
+      this.ripples.splice(0, this.ripples.length - 14);
+    }
+  }
+
   update(dt, heldDir) {
     for (let i = this.particles.length - 1; i >= 0; i--) {
       const p = this.particles[i];
@@ -562,6 +707,14 @@ export class OverworldEngine {
         p.x += p.vx * dt;
         p.y += p.vy * dt;
         p.vy += 45 * dt;
+      }
+    }
+
+    for (let i = this.ripples.length - 1; i >= 0; i--) {
+      const r = this.ripples[i];
+      r.life += dt;
+      if (r.life >= r.maxLife) {
+        this.ripples.splice(i, 1);
       }
     }
 
@@ -587,11 +740,15 @@ export class OverworldEngine {
         this.moveProgress = 0;
         profile.pos.x = this.moveTargetX;
         profile.pos.y = this.moveTargetY;
+        const hadFollowerStep = this.followerMoving;
         this.followerX = this.followerTargetX;
         this.followerY = this.followerTargetY;
         this.followerStartX = this.followerX;
         this.followerStartY = this.followerY;
         this.followerMoving = false;
+        if (hadFollowerStep) {
+          this.spawnStepRipple(this.followerX, this.followerY);
+        }
         this.onStepSaved?.(profile.pos.x, profile.pos.y, profile.pos.dir, true);
         this.handleTileArrival(profile.pos.x, profile.pos.y);
       }
@@ -659,6 +816,7 @@ export class OverworldEngine {
 
   handleTileArrival(x, y) {
     this.refreshInteractHint();
+    this.spawnStepRipple(x, y);
 
     const biome = getBiomeAt(x, y);
     if (biome.id !== this.currentBiomeId) {
@@ -754,6 +912,9 @@ export class OverworldEngine {
       }
     }
 
+    // Subtle shallow-water & snow step ripples
+    this.drawStepRipples(ctx, camX, camY);
+
     // Draw glowing rare-spawn patches on encounter tiles
     for (const patch of this.rarePatches) {
       if (patch.x < startCol || patch.x > endCol || patch.y < startRow || patch.y > endRow) continue;
@@ -787,7 +948,7 @@ export class OverworldEngine {
       ctx.restore();
     }
 
-    // Collect visible NPCs + player for clean Y-sorted rendering
+    // Collect visible NPCs, rivals, follower & player for clean Y-sorted rendering
     const actors = [];
     for (const [key, npc] of Object.entries(NPCS)) {
       const [nx, ny] = key.split(',').map(Number);
@@ -798,6 +959,17 @@ export class OverworldEngine {
         sx: nx * this.tileSize - camX,
         sy: ny * this.tileSize - camY,
         npc,
+      });
+    }
+    for (const [key, rival] of Object.entries(RIVAL_TRAINERS)) {
+      const [rx, ry] = key.split(',').map(Number);
+      if (rx < startCol - 1 || rx > endCol + 1 || ry < startRow - 1 || ry > endRow + 1) continue;
+      actors.push({
+        kind: 'rival',
+        sortY: ry,
+        sx: rx * this.tileSize - camX,
+        sy: ry * this.tileSize - camY,
+        rival,
       });
     }
     actors.push({
@@ -829,39 +1001,18 @@ export class OverworldEngine {
 
     for (const actor of actors) {
       if (actor.kind === 'player') {
-        this.drawPlayer(ctx, actor.sx, actor.sy, profile.trainerId, profile.pos.dir, nowMs);
+        this.drawPlayer(ctx, actor.sx, actor.sy, profile.trainerId, profile.pos.dir, nowMs, profile.appearance);
       } else if (actor.kind === 'follower') {
         this.drawFollower(ctx, actor.sx, actor.sy, actor.lead, this.followerDir, nowMs);
+      } else if (actor.kind === 'rival') {
+        this.drawRival(ctx, actor.sx, actor.sy, actor.rival, nowMs, profile);
       } else {
         this.drawNpc(ctx, actor.sx, actor.sy, actor.npc, nowMs, profile);
       }
     }
 
-    // Draw ambient biome motes (fireflies, cave crystals, sea mist, volcanic embers, peak snowflakes)
-    ctx.save();
-    for (let i = 0; i < this.ambientMotes.length; i++) {
-      const mote = this.ambientMotes[i];
-      const driftDown = biomeId === 'peak';
-      const ySpeed = driftDown ? 0.011 : 0.006;
-      const yDir = driftDown ? 1 : -1;
-      const mx = Math.round(((mote.xFrac * this.viewW + Math.sin(nowMs * 0.0012 * mote.speed + mote.seed) * 16) % this.viewW + this.viewW) % this.viewW);
-      const my = Math.round(((mote.yFrac * this.viewH + yDir * nowMs * ySpeed * mote.speed) % this.viewH + this.viewH) % this.viewH);
-      const twinkle = 0.28 + 0.5 * (0.5 + 0.5 * Math.sin(nowMs * 0.004 * mote.speed + mote.seed * 2));
-      ctx.globalAlpha = twinkle;
-      if (biomeId === 'cave') {
-        ctx.fillStyle = '#e879f9';
-      } else if (biomeId === 'water') {
-        ctx.fillStyle = '#e0f2fe';
-      } else if (biomeId === 'volcano') {
-        ctx.fillStyle = i % 2 === 0 ? '#fb923c' : '#fde047';
-      } else if (biomeId === 'peak') {
-        ctx.fillStyle = i % 3 === 0 ? '#a5f3fc' : i % 3 === 1 ? '#e0f2fe' : '#c084fc';
-      } else {
-        ctx.fillStyle = '#fef08a';
-      }
-      ctx.fillRect(mx, my, mote.size, mote.size);
-    }
-    ctx.restore();
+    // Draw biome-specific ambient weather motes & peak aurora shimmer
+    this.drawBiomeWeather(ctx, biomeId, nowMs);
 
     // Draw particles
     for (const p of this.particles) {
@@ -873,6 +1024,128 @@ export class OverworldEngine {
       ctx.fill();
     }
     ctx.globalAlpha = 1;
+  }
+
+  drawStepRipples(ctx, camX, camY) {
+    if (!this.ripples.length) return;
+    ctx.save();
+    for (const r of this.ripples) {
+      const progress = Math.min(1, r.life / r.maxLife);
+      const alpha = Math.max(0, 1 - progress);
+      const cx = r.x * this.tileSize + 16 - camX;
+      const cy = r.y * this.tileSize + 24 - camY;
+      if (r.kind === 'water') {
+        ctx.strokeStyle = `rgba(224, 242, 254, ${(alpha * 0.85).toFixed(3)})`;
+        ctx.lineWidth = 1.4;
+        ctx.beginPath();
+        ctx.ellipse(cx, cy, 4 + progress * 9, 2 + progress * 4, 0, 0, Math.PI * 2);
+        ctx.stroke();
+        if (progress > 0.25) {
+          ctx.strokeStyle = `rgba(103, 232, 249, ${(alpha * 0.65).toFixed(3)})`;
+          ctx.beginPath();
+          ctx.ellipse(cx, cy, 2 + progress * 5, 1 + progress * 2.2, 0, 0, Math.PI * 2);
+          ctx.stroke();
+        }
+      } else {
+        ctx.fillStyle = `rgba(100, 116, 139, ${(alpha * 0.4).toFixed(3)})`;
+        ctx.fillRect(Math.round(cx - 5), Math.round(cy - 1), 3, 2);
+        ctx.fillRect(Math.round(cx + 2), Math.round(cy + 1), 3, 2);
+        ctx.strokeStyle = `rgba(248, 250, 252, ${(alpha * 0.72).toFixed(3)})`;
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.ellipse(cx, cy + 1, 5 + progress * 5, 2.5 + progress * 2, 0, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+    }
+    ctx.restore();
+  }
+
+  drawBiomeWeather(ctx, biomeId, nowMs) {
+    ctx.save();
+    if (biomeId === 'peak') {
+      // Soft dancing northern aurora ribbons near the top of the viewport
+      const bandColors = ['rgba(56, 189, 248, 0.085)', 'rgba(52, 211, 153, 0.09)', 'rgba(192, 132, 252, 0.08)'];
+      for (let b = 0; b < bandColors.length; b++) {
+        const waveY = 14 + b * 14 + Math.sin(nowMs * 0.0014 + b * 1.7) * 8;
+        const shiftX = Math.sin(nowMs * 0.0009 + b * 2.1) * 28;
+        const grad = ctx.createLinearGradient(0, waveY - 12, this.viewW, waveY + 26);
+        grad.addColorStop(0, 'rgba(56, 189, 248, 0)');
+        grad.addColorStop(0.3 + b * 0.1, bandColors[b]);
+        grad.addColorStop(0.75, bandColors[(b + 1) % bandColors.length]);
+        grad.addColorStop(1, 'rgba(192, 132, 252, 0)');
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.moveTo(0, waveY + 8);
+        ctx.quadraticCurveTo(this.viewW * 0.35 + shiftX, waveY - 14, this.viewW * 0.7, waveY + 12);
+        ctx.quadraticCurveTo(this.viewW * 0.88 - shiftX * 0.5, waveY + 22, this.viewW, waveY + 4);
+        ctx.lineTo(this.viewW, waveY + 28);
+        ctx.lineTo(0, waveY + 28);
+        ctx.closePath();
+        ctx.fill();
+      }
+    }
+
+    for (let i = 0; i < this.ambientMotes.length; i++) {
+      const mote = this.ambientMotes[i];
+      const twinkle = 0.3 + 0.55 * (0.5 + 0.5 * Math.sin(nowMs * 0.004 * mote.speed + mote.seed * 2));
+
+      if (biomeId === 'village' || biomeId === 'forest') {
+        if (mote.variant === 0) {
+          // Falling blossom petals
+          const mx = Math.round(((mote.xFrac * this.viewW + nowMs * 0.007 * mote.speed + Math.sin(nowMs * 0.002 + mote.seed) * 10) % this.viewW + this.viewW) % this.viewW);
+          const my = Math.round(((mote.yFrac * this.viewH + nowMs * 0.009 * mote.speed) % this.viewH + this.viewH) % this.viewH);
+          ctx.globalAlpha = 0.55 * twinkle + 0.2;
+          ctx.fillStyle = i % 4 === 0 ? '#f9a8d4' : '#fbcfe8';
+          ctx.fillRect(mx, my, 3, 2);
+        } else {
+          // Warm drifting fireflies
+          const mx = Math.round(((mote.xFrac * this.viewW + Math.sin(nowMs * 0.0014 * mote.speed + mote.seed) * 20) % this.viewW + this.viewW) % this.viewW);
+          const my = Math.round(((mote.yFrac * this.viewH - nowMs * 0.004 * mote.speed + Math.cos(nowMs * 0.0016 + mote.seed) * 10) % this.viewH + this.viewH) % this.viewH);
+          ctx.globalAlpha = twinkle * 0.42;
+          ctx.fillStyle = '#bef264';
+          ctx.fillRect(mx - 1, my - 1, 4, 4);
+          ctx.globalAlpha = twinkle;
+          ctx.fillStyle = '#fef08a';
+          ctx.fillRect(mx, my, 2, 2);
+        }
+      } else if (biomeId === 'cave') {
+        // Crystal glints
+        const mx = Math.round(((mote.xFrac * this.viewW + Math.sin(nowMs * 0.0008 + mote.seed) * 8) % this.viewW + this.viewW) % this.viewW);
+        const my = Math.round(((mote.yFrac * this.viewH + Math.cos(nowMs * 0.0007 + mote.seed) * 8) % this.viewH + this.viewH) % this.viewH);
+        ctx.globalAlpha = twinkle;
+        ctx.fillStyle = i % 3 === 0 ? '#22d3ee' : '#e879f9';
+        ctx.fillRect(mx, my, 2, 2);
+        if (twinkle > 0.65) {
+          ctx.fillStyle = '#ffffff';
+          ctx.fillRect(mx - 1, my, 4, 1);
+          ctx.fillRect(mx, my - 1, 1, 4);
+        }
+      } else if (biomeId === 'water') {
+        // Seafoam bubbles rising softly
+        const mx = Math.round(((mote.xFrac * this.viewW + Math.sin(nowMs * 0.0018 * mote.speed + mote.seed) * 12) % this.viewW + this.viewW) % this.viewW);
+        const my = Math.round(((mote.yFrac * this.viewH - nowMs * 0.007 * mote.speed) % this.viewH + this.viewH) % this.viewH);
+        ctx.globalAlpha = twinkle * 0.85;
+        ctx.fillStyle = '#7dd3fc';
+        ctx.fillRect(mx, my, 3, 3);
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(mx, my, 1, 1);
+      } else if (biomeId === 'volcano') {
+        // Rising glowing embers
+        const mx = Math.round(((mote.xFrac * this.viewW + Math.sin(nowMs * 0.0022 * mote.speed + mote.seed) * 18) % this.viewW + this.viewW) % this.viewW);
+        const my = Math.round(((mote.yFrac * this.viewH - nowMs * 0.015 * mote.speed) % this.viewH + this.viewH) % this.viewH);
+        ctx.globalAlpha = Math.min(1, twinkle * 1.1);
+        ctx.fillStyle = i % 2 === 0 ? '#fb923c' : '#fde047';
+        ctx.fillRect(mx, my, mote.size, mote.size + 1);
+      } else {
+        // Peak snowflakes
+        const mx = Math.round(((mote.xFrac * this.viewW + Math.sin(nowMs * 0.0015 * mote.speed + mote.seed) * 16) % this.viewW + this.viewW) % this.viewW);
+        const my = Math.round(((mote.yFrac * this.viewH + nowMs * 0.013 * mote.speed) % this.viewH + this.viewH) % this.viewH);
+        ctx.globalAlpha = Math.min(0.95, twinkle + 0.15);
+        ctx.fillStyle = i % 3 === 0 ? '#a5f3fc' : i % 3 === 1 ? '#ffffff' : '#e0f2fe';
+        ctx.fillRect(mx, my, Math.ceil(mote.size), Math.ceil(mote.size));
+      }
+    }
+    ctx.restore();
   }
 
   drawBaseGround(ctx, sx, sy, ts, h, tileBiomeId) {
@@ -1279,19 +1552,33 @@ export class OverworldEngine {
         const bob = Math.sin(nowMs * 0.006) * 2.5;
         ctx.fillStyle = cleared
           ? '#facc15'
-          : shrine?.biome === 'forest'
-            ? '#4ade80'
-            : shrine?.biome === 'cave'
-              ? '#c084fc'
-              : shrine?.biome === 'volcano'
-                ? '#fb7185'
-                : shrine?.biome === 'peak'
-                  ? '#67e8f9'
-                  : '#38bdf8';
+          : shrine?.id === 'thunder_shrine'
+            ? '#fde047'
+            : shrine?.id === 'starlight_shrine'
+              ? '#f472b6'
+              : shrine?.biome === 'forest'
+                ? '#4ade80'
+                : shrine?.biome === 'cave'
+                  ? '#c084fc'
+                  : shrine?.biome === 'volcano'
+                    ? '#fb7185'
+                    : shrine?.biome === 'peak'
+                      ? '#67e8f9'
+                      : '#38bdf8';
+        if (cleared) {
+          ctx.save();
+          ctx.globalAlpha = 0.35 + 0.25 * Math.sin(nowMs * 0.007);
+          ctx.strokeStyle = '#fef08a';
+          ctx.lineWidth = 1.5;
+          ctx.beginPath();
+          ctx.arc(sx + 16, sy + 9 + bob, 9, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.restore();
+        }
         ctx.beginPath();
         ctx.arc(sx + 16, sy + 9 + bob, 6, 0, Math.PI * 2);
         ctx.fill();
-        ctx.fillStyle = '#ffffff';
+        ctx.fillStyle = shrine?.id === 'thunder_shrine' && !cleared ? '#38bdf8' : '#ffffff';
         ctx.fillRect(sx + 14, sy + 7 + bob, 2, 2);
         break;
       }
@@ -1464,10 +1751,174 @@ export class OverworldEngine {
     }
   }
 
-  drawPlayer(ctx, sx, sy, trainerId, dir, nowMs) {
-    const trainer = TRAINERS[trainerId] || TRAINERS.violet;
+  drawRival(ctx, sx, sy, rival, nowMs, profile) {
+    const palette = rival.palette || {};
+    const defeated = Boolean(profile?.rivalsDefeated?.includes(rival.id));
+    const bob = Math.sin(nowMs * 0.005 + sx * 0.1) * 0.9;
+
+    // Ground aura ring + shadow
+    ctx.save();
+    ctx.globalAlpha = defeated ? 0.25 : 0.4 + 0.16 * Math.sin(nowMs * 0.006);
+    ctx.strokeStyle = palette.accent || '#f97316';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.ellipse(sx + 16, sy + 28, 11, 5, 0, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
+    ctx.beginPath();
+    ctx.ellipse(sx + 16, sy + 28, 9, 4, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    const y = Math.round(sy - bob);
+
+    // Duelist scarf/cloak behind shoulders
+    ctx.fillStyle = palette.accent || '#f97316';
+    ctx.fillRect(sx + 7, y + 14, 18, 7);
+
+    // Athletic boots / legs
+    ctx.fillStyle = '#0f172a';
+    ctx.fillRect(sx + 10, y + 23, 5, 5);
+    ctx.fillRect(sx + 17, y + 23, 5, 5);
+
+    // Trainer jacket & trim
+    ctx.fillStyle = palette.outfitPrimary || '#dc2626';
+    ctx.fillRect(sx + 9, y + 14, 14, 10);
+    ctx.fillStyle = palette.outfitSecondary || '#facc15';
+    ctx.fillRect(sx + 10, y + 14, 12, 3);
+    ctx.fillRect(sx + 14, y + 17, 4, 6);
+
+    // Head & Hair
+    ctx.fillStyle = palette.hair || '#334155';
+    ctx.fillRect(sx + 9, y + 4, 14, 11);
+
+    // Face & determined eyes
+    ctx.fillStyle = palette.skin || '#fde2c8';
+    ctx.fillRect(sx + 10, y + 8, 12, 7);
+    ctx.fillStyle = '#0f172a';
+    ctx.fillRect(sx + 12, y + 10, 2, 3);
+    ctx.fillRect(sx + 18, y + 10, 2, 3);
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(sx + 12, y + 10, 1, 1);
+    ctx.fillRect(sx + 18, y + 10, 1, 1);
+
+    // Rival Visor / Cap
+    ctx.fillStyle = palette.hat || '#991b1b';
+    ctx.fillRect(sx + 8, y + 2, 16, 5);
+    ctx.fillStyle = palette.outfitSecondary || '#fde047';
+    ctx.fillRect(sx + 9, y + 6, 14, 2);
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(sx + 15, y + 3, 2, 2);
+
+    // Floating battle (⚔️) or rematchable (✨) indicator
+    const floatY = Math.round(y - 11 + Math.sin(nowMs * 0.0075) * 2);
+    ctx.save();
+    ctx.fillStyle = defeated ? 'rgba(14, 116, 144, 0.92)' : 'rgba(153, 27, 27, 0.94)';
+    ctx.fillRect(sx + 9, floatY, 14, 11);
+    ctx.strokeStyle = defeated ? '#67e8f9' : '#facc15';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(sx + 9, floatY, 14, 11);
+    ctx.fillStyle = '#ffffff';
+    ctx.font = '8px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(defeated ? '✨' : '⚔️', sx + 16, floatY + 6);
+    ctx.restore();
+  }
+
+  _drawPlayerCape(ctx, sx, y, dir, sway, look) {
+    ctx.fillStyle = look.accentDark || '#581c87';
+    if (dir === 'up') {
+      ctx.fillRect(sx + 7 + sway, y + 13, 18, 12);
+      ctx.fillStyle = look.outfitSecondary;
+      ctx.fillRect(sx + 10 + sway, y + 14, 12, 9);
+      ctx.fillStyle = '#fef08a';
+      ctx.fillRect(sx + 10, y + 14, 2, 2);
+      ctx.fillRect(sx + 20, y + 14, 2, 2);
+      return;
+    }
+    if (dir === 'left') {
+      const w = 9 + Math.max(0, sway);
+      ctx.fillRect(sx + 16, y + 14, w, 10);
+      ctx.fillStyle = look.outfitSecondary;
+      ctx.fillRect(sx + 18 + Math.max(0, sway), y + 21, 5, 2);
+      return;
+    }
+    if (dir === 'right') {
+      const extra = Math.max(0, -sway);
+      ctx.fillRect(sx + 7 - extra, y + 14, 9 + extra, 10);
+      ctx.fillStyle = look.outfitSecondary;
+      ctx.fillRect(sx + 9 - extra, y + 21, 5, 2);
+      return;
+    }
+    ctx.fillRect(sx + 6 + sway, y + 14, 20, 11);
+    ctx.fillStyle = look.outfitSecondary;
+    ctx.fillRect(sx + 7 + sway, y + 23, 18, 2);
+  }
+
+  _drawPlayerAccessory(ctx, sx, y, dir, nowMs, look) {
+    if (look.accessory === 'crown') {
+      ctx.fillStyle = '#eab308';
+      ctx.fillRect(sx + 9, y + 3, 14, 3);
+      ctx.fillStyle = '#facc15';
+      ctx.fillRect(sx + 9, y, 3, 3);
+      ctx.fillRect(sx + 14, y - 1, 4, 4);
+      ctx.fillRect(sx + 20, y, 3, 3);
+      ctx.fillStyle = look.accent || '#38bdf8';
+      ctx.fillRect(sx + 15, y + 3, 2, 2);
+      return;
+    }
+    if (look.accessory === 'wizard') {
+      ctx.fillStyle = look.accentDark || '#312e81';
+      ctx.fillRect(sx + 5, y + 5, 22, 3);
+      ctx.fillRect(sx + 9, y + 2, 14, 3);
+      ctx.fillRect(sx + 12, y - 1, 8, 3);
+      ctx.fillRect(sx + 15, y - 3, 3, 2);
+      ctx.fillStyle = look.outfitSecondary;
+      ctx.fillRect(sx + 9, y + 4, 14, 2);
+      if (dir !== 'up') {
+        ctx.fillStyle = '#fef08a';
+        ctx.fillRect(sx + 15, y + 1, 2, 2);
+      }
+      return;
+    }
+    if (look.accessory === 'headband') {
+      ctx.fillStyle = look.outfitSecondary;
+      ctx.fillRect(sx + 8, y + 5, 16, 3);
+      const tailShift = Math.round(Math.sin(nowMs * 0.01) * 0.9);
+      const tailX = dir === 'right' ? sx + 5 : sx + 24;
+      ctx.fillStyle = look.accent;
+      ctx.fillRect(tailX, y + 5 + tailShift, 3, 4);
+      if (dir !== 'up') {
+        ctx.fillStyle = '#fef08a';
+        ctx.fillRect(sx + 15, y + 5, 2, 2);
+      }
+      return;
+    }
+
+    // Default Adventure Cap
+    ctx.fillStyle = look.outfitPrimary;
+    ctx.fillRect(sx + 8, y + 2, 16, 5);
+    ctx.fillStyle = look.outfitSecondary;
+    if (dir === 'left') {
+      ctx.fillRect(sx + 6, y + 6, 12, 2);
+    } else if (dir === 'right') {
+      ctx.fillRect(sx + 14, y + 6, 12, 2);
+    } else {
+      ctx.fillRect(sx + 9, y + 6, 14, 2);
+    }
+    if (dir === 'down') {
+      ctx.fillStyle = '#fef08a';
+      ctx.fillRect(sx + 14, y + 3, 4, 2);
+    }
+  }
+
+  drawPlayer(ctx, sx, sy, trainerId, dir, nowMs, appearance = null) {
+    const look = getResolvedTrainerLook(trainerId, appearance);
     const bob = this.moving ? Math.abs(Math.sin(this.moveProgress * Math.PI)) * 3 : Math.sin(nowMs * 0.004) * 0.6;
     const stepShift = this.moving ? (this.walkFrame === 0 ? 2 : -2) : 0;
+    const capeSway = Math.round(Math.sin(nowMs * 0.008 + (this.moving ? this.moveProgress * Math.PI : 0)) * (this.moving ? 2 : 1));
 
     // Ground shadow
     ctx.fillStyle = 'rgba(0, 0, 0, 0.28)';
@@ -1477,24 +1928,37 @@ export class OverworldEngine {
 
     const y = Math.round(sy - bob);
 
+    if (look.cape && dir !== 'up') {
+      this._drawPlayerCape(ctx, sx, y, dir, capeSway, look);
+    }
+
     // Legs
     ctx.fillStyle = '#1e293b';
     ctx.fillRect(sx + 10, y + 23 + (stepShift > 0 ? -1 : 0), 5, 5);
     ctx.fillRect(sx + 17, y + 23 + (stepShift < 0 ? -1 : 0), 5, 5);
 
     // Body / Jacket
-    ctx.fillStyle = trainer.outfitPrimary;
+    ctx.fillStyle = look.outfitPrimary;
     ctx.fillRect(sx + 9, y + 14, 14, 10);
-    ctx.fillStyle = trainer.outfitSecondary;
+    ctx.fillStyle = look.outfitSecondary;
     ctx.fillRect(sx + 12, y + 15, 8, 6);
+    if (look.cape && dir === 'down') {
+      ctx.fillStyle = '#fef08a';
+      ctx.fillRect(sx + 10, y + 15, 2, 2);
+      ctx.fillRect(sx + 20, y + 15, 2, 2);
+    }
+
+    if (look.cape && dir === 'up') {
+      this._drawPlayerCape(ctx, sx, y, dir, capeSway, look);
+    }
 
     // Head & Hair
-    ctx.fillStyle = trainer.hair;
+    ctx.fillStyle = look.hair;
     ctx.fillRect(sx + 9, y + 4, 14, 11);
 
     // Face (unless facing up)
     if (dir !== 'up') {
-      ctx.fillStyle = trainer.skin;
+      ctx.fillStyle = look.skin;
       if (dir === 'down') {
         ctx.fillRect(sx + 10, y + 8, 12, 7);
         ctx.fillStyle = '#0f172a';
@@ -1511,15 +1975,8 @@ export class OverworldEngine {
       }
     }
 
-    // Trainer Cap + Emblem
-    ctx.fillStyle = trainer.outfitPrimary;
-    ctx.fillRect(sx + 8, y + 2, 16, 5);
-    ctx.fillStyle = trainer.outfitSecondary;
-    ctx.fillRect(sx + 9, y + 6, 14, 2);
-    if (dir === 'down') {
-      ctx.fillStyle = '#fef08a';
-      ctx.fillRect(sx + 14, y + 3, 4, 2);
-    }
+    // Trainer Headgear / Accessory
+    this._drawPlayerAccessory(ctx, sx, y, dir, nowMs, look);
   }
 
   _getFollowerSpriteEntry(species, useBack, shiny) {
