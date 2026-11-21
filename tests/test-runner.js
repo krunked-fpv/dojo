@@ -14,6 +14,7 @@ import {
   NPCS,
   RIVAL_TRAINERS,
   SHRINES,
+  SIGNPOSTS,
   SPECIES,
   TILE,
   TRAINER_ACCESSORIES,
@@ -42,6 +43,7 @@ import {
   generateSilhouetteDataUri,
   getBattleShardReward,
   getBiomeScaledRange,
+  getBondTier,
   getScaledRivalParty,
   getScaledShrineGuard,
   getTrainerPowerLevel,
@@ -517,7 +519,7 @@ function buildTestSuites() {
               engine.start({ enemy: createPokemon(25, 5), biomeId: 'forest' });
               assertEqual(engine.active, false, 'BattleEngine does not stay stuck active on empty team');
               assertEqual(endedWith?.outcome, 'escaped', 'BattleEngine invokes onBattleEnd cleanly');
-              assert(BADGES.length === 12 && Object.keys(SPECIES).length === 90, 'Config roster intact');
+              assert(BADGES.length === 14 && Object.keys(SPECIES).length === 110, 'Config roster intact');
             } finally {
               engine?.destroy();
               window.localStorage.removeItem(TEST_KEY);
@@ -929,10 +931,10 @@ function buildTestSuites() {
       ],
     },
     {
-      name: '12. Evolution Chains, Evolution Gems & Expanded 90-Species Roster',
+      name: '12. Evolution Chains, Evolution Gems & Expanded 110-Species Roster',
       tests: [
         {
-          name: 'All 10 TYPES have fallback SVGs, 90 SPECIES & 8 gems exist, and level & gem evolutions update Pokemon & Storage',
+          name: 'All 10 TYPES have fallback SVGs, 110 SPECIES & 9 gems exist, and level & gem evolutions update Pokemon & Storage',
           async fn() {
             const typeIds = Object.keys(TYPES);
             assertEqual(typeIds.length, 10, '10 elemental types exist');
@@ -942,8 +944,8 @@ function buildTestSuites() {
               assertEqual(resp.ok, true, `fallback SVG exists for ${reqType}`);
             }
 
-            assertEqual(Object.keys(SPECIES).length, 90, '90 species defined');
-            assertEqual(Object.keys(EVOLUTION_ITEMS).length, 8, '8 evolution gems defined');
+            assertEqual(Object.keys(SPECIES).length, 110, '110 species defined');
+            assertEqual(Object.keys(EVOLUTION_ITEMS).length, 9, '9 evolution gems defined');
             assertEqual(EVOLUTIONS[1][0].to, 2, 'Bulbasaur -> Ivysaur');
             assertEqual(EVOLUTIONS[2][0].to, 3, 'Ivysaur -> Venusaur');
             assertEqual(EVOLUTIONS[129][0].to, 130, 'Magikarp -> Gyarados');
@@ -958,7 +960,7 @@ function buildTestSuites() {
 
             const eevee = createPokemon(133, 8);
             assertEqual(eevee.getPendingLevelEvolution(), null, 'Eevee has no level evolution');
-            const eeveeNoGems = eevee.getAvailableItemEvolutions({ water_gem: 0, thunder_gem: 0, fire_gem: 0, moon_gem: 0, leaf_gem: 0, ice_gem: 0, sun_gem: 0, dusk_gem: 0 });
+            const eeveeNoGems = eevee.getAvailableItemEvolutions({ water_gem: 0, thunder_gem: 0, fire_gem: 0, moon_gem: 0, leaf_gem: 0, ice_gem: 0, sun_gem: 0, dusk_gem: 0, astral_gem: 0 });
             assertEqual(eeveeNoGems.length, 7, 'Eevee has 7 item evolution paths');
             assertEqual(eeveeNoGems.every((o) => !o.canUse), true, 'cannot use gem evolution with 0 gems');
             const eeveeWithWater = eevee.getAvailableItemEvolutions({ water_gem: 1 });
@@ -1079,28 +1081,28 @@ function buildTestSuites() {
       ],
     },
     {
-      name: '14. 6 Biomes, 8 Shrines, NPCs, Quests & Starlight Compass',
+      name: '14. 7 Biomes, 9 Shrines, NPCs, Quests & Starlight Compass',
       tests: [
         {
-          name: '52x38 world map is BFS-reachable to all 6 biomes, 8 shrines, 12 chests, 10 NPCs, landmarks & quests work',
+          name: '52x48 world map is BFS-reachable to all 7 biomes, 9 shrines, 14 chests, 12 NPCs, landmarks & quests work',
           fn() {
             assertEqual(WORLD_COLS, 52, 'WORLD_COLS === 52');
-            assertEqual(WORLD_ROWS, 38, 'WORLD_ROWS === 38');
-            assertEqual(WORLD_MAP.length, 38, 'WORLD_MAP has 38 rows');
+            assertEqual(WORLD_ROWS, 48, 'WORLD_ROWS === 48');
+            assertEqual(WORLD_MAP.length, 48, 'WORLD_MAP has 48 rows');
             for (let y = 0; y < WORLD_ROWS; y++) {
               assertEqual(WORLD_MAP[y].length, 52, `row ${y} width === 52`);
             }
 
-            const reqBiomes = ['village', 'forest', 'cave', 'water', 'volcano', 'peak'];
+            const reqBiomes = ['village', 'forest', 'cave', 'water', 'volcano', 'peak', 'grove'];
             for (const bId of reqBiomes) {
               assert(Boolean(BIOMES[bId]), `BIOMES.${bId} exists`);
             }
 
             const shrineList = Object.entries(SHRINES);
-            assertEqual(shrineList.length, 8, '8 shrines exist');
+            assertEqual(shrineList.length, 9, '9 shrines exist');
             const chestList = Object.entries(CHESTS);
-            assertEqual(chestList.length, 12, '12 chests exist');
-            assertEqual(Object.keys(NPCS).length, 10, '10 NPCs exist');
+            assertEqual(chestList.length, 14, '14 chests exist');
+            assertEqual(Object.keys(NPCS).length, 12, '12 NPCs exist');
             assertGreater(Object.keys(LANDMARKS).length, 4, '5+ landmarks exist');
 
             // BFS from spawn (8, 15)
@@ -1435,20 +1437,20 @@ function buildTestSuites() {
               app.refreshHud();
 
               assert(
-                app.hudDexBtn.textContent.includes('Dex 7/90'),
-                `HUD Dex pill displays reconciled 7/90, got "${app.hudDexBtn.textContent}"`,
+                app.hudDexBtn.textContent.includes('Dex 7/110'),
+                `HUD Dex pill displays reconciled 7/110, got "${app.hudDexBtn.textContent}"`,
               );
 
               app.openPokedex('dex');
               const summaryText = document.querySelector('.dex-summary-bar')?.textContent || '';
-              assert(summaryText.includes('Caught: 7/90'), `Dex summary shows Caught: 7/90, got "${summaryText}"`);
-              assert(summaryText.includes('Seen: 9/90'), `Dex summary shows Seen: 9/90, got "${summaryText}"`);
+              assert(summaryText.includes('Caught: 7/110'), `Dex summary shows Caught: 7/110, got "${summaryText}"`);
+              assert(summaryText.includes('Seen: 9/110'), `Dex summary shows Seen: 9/110, got "${summaryText}"`);
 
               const cards = Array.from(document.querySelectorAll('.dex-grid .dex-card'));
-              assertEqual(cards.length, 90, '90 Pokédex cards rendered');
+              assertEqual(cards.length, 110, '110 Pokédex cards rendered');
               assertEqual(cards.filter((c) => c.classList.contains('is-caught')).length, 7, '7 .is-caught cards rendered');
               assertEqual(cards.filter((c) => c.classList.contains('is-seen')).length, 2, '2 .is-seen cards rendered');
-              assertEqual(cards.filter((c) => c.classList.contains('is-unknown')).length, 81, '81 .is-unknown cards rendered');
+              assertEqual(cards.filter((c) => c.classList.contains('is-unknown')).length, 101, '101 .is-unknown cards rendered');
 
               const cardById = new Map();
               for (const card of cards) {
@@ -1493,7 +1495,7 @@ function buildTestSuites() {
               // Guide tab Dex header matches Pokédex tab
               app.openPokedex('guide');
               const guideText = document.querySelector('.guide-compass-stats')?.textContent || '';
-              assert(guideText.includes('Dex: 7/90'), `Guide tab shows matching Dex: 7/90, got "${guideText}"`);
+              assert(guideText.includes('Dex: 7/110'), `Guide tab shows matching Dex: 7/110, got "${guideText}"`);
             } finally {
               app.pokedex.close();
               if (prevRawSave === null) {
@@ -1718,12 +1720,12 @@ function buildTestSuites() {
       ],
     },
     {
-      name: '18. Expanded Roster, 12 Badges, 8 Shrines, 12 Chests, 10 Quests, 5 Rivals & Safe Relocation',
+      name: '18. Expanded Roster, 14 Badges, 9 Shrines, 14 Chests, 12 Quests, 6 Rivals & Safe Relocation',
       tests: [
         {
-          name: '90 species, 10 Sprint-3 + 8 Sprint-4 moves, 8 gems, 12 badges, 8 shrines, 12 chests, 10 quests, 5 rivals & BFS/sanitizePosition hold',
+          name: '110 species, 10 Sprint-3 + 8 Sprint-4 moves, 9 gems, 14 badges, 9 shrines, 14 chests, 12 quests, 6 rivals & BFS/sanitizePosition hold',
           fn() {
-            assertEqual(Object.keys(SPECIES).length, 90, '90 species total');
+            assertEqual(Object.keys(SPECIES).length, 110, '110 species total');
             const newIds = [18, 39, 40, 45, 62, 65, 76, 94, 116, 117, 143, 145, 151, 179, 180, 181, 196, 230, 470, 471];
             for (const id of newIds) {
               assert(Boolean(SPECIES[id]), `new species #${id} exists`);
@@ -1744,11 +1746,11 @@ function buildTestSuites() {
               }
             }
 
-            assertEqual(Object.keys(EVOLUTION_ITEMS).length, 8, '8 evolution gems exist');
+            assertEqual(Object.keys(EVOLUTION_ITEMS).length, 9, '9 evolution gems exist');
             assert(Boolean(EVOLUTION_ITEMS.leaf_gem && EVOLUTION_ITEMS.ice_gem), 'leaf_gem and ice_gem present');
             assertEqual(EVOLUTIONS[133].length, 7, '7 Eeveelutions defined');
 
-            assertEqual(BADGES.length, 12, '12 badges defined');
+            assertEqual(BADGES.length, 14, '14 badges defined');
             const tempest = BADGES.find((b) => b.id === 'tempest');
             const celestial = BADGES.find((b) => b.id === 'celestial');
             assert(Boolean(tempest && celestial), 'tempest and celestial badges exist');
@@ -1758,18 +1760,18 @@ function buildTestSuites() {
             const caught25 = Object.fromEntries(Object.keys(SPECIES).slice(0, 25).map((id) => [id, 1]));
             assertEqual(celestial.check({ shrinesCleared: [], pokedex: { caught: caught25 } }), true, 'celestial unlocks on 25 caught species');
 
-            assertEqual(Object.keys(SHRINES).length, 8, '8 shrines defined');
+            assertEqual(Object.keys(SHRINES).length, 9, '9 shrines defined');
             assertEqual(Object.values(SHRINES).some((s) => s.id === 'thunder_shrine' && s.guardianId === 145), true, 'thunder_shrine guardian Zapdos #145');
             assertEqual(Object.values(SHRINES).some((s) => s.id === 'starlight_shrine' && s.guardianId === 151), true, 'starlight_shrine guardian Mew #151');
-            assertEqual(Object.keys(CHESTS).length, 12, '12 chests defined');
-            assertEqual(Object.keys(NPCS).length, 10, '10 NPCs defined');
-            assertEqual(FIELD_QUESTS.length, 10, '10 quests defined');
+            assertEqual(Object.keys(CHESTS).length, 14, '14 chests defined');
+            assertEqual(Object.keys(NPCS).length, 12, '12 NPCs defined');
+            assertEqual(FIELD_QUESTS.length, 12, '12 quests defined');
             assertEqual(FIELD_QUESTS.some((q) => q.id === 'quest_celeste_style'), true, 'quest_celeste_style exists');
             assertEqual(FIELD_QUESTS.some((q) => q.id === 'quest_yuki_peak'), true, 'quest_yuki_peak exists');
-            assertEqual(Object.keys(RIVAL_TRAINERS).length, 5, '5 RIVAL_TRAINERS defined');
+            assertEqual(Object.keys(RIVAL_TRAINERS).length, 6, '6 RIVAL_TRAINERS defined');
 
             // No evolved forms in wild encounters (preserves Suite 16 lineage rules)
-            const forbiddenWild = new Set([2, 26, 134, 135, 136, 182, 186, 196, 197, 208, 282, 334, 365, 405, 467, 470, 471]);
+            const forbiddenWild = new Set([2, 26, 134, 135, 136, 157, 182, 186, 196, 197, 208, 254, 282, 334, 350, 365, 373, 405, 448, 467, 468, 470, 471, 475, 478]);
             for (const [bId, biome] of Object.entries(BIOMES)) {
               for (const enc of biome.encounters || []) {
                 assert(!forbiddenWild.has(enc.id), `forbidden evolved wild #${enc.id} in ${bId}`);
@@ -1833,8 +1835,8 @@ function buildTestSuites() {
         {
           name: 'TRAINER_STYLES, TRAINER_ACCESSORIES, resolveTrainerLook, nicknames, bond crit boost & starBalls save/migration hold',
           fn() {
-            assertEqual(Object.keys(TRAINER_STYLES).length, 8, '8 TRAINER_STYLES defined');
-            assertEqual(Object.keys(TRAINER_ACCESSORIES).length, 6, '6 TRAINER_ACCESSORIES defined');
+            assertEqual(Object.keys(TRAINER_STYLES).length, 10, '10 TRAINER_STYLES defined');
+            assertEqual(Object.keys(TRAINER_ACCESSORIES).length, 8, '8 TRAINER_ACCESSORIES defined');
 
             for (const tid of ['violet', 'ozias']) {
               const base = TRAINERS[tid];
@@ -2183,10 +2185,10 @@ function buildTestSuites() {
       ],
     },
     {
-      name: '21. Pokedex Filters (90 Cards), Style Studio, Box Evo, Audio & Battle Layout',
+      name: '21. Pokedex Filters (110 Cards), Style Studio, Box Evo, Audio & Battle Layout',
       tests: [
         {
-          name: 'Dex defaults to 90 cards, Style Studio updates live preview & theme, Box evolves, THEMES.rival works & battle stage has zero overlap',
+          name: 'Dex defaults to 110 cards, Style Studio updates live preview & theme, Box evolves, THEMES.rival works & battle stage has zero overlap',
           async fn() {
             const app = window.__starlightApp;
             assert(Boolean(app), 'GameApp mounted');
@@ -2236,16 +2238,16 @@ function buildTestSuites() {
               app.overworld.setActive(true);
               app.overworld.syncFromProfile();
 
-              // 1. Pokédex default 'all' filter (90 cards) + filter pills + reset on reopen
+              // 1. Pokédex default 'all' filter (110 cards) + filter pills + reset on reopen
               app.openPokedex('dex');
-              assertEqual(document.querySelectorAll('.dex-grid .dex-card').length, 90, 'Dex opens with 90 cards on default "all" filter');
+              assertEqual(document.querySelectorAll('.dex-grid .dex-card').length, 110, 'Dex opens with 110 cards on default "all" filter');
               const peakPill = document.querySelector('.dex-filter-pill[data-filter="peak"]');
               assert(Boolean(peakPill), 'Peak filter pill rendered');
               peakPill.click();
               const peakCount = document.querySelectorAll('.dex-grid .dex-card').length;
-              assert(peakCount > 0 && peakCount < 90, `Peak filter narrows cards (${peakCount})`);
+              assert(peakCount > 0 && peakCount < 110, `Peak filter narrows cards (${peakCount})`);
               app.openPokedex('dex');
-              assertEqual(document.querySelectorAll('.dex-grid .dex-card').length, 90, 'Reopening Dex resets filter to all (90 cards)');
+              assertEqual(document.querySelectorAll('.dex-grid .dex-card').length, 110, 'Reopening Dex resets filter to all (110 cards)');
 
               // 2. Style Studio tab + #hud-portrait click + live preview + theme update
               app.pokedex.close();
@@ -2254,8 +2256,8 @@ function buildTestSuites() {
               assertEqual(app.pokedex.activeTab, 'trainer', 'Clicking #hud-portrait opens trainer Style tab');
               const studioPreview = document.getElementById('trainer-studio-preview');
               assert(Boolean(studioPreview) && studioPreview.width === 112 && studioPreview.height === 112, '112x112 Style Studio canvas mounted');
-              assertEqual(document.querySelectorAll('.style-chip').length, 8, '8 outfit style chips rendered');
-              assertEqual(document.querySelectorAll('.accessory-chip').length, 6, '6 accessory chips rendered');
+              assertEqual(document.querySelectorAll('.style-chip').length, 10, '10 outfit style chips rendered');
+              assertEqual(document.querySelectorAll('.accessory-chip').length, 8, '8 accessory chips rendered');
 
               document.querySelector('.style-chip[data-style-id="royal"]').click();
               document.querySelector('.accessory-chip[data-accessory-id="crown"]').click();
@@ -2361,12 +2363,12 @@ function buildTestSuites() {
       ],
     },
     {
-      name: '22. Sprint 4 Roster (90), 8 Moves, 8 Gems, 7 Eeveelutions, 12 Badges & Full World BFS',
+      name: '22. Sprint 4 Roster (110), 8 Moves, 9 Gems, 7 Eeveelutions, 14 Badges & Full World BFS',
       tests: [
         {
-          name: '90 species (16 new id<=467), 8 new moves, 8 gems, 7 Eeveelutions, 12 badges, 8 shrines, 12 chests, 10 NPCs/quests, 5 rivals, 7 landmarks & BFS hold',
+          name: '110 species (16 Sprint-4 id<=467), 8 new moves, 9 gems, 7 Eeveelutions, 14 badges, 9 shrines, 14 chests, 12 NPCs/quests, 6 rivals, 9 landmarks & BFS hold',
           fn() {
-            assertEqual(Object.keys(SPECIES).length, 90, '90 species defined');
+            assertEqual(Object.keys(SPECIES).length, 110, '110 species defined');
             const sprint4SpeciesIds = [182, 186, 197, 208, 280, 281, 282, 333, 334, 363, 364, 365, 403, 404, 405, 467];
             for (const id of sprint4SpeciesIds) {
               assert(Boolean(SPECIES[id]), `Sprint 4 species #${id} defined`);
@@ -2398,7 +2400,7 @@ function buildTestSuites() {
               assertEqual(mv.category, category, `${id}.category`);
             }
 
-            assertEqual(Object.keys(EVOLUTION_ITEMS).length, 8, '8 gems defined');
+            assertEqual(Object.keys(EVOLUTION_ITEMS).length, 9, '9 gems defined');
             assertEqual(EVOLUTION_ITEMS.sun_gem?.icon, '☀️', 'sun_gem present');
             assertEqual(EVOLUTION_ITEMS.dusk_gem?.icon, '🔮', 'dusk_gem present');
 
@@ -2410,11 +2412,11 @@ function buildTestSuites() {
             assert(EVOLUTIONS[126].some((e) => e.to === 467 && e.item === 'fire_gem'), 'Magmar -> Magmortar via fire_gem');
             assert(EVOLUTIONS[333].some((e) => e.to === 334 && e.item === 'sun_gem'), 'Swablu -> Altaria via sun_gem');
 
-            assertEqual(Object.keys(TRAINER_STYLES).length, 8, '8 TRAINER_STYLES defined');
+            assertEqual(Object.keys(TRAINER_STYLES).length, 10, '10 TRAINER_STYLES defined');
             assert(Boolean(TRAINER_STYLES.solstice && TRAINER_STYLES.twilight), 'solstice and twilight styles defined');
-            assertEqual(Object.keys(TRAINER_ACCESSORIES).length, 6, '6 TRAINER_ACCESSORIES defined');
+            assertEqual(Object.keys(TRAINER_ACCESSORIES).length, 8, '8 TRAINER_ACCESSORIES defined');
             assert(Boolean(TRAINER_ACCESSORIES.goggles && TRAINER_ACCESSORIES.halo), 'goggles and halo accessories defined');
-            assertEqual(Object.keys(TRAINER_AURAS).length, 4, '4 TRAINER_AURAS defined');
+            assertEqual(Object.keys(TRAINER_AURAS).length, 6, '6 TRAINER_AURAS defined');
             for (const auraId of ['none', 'stars', 'hearts', 'lightning']) {
               assert(Boolean(TRAINER_AURAS[auraId]), `TRAINER_AURAS.${auraId} exists`);
             }
@@ -2423,7 +2425,7 @@ function buildTestSuites() {
             assertEqual(defaultLook.aura, 'stars', 'resolveTrainerLook resolves aura');
             assertEqual(resolveTrainerLook('ozias', null).aura, 'none', 'null appearance defaults aura to none');
 
-            assertEqual(BADGES.length, 12, '12 BADGES defined');
+            assertEqual(BADGES.length, 14, '14 BADGES defined');
             const eclipseBadge = BADGES.find((b) => b.id === 'eclipse');
             const stardustBadge = BADGES.find((b) => b.id === 'stardust');
             assert(Boolean(eclipseBadge && stardustBadge), 'eclipse and stardust badges defined');
@@ -2432,18 +2434,18 @@ function buildTestSuites() {
             assertEqual(stardustBadge.check({ stats: { upgrades: 1, evolutions: 0 } }), true, 'stardust unlocks on 1 upgrade');
             assertEqual(stardustBadge.check({ stats: { upgrades: 0, evolutions: 3 } }), true, 'stardust unlocks on 3 evolutions');
 
-            assertEqual(Object.keys(SHRINES).length, 8, '8 SHRINES defined');
+            assertEqual(Object.keys(SHRINES).length, 9, '9 SHRINES defined');
             assert(Object.values(SHRINES).some((s) => s.id === 'eclipse_shrine' && s.guardianId === 282 && s.badgeId === 'eclipse'), 'eclipse_shrine guardian Gardevoir #282');
-            assertEqual(Object.keys(CHESTS).length, 12, '12 CHESTS defined');
+            assertEqual(Object.keys(CHESTS).length, 14, '14 CHESTS defined');
             assert(Object.values(CHESTS).some((c) => c.id === 'lagoon_chest_sun' && c.rewards?.gems?.sun_gem === 1), 'lagoon_chest_sun grants sun_gem');
             assert(Object.values(CHESTS).some((c) => c.id === 'cave_chest_dusk' && c.rewards?.gems?.dusk_gem === 1), 'cave_chest_dusk grants dusk_gem');
-            assertEqual(Object.keys(NPCS).length, 10, '10 NPCS defined');
-            assertEqual(FIELD_QUESTS.length, 10, '10 FIELD_QUESTS defined');
+            assertEqual(Object.keys(NPCS).length, 12, '12 NPCS defined');
+            assertEqual(FIELD_QUESTS.length, 12, '12 FIELD_QUESTS defined');
             assert(FIELD_QUESTS.some((q) => q.id === 'quest_orion_upgrade'), 'quest_orion_upgrade defined');
             assert(FIELD_QUESTS.some((q) => q.id === 'quest_selene_twilight'), 'quest_selene_twilight defined');
-            assertEqual(Object.keys(RIVAL_TRAINERS).length, 5, '5 RIVAL_TRAINERS defined');
+            assertEqual(Object.keys(RIVAL_TRAINERS).length, 6, '6 RIVAL_TRAINERS defined');
             assert(Object.values(RIVAL_TRAINERS).some((r) => r.id === 'rival_astra' && r.biome === 'peak'), 'rival_astra in peak');
-            assertEqual(Object.keys(LANDMARKS).length, 7, '7 LANDMARKS defined');
+            assertEqual(Object.keys(LANDMARKS).length, 9, '9 LANDMARKS defined');
 
             // BFS from spawn (8,15) reaches all 8 shrines, 12 chests, 10 NPCs, 5 rivals, 7 landmarks
             const visited = new Set([`${GAME_META.spawn.x},${GAME_META.spawn.y}`]);
@@ -2851,9 +2853,9 @@ function buildTestSuites() {
               assertEqual(app.starterScreenEl.hidden, false, 'starter screen shown for new profile');
               const styleBar = document.getElementById('starter-style-bar');
               assert(Boolean(styleBar), '#starter-style-bar exists');
-              assertEqual(styleBar.querySelectorAll('.starter-style-chip').length, 8, '8 starter style chips');
-              assertEqual(styleBar.querySelectorAll('.starter-acc-chip').length, 6, '6 starter accessory chips');
-              assertEqual(styleBar.querySelectorAll('.starter-aura-chip').length, 4, '4 starter aura chips');
+              assertEqual(styleBar.querySelectorAll('.starter-style-chip').length, 10, '10 starter style chips');
+              assertEqual(styleBar.querySelectorAll('.starter-acc-chip').length, 8, '8 starter accessory chips');
+              assertEqual(styleBar.querySelectorAll('.starter-aura-chip').length, 6, '6 starter aura chips');
               styleBar.querySelector('.starter-style-chip[data-starter-style-id="twilight"]')?.click();
               styleBar.querySelector('.starter-acc-chip[data-starter-acc-id="halo"]')?.click();
               styleBar.querySelector('.starter-aura-chip[data-starter-aura-id="stars"]')?.click();
@@ -2903,11 +2905,11 @@ function buildTestSuites() {
               assert(guideHtml.includes('Trainer Power:'), 'Guide renders Trainer Power');
               assertGreater(document.querySelectorAll('.biome-threat-tag').length, 0, 'Guide renders biome threat tags');
 
-              // 5. Style Studio 8 styles / 6 accessories / 4 auras + overworld aura render
+              // 5. Style Studio 10 styles / 8 accessories / 6 auras + overworld aura render
               app.openPokedex('trainer');
-              assertEqual(document.querySelectorAll('.style-chip').length, 8, 'Style Studio renders 8 styles');
-              assertEqual(document.querySelectorAll('.accessory-chip').length, 6, 'Style Studio renders 6 accessories');
-              assertEqual(document.querySelectorAll('.aura-chip').length, 4, 'Style Studio renders 4 auras');
+              assertEqual(document.querySelectorAll('.style-chip').length, 10, 'Style Studio renders 10 styles');
+              assertEqual(document.querySelectorAll('.accessory-chip').length, 8, 'Style Studio renders 8 accessories');
+              assertEqual(document.querySelectorAll('.aura-chip').length, 6, 'Style Studio renders 6 auras');
               document.querySelector('.aura-chip[data-aura-id="lightning"]')?.click();
               assertEqual(profile.appearance.aura, 'lightning', 'clicking .aura-chip updates appearance.aura');
               app.pokedex.close();
@@ -3009,6 +3011,861 @@ function buildTestSuites() {
               } else {
                 app.refreshHud();
               }
+              app.syncOverworldPause();
+            }
+          },
+        },
+      ],
+    },
+    {
+      name: '26. Sprint 5 Roster (110), Celestial Grove, Bond Perks & Save Migration',
+      tests: [
+        {
+          name: '110 species, 8 moves, astral_gem, Kirlia->Gallade split evo, getBondTier, cheerPokemon, badges & post-shrine roamers hold',
+          fn() {
+            assertEqual(Object.keys(SPECIES).length, 110, '110 species defined');
+            const sprint5SpeciesIds = [
+              155, 156, 157, 175, 176, 252, 253, 254, 349, 350,
+              361, 371, 372, 373, 385, 447, 448, 468, 475, 478,
+            ];
+            for (const id of sprint5SpeciesIds) {
+              assert(Boolean(SPECIES[id]), `Sprint 5 species #${id} exists`);
+            }
+            for (const sp of Object.values(SPECIES)) {
+              assert(Boolean(TYPES[sp.type]), `species #${sp.id} has valid type ${sp.type}`);
+              assert(Array.isArray(sp.movePool) && sp.movePool.length >= 3, `species #${sp.id} has movePool`);
+              for (const mvId of sp.movePool) {
+                assert(Boolean(MOVES[mvId]), `species #${sp.id} move ${mvId} exists`);
+              }
+            }
+
+            const sprint5Moves = [
+              ['leaf_blade', 'grass', 'physical', 'attack', 'grass'],
+              ['eruption_flare', 'fire', 'special', 'attack', 'fire'],
+              ['aura_sphere', 'psychic', 'special', 'attack', 'psychic'],
+              ['psycho_cut', 'psychic', 'physical', 'attack', 'psychic'],
+              ['aqua_tail', 'water', 'physical', 'attack', 'water'],
+              ['draco_meteor', 'dragon', 'special', 'attack', 'dragon'],
+              ['omen_wind', 'ghost', 'special', 'attack', 'ghost'],
+              ['doom_desire', 'psychic', 'special', 'attack', 'star'],
+            ];
+            for (const [id, type, dmgClass, category, fx] of sprint5Moves) {
+              const mv = MOVES[id];
+              assert(Boolean(mv), `MOVES.${id} defined`);
+              assertEqual(mv.type, type, `${id}.type`);
+              assertEqual(mv.damageClass, dmgClass, `${id}.damageClass`);
+              assertEqual(mv.category, category, `${id}.category`);
+              assertEqual(mv.fx, fx, `${id}.fx`);
+            }
+
+            assertEqual(Object.keys(EVOLUTION_ITEMS).length, 9, '9 evolution gems defined');
+            assert(Boolean(EVOLUTION_ITEMS.astral_gem), 'astral_gem defined');
+            assertEqual(EVOLUTION_ITEMS.astral_gem.icon, '🌠', 'astral_gem icon');
+
+            // Kirlia (#281) split evo: Gardevoir (#282, moon_gem) first, Gallade (#475, astral_gem) second
+            const kirliaRules = EVOLUTIONS[281];
+            assert(Array.isArray(kirliaRules) && kirliaRules.length === 2, 'Kirlia has 2 split evolution rules');
+            assertEqual(kirliaRules[0].to, 282, 'Kirlia first rule is Gardevoir #282');
+            assertEqual(kirliaRules[0].item, 'moon_gem', 'Kirlia -> Gardevoir uses moon_gem');
+            assertEqual(kirliaRules[1].to, 475, 'Kirlia second rule is Gallade #475');
+            assertEqual(kirliaRules[1].item, 'astral_gem', 'Kirlia -> Gallade uses astral_gem');
+
+            assert(EVOLUTIONS[176].some((r) => r.to === 468 && r.item === 'astral_gem'), 'Togetic -> Togekiss via astral_gem');
+            assert(EVOLUTIONS[349].some((r) => r.to === 350 && r.item === 'astral_gem'), 'Feebas -> Milotic via astral_gem');
+            assert(EVOLUTIONS[361].some((r) => r.to === 478 && r.item === 'dusk_gem'), 'Snorunt -> Froslass via dusk_gem');
+            assert(EVOLUTIONS[447].some((r) => r.to === 448 && r.item === 'astral_gem'), 'Riolu -> Lucario via astral_gem');
+
+            // getBondTier boundary verification & calculateDamage tiered critBonus
+            const tier0 = getBondTier(0);
+            const tier0Edge = getBondTier(39);
+            const tier1 = getBondTier(40);
+            const tier2 = getBondTier(60);
+            const tier3 = getBondTier(85);
+            const tierNeg = getBondTier(-20);
+            const tierHigh = getBondTier(999);
+            const tierNaN = getBondTier(NaN);
+            assertEqual(tier0.tier, 0, 'bond 0 -> tier 0');
+            assertEqual(tier0Edge.xpMult, 1.0, 'bond 39 -> xpMult 1.0');
+            assertEqual(tier1.tier, 1, 'bond 40 -> tier 1');
+            assertEqual(tier1.xpMult, 1.08, 'tier 1 xpMult 1.08');
+            assertEqual(tier1.critBonus, 0.02, 'tier 1 critBonus 0.02');
+            assertEqual(tier2.tier, 2, 'bond 60 -> tier 2');
+            assertEqual(tier2.xpMult, 1.12, 'tier 2 xpMult 1.12');
+            assertEqual(tier2.critBonus, 0.04, 'tier 2 critBonus 0.04');
+            assertEqual(tier2.endureChance, 0.15, 'tier 2 endureChance 0.15');
+            assertEqual(tier3.tier, 3, 'bond 85 -> tier 3');
+            assertEqual(tier3.xpMult, 1.20, 'tier 3 xpMult 1.20');
+            assertEqual(tier3.endureChance, 0.25, 'tier 3 endureChance 0.25');
+            assertEqual(tierNeg.tier, 0, 'negative bond clamps safely to tier 0');
+            assertEqual(tierHigh.tier, 3, 'high bond clamps safely to tier 3');
+            assertEqual(tierNaN.tier, 0, 'NaN bond defaults safely to tier 0');
+
+            const target = createPokemon(10, 10);
+            const monB20 = createPokemon(25, 10, 'forest', { bond: 20 });
+            const monB45 = createPokemon(25, 10, 'forest', { bond: 45 });
+            const monB70 = createPokemon(25, 10, 'forest', { bond: 70 });
+            const origRand = Math.random;
+            try {
+              Math.random = () => 0.09; // between 0.08 and 0.10
+              assertEqual(calculateDamage(monB20, target, MOVES.tackle, { forceHit: true, fixedVariance: 1 }).isCrit, false, 'bond 20 stays 8% crit');
+              assertEqual(calculateDamage(monB45, target, MOVES.tackle, { forceHit: true, fixedVariance: 1 }).isCrit, true, 'bond 45 raises crit to 10%');
+              Math.random = () => 0.11; // between 0.10 and 0.12
+              assertEqual(calculateDamage(monB45, target, MOVES.tackle, { forceHit: true, fixedVariance: 1 }).isCrit, false, 'bond 45 does not crit at 0.11');
+              assertEqual(calculateDamage(monB70, target, MOVES.tackle, { forceHit: true, fixedVariance: 1 }).isCrit, true, 'bond 70 raises crit to 12%');
+            } finally {
+              Math.random = origRand;
+            }
+
+            // Grove & Harmony badges
+            assertEqual(BADGES.length, 14, '14 badges defined');
+            const groveBadge = BADGES.find((b) => b.id === 'grove');
+            const harmonyBadge = BADGES.find((b) => b.id === 'harmony');
+            assert(Boolean(groveBadge && harmonyBadge), 'grove and harmony badges defined');
+            assertEqual(groveBadge.check({ shrinesCleared: ['grove_shrine'], pokedex: { caught: {} } }), true, 'grove badge unlocks on grove_shrine');
+            assertEqual(groveBadge.check({ shrinesCleared: [], pokedex: { caught: { 175: true, 252: 1, 447: 1 } } }), true, 'grove badge unlocks on 3 grove species');
+            assertEqual(groveBadge.check({ shrinesCleared: [], pokedex: { caught: { 175: 1, 252: 0 } } }), false, 'grove badge ignores zero-count entries');
+            assertEqual(harmonyBadge.check({ team: [{ bond: 60 }], box: [], pokedex: { caught: {} } }), true, 'harmony badge unlocks at bond 60');
+            const caught35 = Object.fromEntries(Object.keys(SPECIES).slice(0, 35).map((id) => [id, 1]));
+            assertEqual(harmonyBadge.check({ team: [], box: [], pokedex: { caught: caught35 } }), true, 'harmony badge unlocks at 35 species');
+
+            // Storage: Kirlia->Gallade split evo + cheerPokemon + persistence
+            const TEST_KEY = 'starlight_pokemon_test_s26_v1';
+            try {
+              window.localStorage.removeItem(TEST_KEY);
+              const store = new StorageManager(TEST_KEY);
+              store.selectTrainer('violet');
+              store.chooseStarter(1);
+              const profile = store.getActiveProfile();
+
+              const missingCheer = store.cheerPokemon('missing-uid');
+              assertEqual(missingCheer.cheered, false, 'cheerPokemon rejects unknown uid');
+
+              const starter = profile.team[0];
+              assertEqual(starter.bond, 20, 'starter starts at bond 20');
+              for (let step = 1; step <= 4; step++) {
+                const cheerRes = store.cheerPokemon(starter.uid);
+                assertEqual(cheerRes.cheered, true, `cheer #${step} succeeds`);
+                assertEqual(cheerRes.bond, 20 + step * 10, `bond incremented to ${20 + step * 10}`);
+              }
+              assertEqual(starter.bond, 60, '4 cheers bring bond 20 -> 60');
+              assert(profile.badges.includes('harmony'), 'harmony badge unlocked on cheering to bond 60');
+
+              const kirlia = createPokemon(281, 16, 'cave');
+              store.recordCaught(kirlia);
+              store.addGem('astral_gem', 1);
+              const itemOpts = kirlia.getAvailableItemEvolutions({ moon_gem: 1, astral_gem: 1 });
+              assertEqual(itemOpts.find((o) => o.toId === 282)?.canUse, true, 'Kirlia split evo Gardevoir available');
+              assertEqual(itemOpts.find((o) => o.toId === 475)?.canUse, true, 'Kirlia split evo Gallade available');
+              const galladeRes = store.evolvePokemon(kirlia.uid, 475, 'astral_gem');
+              assert(Boolean(galladeRes?.evolution), 'Kirlia -> Gallade evolution succeeded');
+              assertEqual(kirlia.speciesId, 475, 'Kirlia evolved into Gallade #475');
+              assertEqual(profile.bag.gems.astral_gem, 0, 'astral_gem consumed');
+              assert(Boolean(profile.pokedex.caught[475]), 'Gallade #475 recorded in Dex');
+
+              // Post-shrine roaming encounters (#144, #145, #146, #151, #385) without mutating BIOMES
+              const baseEncCounts = {
+                volcano: BIOMES.volcano.encounters.length,
+                peak: BIOMES.peak.encounters.length,
+                grove: BIOMES.grove.encounters.length,
+              };
+              const sweepRolls = (biomeId, prof) => {
+                const seen = new Set();
+                try {
+                  for (let i = 0; i < 250; i++) {
+                    Math.random = () => (i + 0.5) / 250;
+                    seen.add(rollWildPokemon(biomeId, prof, { forceShiny: false, forceElite: false }).speciesId);
+                  }
+                } finally {
+                  Math.random = origRand;
+                }
+                return seen;
+              };
+
+              const unshrineProfile = { team: [{ level: 20 }], badges: [], shrinesCleared: [] };
+              const noRoamVolcano = sweepRolls('volcano', unshrineProfile);
+              const noRoamPeak = sweepRolls('peak', unshrineProfile);
+              const noRoamGrove = sweepRolls('grove', unshrineProfile);
+              assert(!noRoamVolcano.has(145) && !noRoamVolcano.has(146), 'no Zapdos/Moltres roamer before shrines');
+              assert(!noRoamPeak.has(144) && !noRoamPeak.has(151), 'no Articuno/Mew roamer before shrines');
+              assert(!noRoamGrove.has(385), 'no Jirachi roamer before grove_shrine');
+
+              const clearedProfile = {
+                team: [{ level: 24 }],
+                badges: [],
+                shrinesCleared: ['volcano_shrine', 'thunder_shrine', 'peak_shrine', 'starlight_shrine', 'grove_shrine'],
+              };
+              const roamVolcano = sweepRolls('volcano', clearedProfile);
+              const roamPeak = sweepRolls('peak', clearedProfile);
+              const roamGrove = sweepRolls('grove', clearedProfile);
+              assert(roamVolcano.has(146), 'volcano_shrine unlocks roaming Moltres #146 in volcano');
+              assert(roamVolcano.has(145), 'thunder_shrine unlocks roaming Zapdos #145 in volcano');
+              assert(roamPeak.has(144), 'peak_shrine unlocks roaming Articuno #144 in peak');
+              assert(roamPeak.has(151), 'starlight_shrine unlocks roaming Mew #151 in peak');
+              assert(roamGrove.has(385), 'grove_shrine unlocks roaming Jirachi #385 in grove');
+
+              assertEqual(BIOMES.volcano.encounters.length, baseEncCounts.volcano, 'BIOMES.volcano.encounters not mutated');
+              assertEqual(BIOMES.peak.encounters.length, baseEncCounts.peak, 'BIOMES.peak.encounters not mutated');
+              assertEqual(BIOMES.grove.encounters.length, baseEncCounts.grove, 'BIOMES.grove.encounters not mutated');
+            } finally {
+              Math.random = origRand;
+              window.localStorage.removeItem(TEST_KEY);
+            }
+          },
+        },
+        {
+          name: '52x48 Celestial Grove BFS reachability (9 shrines, 14 chests, 12 NPCs, 6 rivals, 9 landmarks, 7 signposts) & lossless v1/v2 migration hold',
+          fn() {
+            assertEqual(WORLD_COLS, 52, 'WORLD_COLS === 52');
+            assertEqual(WORLD_ROWS, 48, 'WORLD_ROWS === 48');
+            assertEqual(WORLD_MAP.length, 48, 'WORLD_MAP has 48 rows');
+            for (let y = 0; y < WORLD_ROWS; y++) {
+              assertEqual(WORLD_MAP[y].length, 52, `row ${y} width === 52`);
+            }
+
+            assertEqual(getBiomeAt(8, 15).id, 'village', 'spawn remains village');
+            assertEqual(getBiomeAt(8, 35).id, 'water', 'row 35 west remains water');
+            assertEqual(getBiomeAt(35, 35).id, 'peak', 'row 35 east remains peak');
+            assertEqual(getBiomeAt(8, 38).id, 'grove', 'row 38+ is grove');
+            assertEqual(getBiomeAt(46, 41).id, 'grove', 'grove_shrine is in grove');
+
+            assertEqual(Object.keys(SHRINES).length, 9, '9 shrines');
+            assertEqual(Object.keys(CHESTS).length, 14, '14 chests');
+            assertEqual(Object.keys(NPCS).length, 12, '12 NPCs');
+            assertEqual(FIELD_QUESTS.length, 12, '12 quests');
+            assertEqual(Object.keys(RIVAL_TRAINERS).length, 6, '6 rivals');
+            assertEqual(Object.keys(LANDMARKS).length, 9, '9 landmarks');
+            assertEqual(Object.keys(SIGNPOSTS).length, 7, '7 signposts');
+
+            const visited = new Set([`${GAME_META.spawn.x},${GAME_META.spawn.y}`]);
+            const queue = [[GAME_META.spawn.x, GAME_META.spawn.y]];
+            for (let head = 0; head < queue.length; head++) {
+              const [cx, cy] = queue[head];
+              for (const [dx, dy] of [[0, 1], [1, 0], [0, -1], [-1, 0]]) {
+                const nx = cx + dx;
+                const ny = cy + dy;
+                const key = `${nx},${ny}`;
+                if (!visited.has(key) && isTileWalkableAt(nx, ny)) {
+                  visited.add(key);
+                  queue.push([nx, ny]);
+                }
+              }
+            }
+
+            const hasAdj = (coordKey) => {
+              const [x, y] = coordKey.split(',').map(Number);
+              return [[0, 1], [1, 0], [0, -1], [-1, 0]].some(([dx, dy]) => visited.has(`${x + dx},${y + dy}`));
+            };
+
+            for (const [k, s] of Object.entries(SHRINES)) {
+              const [sx, sy] = k.split(',').map(Number);
+              assertEqual(WORLD_MAP[sy][sx], TILE.SHRINE, `shrine ${s.id} on TILE.SHRINE`);
+              assertEqual(hasAdj(k), true, `shrine ${s.id} at ${k} reachable`);
+            }
+            for (const [k, c] of Object.entries(CHESTS)) {
+              const [cx, cy] = k.split(',').map(Number);
+              assertEqual(WORLD_MAP[cy][cx], TILE.CHEST, `chest ${c.id} on TILE.CHEST`);
+              assertEqual(hasAdj(k), true, `chest ${c.id} at ${k} reachable`);
+            }
+            for (const [k, n] of Object.entries(NPCS)) {
+              assertEqual(hasAdj(k), true, `NPC ${n.id} at ${k} reachable`);
+            }
+            for (const [k, r] of Object.entries(RIVAL_TRAINERS)) {
+              assertEqual(hasAdj(k), true, `Rival ${r.id} at ${k} reachable`);
+            }
+            for (const [k, l] of Object.entries(LANDMARKS)) {
+              assertEqual(hasAdj(k), true, `Landmark ${l.id} at ${k} reachable`);
+            }
+            for (const k of Object.keys(SIGNPOSTS)) {
+              const [sx, sy] = k.split(',').map(Number);
+              assertEqual(WORLD_MAP[sy][sx], TILE.SIGN, `Signpost at ${k} on TILE.SIGN`);
+              assertEqual(hasAdj(k), true, `Signpost at ${k} reachable`);
+            }
+
+            // Both gateways into Celestial Grove and the Grove Healing Fountain are reachable
+            assertEqual(visited.has('8,38'), true, 'West Lagoon Causeway reaches Celestial Grove (8,38)');
+            assertEqual(visited.has('34,38'), true, 'Peak Rune Gateway reaches Celestial Grove (34,38)');
+            assertEqual(WORLD_MAP[41][25], TILE.HEAL, 'Celestial Grove Healing Fountain at (25,41)');
+            assertEqual(visited.has('25,41'), true, 'Celestial Grove Healing Fountain reachable');
+
+            const compass = getCompassGuidance({
+              shrinesCleared: [
+                'forest_shrine', 'cave_shrine', 'water_shrine', 'volcano_shrine',
+                'peak_shrine', 'thunder_shrine', 'eclipse_shrine', 'starlight_shrine',
+              ],
+              pokedex: { caught: {} },
+            }, SPECIES);
+            assertEqual(compass.targetBiomeId, 'grove', 'Compass guides to Celestial Grove after prior 8 shrines');
+            assert(compass.title.includes('Grove'), `Compass title mentions Grove, got "${compass.title}"`);
+
+            // Lossless v1/v2 save migration on STORAGE_KEY
+            assertEqual(STORAGE_KEY, 'starlight_pokemon_save_v1', 'STORAGE_KEY stays starlight_pokemon_save_v1');
+            const TEST_KEY = 'starlight_pokemon_test_s26_mig_v1';
+            try {
+              window.localStorage.setItem(TEST_KEY, JSON.stringify({
+                version: 1,
+                activeTrainerId: 'violet',
+                profiles: {
+                  violet: {
+                    trainerId: 'violet',
+                    starterId: 1,
+                    pos: { x: 25, y: 41, dir: 'up' }, // Grove fountain
+                    team: [{ uid: 'v1-bulba', speciesId: 1, level: 9, xp: 20, hp: 31 }],
+                    bag: { potions: 4, greatBalls: 2 },
+                  },
+                  ozias: {
+                    trainerId: 'ozias',
+                    starterId: 4,
+                    pos: { x: 8, y: 40, dir: 'down' },
+                    team: [{ uid: 'v2-char', speciesId: 4, level: 12, xp: 5, hp: 35, bond: 72, upgradeTier: 2 }],
+                    bag: { potions: 3, greatBalls: 1, starBalls: 2, starShards: 7, gems: { moon_gem: 1 } },
+                  },
+                },
+              }));
+              const migrated = new StorageManager(TEST_KEY);
+              assertEqual(migrated.state.version, 2, 'migrated save keeps version === 2');
+              const mv = migrated.getProfile('violet');
+              const mo = migrated.getProfile('ozias');
+              assertEqual(mv.pos.x, 25, 'Grove position x preserved');
+              assertEqual(mv.pos.y, 41, 'Grove position y preserved');
+              assertEqual(mv.bag.gems.astral_gem, 0, 'v1 save hydrates astral_gem: 0');
+              assertEqual(mv.team[0].bond, 20, 'v1 mon hydrates default bond 20');
+              assertEqual(mo.bag.gems.astral_gem, 0, 'v2 save hydrates astral_gem: 0');
+              assertEqual(mo.bag.gems.moon_gem, 1, 'v2 save preserves moon_gem');
+              assertEqual(mo.team[0].bond, 72, 'v2 mon preserves bond 72');
+              assertEqual(mo.team[0].upgradeTier, 2, 'v2 mon preserves upgradeTier 2');
+              const safeGrove = sanitizePosition({ x: 8, y: 40, dir: 'down' });
+              assertEqual(safeGrove.x, 8, 'sanitizePosition keeps walkable Grove x');
+              assertEqual(safeGrove.y, 40, 'sanitizePosition keeps walkable Grove y');
+            } finally {
+              window.localStorage.removeItem(TEST_KEY);
+            }
+          },
+        },
+      ],
+    },
+    {
+      name: '27. Sprint 5 Combat Choreographies, Grove Audio/Backdrop, Buddy Endure & Bug Fixes',
+      tests: [
+        {
+          name: '8 move choreographies, THEMES.grove, Grove backdrop, forceBuddyEndure 1-HP survival, 0-PP Struggle, rematchWinText & Cheer/Dex UI hold',
+          async fn() {
+            const app = window.__starlightApp;
+            assert(Boolean(app), 'GameApp mounted');
+
+            // 1. AudioEngine: THEMES.grove gains <= 0.12 + 8 new playElemental SFX + playBuddyCheer/Endure
+            assert(Boolean(THEMES.grove), 'THEMES.grove exists');
+            assert(THEMES.grove.melody.length >= 64, 'THEMES.grove melody >= 64 steps');
+            assertInRange(THEMES.grove.leadGain, 0, 0.12, 'grove.leadGain <= 0.12');
+            assertInRange(THEMES.grove.arpGain, 0, 0.12, 'grove.arpGain <= 0.12');
+            assertInRange(THEMES.grove.bassGain, 0, 0.12, 'grove.bassGain <= 0.12');
+
+            const testAudio = new AudioEngine({ silent: true, attachUnlockListeners: false });
+            try {
+              const ctx = testAudio.ensureContext();
+              if (ctx) {
+                assertInRange(testAudio.masterFilter.frequency.value, 900, 1300, 'masterFilter cutoff in 900-1300Hz');
+              }
+              await Promise.race([testAudio.unlock(), new Promise((r) => setTimeout(r, 150))]);
+              testAudio.playBGM('grove');
+              testAudio.playBuddyCheer();
+              testAudio.playBuddyEndure();
+              for (const mvId of ['leaf_blade', 'eruption_flare', 'aura_sphere', 'psycho_cut', 'aqua_tail', 'draco_meteor', 'omen_wind', 'doom_desire']) {
+                testAudio.playElemental(MOVES[mvId].type, mvId);
+              }
+              testAudio.stopBGM();
+            } finally {
+              await testAudio.destroy();
+            }
+
+            // 2. BattleEngine: Grove backdrop, 8 move choreographies, forceBuddyEndure 1-HP survival, 0-PP Struggle & Bond XP
+            const TEST_KEY = 'starlight_pokemon_test_s27_v1';
+            const noopAudio = {
+              playMenuBlip() {},
+              playCursorMove() {},
+              playMoveSelect() {},
+              playWindup() {},
+              playPhysicalImpact() {},
+              playElemental() {},
+              playShieldChime() {},
+              playHealChime() {},
+              playFaint() {},
+              playLevelUp() {},
+              playPokeballThrow() {},
+              playPokeballAbsorb() {},
+              playPokeballBounce() {},
+              playPokeballWobble() {},
+              playCaptureSuccess() {},
+              playStarBallShimmer() {},
+              playXpTick() {},
+              playShinySparkle() {},
+              playBuddyCheer() {},
+              playBuddyEndure() {},
+            };
+            const waitUntil = async (engine, pred, timeoutMs = 5000) => {
+              const start = performance.now();
+              while (!pred()) {
+                if (engine.typingResolve) engine.finishTypewriter();
+                if (performance.now() - start > timeoutMs) {
+                  throw new Error(`Timed out waiting (state=${engine.state}, busy=${engine.busy})`);
+                }
+                await new Promise((r) => setTimeout(r, 15));
+              }
+            };
+
+            let engine = null;
+            const origRand = Math.random;
+            const prevRawSave = window.localStorage.getItem(STORAGE_KEY);
+            const wasBootHidden = app.bootScreenEl.hidden;
+            const wasStarterHidden = app.starterScreenEl.hidden;
+            const wasShellHidden = app.gameShellEl.hidden;
+            const wasOverworldActive = app.overworld.active;
+
+            try {
+              window.localStorage.removeItem(TEST_KEY);
+              const store = new StorageManager(TEST_KEY);
+              store.updateSettings({ battlePace: 'fast' });
+              store.selectTrainer('violet');
+              store.chooseStarter(1);
+              const vp = store.getActiveProfile();
+
+              const lead = createPokemon(475, 22, 'grove', { bond: 65 }); // Gallade Trusted Buddy
+              const benchMate = createPokemon(175, 10, 'grove', { bond: 20 });
+              vp.team = [lead, benchMate];
+
+              engine = new BattleEngine({
+                storage: store,
+                audio: noopAudio,
+                onBattleEnd() {},
+                onBadgesUnlocked() {},
+                onHudRefresh() {},
+              });
+
+              const enemy = createPokemon(468, 30, 'grove');
+              const startP = engine.start({ enemy, biomeId: 'grove' });
+              await waitUntil(engine, () => engine.state === BATTLE_STATES.PLAYER_INPUT);
+              await startP;
+
+              const stageEl = document.getElementById('battle-stage');
+              assertEqual(stageEl.dataset.biome, 'grove', 'battle-stage data-biome is grove');
+              const skyBg = window.getComputedStyle(stageEl.querySelector('.scenery-sky')).backgroundImage;
+              assert(Boolean(skyBg && skyBg !== 'none'), 'grove stage sky background gradient rendered');
+
+              // Exercise all 8 Sprint 5 move choreographies
+              for (const mvId of ['leaf_blade', 'eruption_flare', 'aura_sphere', 'psycho_cut', 'aqua_tail', 'draco_meteor', 'omen_wind', 'doom_desire']) {
+                const mv = MOVES[mvId];
+                const fakeRes = { category: 'attack', damage: 22, heal: 0, effectiveness: 1, isCrit: false, missed: false };
+                await engine.playAttackVisual('player', 'enemy', mv, fakeRes, engine.enemy, engine.sessionId);
+              }
+
+              // Deterministic 1-HP Buddy Endure survival at bond >= 60
+              lead.hp = 5;
+              engine.playerBuddyEndured = false;
+              engine.forceBuddyEndure = true;
+              const fastTypeTimer = setInterval(() => engine.finishTypewriter(), 15);
+              try {
+                Math.random = () => 0.5;
+                await engine.executeMoveAction('enemy', MOVES.doom_desire, engine.sessionId);
+              } finally {
+                clearInterval(fastTypeTimer);
+                Math.random = origRand;
+              }
+              assertEqual(lead.hp, 1, 'forceBuddyEndure clamped player HP to 1');
+              assertEqual(engine.playerBuddyEndured, true, 'playerBuddyEndured flagged true');
+              assertEqual(lead.isFainted, false, 'player survived lethal blow at 1 HP');
+              assertEqual(engine.active, true, 'battle remains active after Buddy Endure');
+              assert(
+                (document.getElementById('battle-log')?.textContent || '').includes('1 HP'),
+                'battle log announces Buddy Endure 1 HP survival',
+              );
+
+              // Enemy PP consumption & 0-PP Struggle fallback
+              const firstEnemyMove = enemy.getMoveObjects()[0];
+              const ppBefore = enemy.getMovePp(firstEnemyMove.id).current;
+              lead.hp = lead.maxHp;
+              const ppTimer = setInterval(() => engine.finishTypewriter(), 15);
+              try {
+                Math.random = () => 0.5;
+                await engine.executeMoveAction('enemy', firstEnemyMove, engine.sessionId);
+              } finally {
+                clearInterval(ppTimer);
+                Math.random = origRand;
+              }
+              assertEqual(enemy.getMovePp(firstEnemyMove.id).current, ppBefore - 1, 'enemy move consumes 1 PP');
+
+              for (const m of enemy.getMoveObjects()) {
+                enemy.movePp[m.id] = 0;
+              }
+              const struggleMove = engine.chooseEnemyMove();
+              assert(Boolean(struggleMove), 'chooseEnemyMove returns fallback when all moves 0 PP');
+              assertEqual(struggleMove.name, 'Struggle', '0-PP fallback move is Struggle');
+              assertEqual(struggleMove._isStruggle, true, '0-PP fallback marks _isStruggle: true');
+
+              // Bond XP multiplier & conscious bench +2 bond on victory
+              const highBondLead = createPokemon(475, 30, 'grove', { bond: 90 }); // Best Buddy 1.20x
+              const benchBefore = benchMate.bond;
+              engine.player = highBondLead;
+              engine.enemy = createPokemon(175, 10, 'grove');
+              vp.team = [highBondLead, benchMate];
+              const xpTimer = setInterval(() => engine.finishTypewriter(), 15);
+              try {
+                await engine.awardVictoryXp(1.0, engine.sessionId, { deferBadges: true });
+              } finally {
+                clearInterval(xpTimer);
+              }
+              const expectedXp = Math.round((10 * 14 + 12) * 1.0 * 1.20);
+              assertEqual(highBondLead.xp, expectedXp, `bond 90 applies 1.20x XP mult (${expectedXp})`);
+              assertEqual(benchMate.bond, benchBefore + 2, 'conscious bench mate gains +2 bond on victory');
+
+              engine.stop({ outcome: 'escaped', faintedAll: false });
+              engine.destroy();
+              engine = null;
+
+              // 3. GameApp.handleBattleEnd rematchWinText fix + Team .cheer-btn + Dex grove filter pill
+              window.localStorage.removeItem(STORAGE_KEY);
+              storage.state = storage.load();
+              storage.selectTrainer('violet');
+              storage.chooseStarter(1);
+              const liveProfile = storage.getActiveProfile();
+              app.bootScreenEl.hidden = true;
+              app.starterScreenEl.hidden = true;
+              app.gameShellEl.hidden = false;
+              app.overworld.setActive(true);
+              app.applyTrainerTheme('violet');
+
+              const kieran = Object.values(RIVAL_TRAINERS).find((r) => r.id === 'rival_kieran');
+              assert(Boolean(kieran && kieran.rematchWinText), 'rival_kieran has rematchWinText');
+
+              // First win shows winText
+              app.handleBattleEnd({
+                outcome: 'won',
+                isTrainer: true,
+                trainerData: { ...kieran, isRematch: false },
+              });
+              const firstDlg = document.getElementById('world-dialogue-text')?.textContent || '';
+              assert(
+                firstDlg.includes(kieran.winText.replace('{trainer}', 'Violet')),
+                `First win uses winText, got "${firstDlg}"`,
+              );
+              app.closeDialogue();
+
+              // Rematch uses rematchWinText
+              app.handleBattleEnd({
+                outcome: 'won',
+                isTrainer: true,
+                trainerData: { ...kieran, isRematch: true },
+              });
+              const rematchDlg = document.getElementById('world-dialogue-text')?.textContent || '';
+              assert(
+                rematchDlg.includes(kieran.rematchWinText.replace('{trainer}', 'Violet')),
+                `Rematch uses rematchWinText, got "${rematchDlg}"`,
+              );
+              assert(
+                !rematchDlg.includes(kieran.winText.replace('{trainer}', 'Violet')),
+                'Rematch does not fall back to first-win winText',
+              );
+              app.closeDialogue();
+
+              // Grove Dex filter pill
+              app.openPokedex('dex');
+              const grovePill = document.querySelector('.dex-filter-pill[data-filter="grove"]');
+              assert(Boolean(grovePill), 'grove Dex filter pill rendered');
+              grovePill.click();
+              const groveCards = Array.from(document.querySelectorAll('.dex-grid .dex-card'));
+              assert(groveCards.length > 0 && groveCards.length < 110, `Grove filter narrows cards (${groveCards.length})`);
+              for (const card of groveCards) {
+                const spId = Number(card.querySelector('.dex-num')?.textContent?.replace('#', '').trim());
+                assertEqual(SPECIES[spId]?.biome, 'grove', `Grove filtered card #${spId} belongs to grove biome`);
+              }
+
+              // Team .cheer-btn UI raises Bond & unlocks harmony badge
+              app.openPokedex('team');
+              const cheerBtn = document.querySelector('.team-card .cheer-btn');
+              assert(Boolean(cheerBtn), 'Team card renders .cheer-btn');
+              for (let i = 0; i < 4; i++) {
+                document.querySelector('.team-card .cheer-btn')?.click();
+              }
+              assertEqual(liveProfile.team[0].bond, 60, '4 UI cheer clicks raise bond 20 -> 60');
+              assert(Boolean(document.querySelector('.evo-celebration-banner')), 'Cheer renders celebration banner');
+              assert(
+                (document.querySelector('.team-card .bond-badge')?.textContent || '').includes('Trusted Buddy'),
+                'Team bond badge updates to Trusted Buddy',
+              );
+              assert(liveProfile.badges.includes('harmony'), 'UI cheering unlocks harmony badge');
+              app.pokedex.close();
+            } finally {
+              Math.random = origRand;
+              engine?.destroy();
+              window.localStorage.removeItem(TEST_KEY);
+              clearTimeout(app.badgeToastTimer);
+              if (app.badgeToastEl) app.badgeToastEl.hidden = true;
+              app.closeDialogue();
+              app.pokedex.close();
+              if (prevRawSave === null) {
+                window.localStorage.removeItem(STORAGE_KEY);
+              } else {
+                window.localStorage.setItem(STORAGE_KEY, prevRawSave);
+              }
+              storage.state = storage.load();
+              app.bootScreenEl.hidden = wasBootHidden;
+              app.starterScreenEl.hidden = wasStarterHidden;
+              app.gameShellEl.hidden = wasShellHidden;
+              app.overworld.setActive(wasOverworldActive);
+              if (!wasOverworldActive) {
+                app.audio?.stopBGM?.();
+              }
+              if (!wasBootHidden) {
+                app.showBootScreen();
+              } else {
+                app.refreshHud();
+              }
+              app.syncControlVisibility();
+              app.syncOverworldPause();
+            }
+          },
+        },
+      ],
+    },
+    {
+      name: '28. Installable PWA: Manifest, Raster PNG Binary Validation, Service Worker & Install Prompt UI',
+      tests: [
+        {
+          name: 'Manifest, real PNG signatures & IHDR dimensions (192/512/180), <head> links, SW handlers/registration, beforeinstallprompt & 1280x720/1024x768 layout pass',
+          async fn() {
+            const app = window.__starlightApp;
+            assert(Boolean(app), 'GameApp mounted');
+
+            // 1. <head> PWA tags
+            const manifestLink = document.querySelector('link[rel="manifest"]');
+            const appleIconLink = document.querySelector('link[rel="apple-touch-icon"]');
+            const themeMeta = document.querySelector('meta[name="theme-color"]');
+            assertEqual(manifestLink?.getAttribute('href'), './manifest.json', 'link[rel="manifest"] points to ./manifest.json');
+            assertEqual(appleIconLink?.getAttribute('href'), './assets/icons/apple-touch-icon.png', 'link[rel="apple-touch-icon"] points to ./assets/icons/apple-touch-icon.png');
+            assertEqual(themeMeta?.getAttribute('content'), '#090d1a', 'meta[name="theme-color"] is #090d1a');
+
+            // 2. manifest.json validation
+            const manResp = await fetch('./manifest.json');
+            assertEqual(manResp.ok, true, 'manifest.json fetches HTTP 200');
+            const manifest = await manResp.json();
+            assertEqual(manifest.display, 'standalone', 'manifest.display === "standalone"');
+            assertEqual(manifest.start_url, './', 'manifest.start_url === "./"');
+            assertEqual(manifest.scope, './', 'manifest.scope === "./"');
+            assertEqual(manifest.background_color, '#090d1a', 'manifest.background_color === #090d1a');
+            assertEqual(manifest.theme_color, manifest.background_color, 'manifest.theme_color matches background_color');
+            const icon192 = manifest.icons?.find((ic) => ic.sizes === '192x192');
+            const icon512 = manifest.icons?.find((ic) => ic.sizes === '512x512');
+            assert(Boolean(icon192 && icon512), 'manifest has 192x192 and 512x512 icons');
+            assert(icon192.purpose?.includes('any') && icon192.purpose?.includes('maskable'), '192x192 icon purpose includes any maskable');
+            assert(icon512.purpose?.includes('any') && icon512.purpose?.includes('maskable'), '512x512 icon purpose includes any maskable');
+
+            // 3. Binary PNG signature (0x89 50 4E 47 0D 0A 1A 0A), IHDR chunk, dimensions & Image decode
+            const pngChecks = [
+              ['./assets/icons/icon-192.png', 192, 192],
+              ['./assets/icons/icon-512.png', 512, 512],
+              ['./assets/icons/apple-touch-icon.png', 180, 180],
+            ];
+            const PNG_SIG = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
+            for (const [iconUrl, expW, expH] of pngChecks) {
+              const resp = await fetch(iconUrl);
+              assertEqual(resp.ok, true, `${iconUrl} fetched OK`);
+              const buf = await resp.arrayBuffer();
+              assertGreater(buf.byteLength, 24, `${iconUrl} non-empty PNG`);
+              const bytes = new Uint8Array(buf);
+              for (let i = 0; i < PNG_SIG.length; i++) {
+                assertEqual(bytes[i], PNG_SIG[i], `${iconUrl} PNG signature byte ${i}`);
+              }
+              const ihdr = String.fromCharCode(bytes[12], bytes[13], bytes[14], bytes[15]);
+              assertEqual(ihdr, 'IHDR', `${iconUrl} first chunk is IHDR`);
+              const view = new DataView(buf);
+              assertEqual(view.getUint32(16, false), expW, `${iconUrl} IHDR width === ${expW}`);
+              assertEqual(view.getUint32(20, false), expH, `${iconUrl} IHDR height === ${expH}`);
+
+              const decoded = await new Promise((resolve, reject) => {
+                const img = new Image();
+                img.onload = () => resolve({ w: img.naturalWidth, h: img.naturalHeight });
+                img.onerror = () => reject(new Error(`Failed to decode PNG image ${iconUrl}`));
+                img.src = `${iconUrl}?v=${Date.now()}`;
+              });
+              assertEqual(decoded.w, expW, `${iconUrl} naturalWidth === ${expW}`);
+              assertEqual(decoded.h, expH, `${iconUrl} naturalHeight === ${expH}`);
+            }
+
+            // 4. Service Worker source & live registration check
+            const swResp = await fetch('./sw.js');
+            assertEqual(swResp.ok, true, 'sw.js fetches HTTP 200');
+            const swSrc = await swResp.text();
+            assert(swSrc.includes("addEventListener('install'"), 'sw.js has install listener');
+            assert(swSrc.includes("addEventListener('activate'"), 'sw.js has activate listener');
+            assert(swSrc.includes('caches.delete'), 'sw.js cleans old caches on activate');
+            assert(swSrc.includes("addEventListener('fetch'"), 'sw.js has fetch listener');
+            assert(swSrc.includes('networkFirstShell'), 'sw.js implements network-first shell handler');
+            assert('serviceWorker' in navigator, 'navigator.serviceWorker available');
+            if (window.location.protocol === 'http:' || window.location.protocol === 'https:') {
+              const reg = await window.__starlightSwRegistration;
+              assert(Boolean(reg && reg.scope), 'Service worker registered cleanly on HTTP origin');
+            }
+
+            // 5. beforeinstallprompt flow, dismiss, standalone suppression & 1280x720 / 1024x768 layout
+            const prevRawSave = window.localStorage.getItem(STORAGE_KEY);
+            const wasBootHidden = app.bootScreenEl.hidden;
+            const wasStarterHidden = app.starterScreenEl.hidden;
+            const wasShellHidden = app.gameShellEl.hidden;
+            const wasOverworldActive = app.overworld.active;
+            const origDeferred = app.deferredInstallPrompt;
+            const origDismissed = app.installPromptDismissed;
+            const origCabinetStyle = app.cabinetEl?.getAttribute('style') ?? null;
+
+            try {
+              const bootBanner = document.getElementById('pwa-install-banner');
+              const hudInstall = document.getElementById('hud-install-group');
+              const settingInstallRow = document.getElementById('setting-install-row');
+              assert(Boolean(bootBanner && hudInstall && settingInstallRow), 'all 3 PWA install UI containers exist');
+
+              app.deferredInstallPrompt = null;
+              app.installPromptDismissed = false;
+              app.syncInstallBanner();
+              assertEqual(bootBanner.hidden, true, 'boot install banner hidden initially');
+              assertEqual(hudInstall.hidden, true, 'HUD install group hidden initially');
+              assertEqual(settingInstallRow.hidden, true, 'Settings install row hidden initially');
+
+              let promptCalls = 0;
+              const makePromptEvent = () => {
+                const ev = new Event('beforeinstallprompt', { cancelable: true });
+                ev.prompt = async () => {
+                  promptCalls += 1;
+                  return { outcome: 'accepted' };
+                };
+                ev.userChoice = Promise.resolve({ outcome: 'accepted' });
+                return ev;
+              };
+
+              const ev1 = makePromptEvent();
+              window.dispatchEvent(ev1);
+              assertEqual(ev1.defaultPrevented, true, 'beforeinstallprompt defaultPrevented');
+              assertEqual(bootBanner.hidden, false, 'boot install banner unhides on beforeinstallprompt');
+              assertEqual(hudInstall.hidden, false, 'HUD install group unhides on beforeinstallprompt');
+              assertEqual(settingInstallRow.hidden, false, 'Settings install row unhides on beforeinstallprompt');
+
+              // Dismiss hides cleanly
+              document.getElementById('pwa-install-dismiss').click();
+              assertEqual(app.installPromptDismissed, true, 'dismiss sets installPromptDismissed');
+              assertEqual(bootBanner.hidden, true, 'boot install banner hides on dismiss');
+              assertEqual(hudInstall.hidden, true, 'HUD install group hides on dismiss');
+              assertEqual(settingInstallRow.hidden, true, 'Settings install row hides on dismiss');
+
+              // Tapping install invokes .prompt() and hides afterward
+              app.installPromptDismissed = false;
+              window.dispatchEvent(makePromptEvent());
+              assertEqual(bootBanner.hidden, false, 'boot banner visible before install tap');
+              document.getElementById('pwa-install-btn').click();
+              await new Promise((r) => setTimeout(r, 30));
+              assertEqual(promptCalls, 1, 'tapping install invokes .prompt()');
+              assertEqual(bootBanner.hidden, true, 'install banner hides after .prompt()');
+
+              // Standalone mode suppresses install UI
+              app.installPromptDismissed = false;
+              app.isStandaloneMode = () => true;
+              window.dispatchEvent(makePromptEvent());
+              assertEqual(bootBanner.hidden, true, 'standalone mode suppresses boot install banner');
+              assertEqual(hudInstall.hidden, true, 'standalone mode suppresses HUD install group');
+              assertEqual(settingInstallRow.hidden, true, 'standalone mode suppresses Settings install row');
+              delete app.isStandaloneMode;
+
+              // 1280x720 & 1024x768 layout non-overlap check with HUD install pill visible + Grove battle
+              window.localStorage.removeItem(STORAGE_KEY);
+              storage.state = storage.load();
+              storage.selectTrainer('violet');
+              storage.chooseStarter(1);
+              storage.getActiveProfile().team[0] = createPokemon(35, 16, 'grove', { upgradeTier: 3 });
+
+              app.bootScreenEl.hidden = true;
+              app.starterScreenEl.hidden = true;
+              app.gameShellEl.hidden = false;
+              app.overworld.setActive(true);
+              app.applyTrainerTheme('violet');
+
+              app.installPromptDismissed = false;
+              window.dispatchEvent(makePromptEvent());
+              assertEqual(hudInstall.hidden, false, 'HUD install pill visible during layout check');
+
+              const startBattleP = app.battle.start({
+                enemy: createPokemon(385, 20, 'grove', { isElite: true, upgradeTier: 2 }),
+                biomeId: 'grove',
+              });
+              app.syncControlVisibility();
+              const fastTimer = setInterval(() => app.battle.finishTypewriter(), 15);
+              try {
+                await startBattleP;
+              } finally {
+                clearInterval(fastTimer);
+              }
+
+              const overlaps = (a, b) => !(
+                a.right <= b.left ||
+                a.left >= b.right ||
+                a.bottom <= b.top ||
+                a.top >= b.bottom
+              );
+
+              for (const [label, w, h] of [
+                ['Chromebook 1280x720', 940, Math.round(720 * 0.985)],
+                ['Tablet 1024x768', 940, Math.round(768 * 0.985)],
+              ]) {
+                app.cabinetEl.style.width = `${w}px`;
+                app.cabinetEl.style.height = `${h}px`;
+                await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+
+                const hudBar = document.querySelector('.hud-bar');
+                assert(
+                  hudBar.scrollWidth <= hudBar.clientWidth + 2,
+                  `${label}: HUD bar overflows horizontally (${hudBar.scrollWidth} > ${hudBar.clientWidth})`,
+                );
+
+                const enemyCard = document.querySelector('.status-card-enemy').getBoundingClientRect();
+                const playerSprite = document.querySelector('.fighter-sprite-player').getBoundingClientRect();
+                const playerCard = document.querySelector('.status-card-player').getBoundingClientRect();
+                const enemySprite = document.querySelector('.fighter-sprite-enemy').getBoundingClientRect();
+                assertEqual(overlaps(enemyCard, playerSprite), false, `${label}: enemyCard overlaps Clefairy`);
+                assertEqual(overlaps(playerCard, enemySprite), false, `${label}: playerCard overlaps Jirachi`);
+              }
+
+              app.battle.stop({ outcome: 'escaped', faintedAll: false });
+            } finally {
+              delete app.isStandaloneMode;
+              app.deferredInstallPrompt = origDeferred;
+              app.installPromptDismissed = origDismissed;
+              app.syncInstallBanner();
+              if (origCabinetStyle === null) {
+                app.cabinetEl?.removeAttribute('style');
+              } else {
+                app.cabinetEl?.setAttribute('style', origCabinetStyle);
+              }
+              if (app.battle.active) {
+                app.battle.stop({ outcome: 'escaped', faintedAll: false });
+              }
+              app.pokedex.close();
+              app.closeSettings();
+              if (prevRawSave === null) {
+                window.localStorage.removeItem(STORAGE_KEY);
+              } else {
+                window.localStorage.setItem(STORAGE_KEY, prevRawSave);
+              }
+              storage.state = storage.load();
+              app.applyTrainerTheme(storage.getActiveTrainerId() || 'violet');
+              app.encounterTransitioning = false;
+              app.bootScreenEl.hidden = wasBootHidden;
+              app.starterScreenEl.hidden = wasStarterHidden;
+              app.gameShellEl.hidden = wasShellHidden;
+              app.overworld.setActive(wasOverworldActive);
+              if (!wasOverworldActive) {
+                app.audio?.stopBGM?.();
+              }
+              app.applySettings();
+              if (!wasBootHidden) {
+                app.showBootScreen();
+              } else {
+                app.refreshHud();
+              }
+              app.syncControlVisibility();
               app.syncOverworldPause();
             }
           },
