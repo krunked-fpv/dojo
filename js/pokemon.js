@@ -16,6 +16,18 @@ function makeUid() {
   return `pk_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
+function normalizeNickname(raw) {
+  if (typeof raw !== 'string') return null;
+  const trimmed = raw.trim().slice(0, 14).trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+function normalizeBond(raw) {
+  if (raw === null || raw === undefined || raw === '') return 20;
+  const num = Number(raw);
+  return Number.isFinite(num) ? Math.max(0, Math.min(100, Math.round(num))) : 20;
+}
+
 export class Pokemon {
   constructor({
     uid = makeUid(),
@@ -26,6 +38,8 @@ export class Pokemon {
     caughtBiome = 'wild',
     movePp = null,
     isShiny = false,
+    nickname = null,
+    bond = 20,
   }) {
     const species = SPECIES[speciesId];
     if (!species) {
@@ -37,6 +51,8 @@ export class Pokemon {
     this.xp = Math.max(0, Number(xp) || 0);
     this.caughtBiome = caughtBiome;
     this.isShiny = Boolean(isShiny);
+    this.nickname = normalizeNickname(nickname);
+    this.bond = normalizeBond(bond);
 
     this.maxHp = 20;
     this.atk = 10;
@@ -105,6 +121,23 @@ export class Pokemon {
 
   get name() {
     return this.species.name;
+  }
+
+  get displayName() {
+    return this.nickname || this.species.name;
+  }
+
+  setNickname(raw) {
+    this.nickname = normalizeNickname(raw);
+    return this.nickname;
+  }
+
+  gainBond(delta = 1) {
+    const step = Number(delta);
+    const add = Number.isFinite(step) ? step : 0;
+    const prev = normalizeBond(this.bond);
+    this.bond = Math.max(0, Math.min(100, Math.round(prev + add)));
+    return this.bond;
   }
 
   get type() {
@@ -278,6 +311,8 @@ export class Pokemon {
       hp: this.hp,
       caughtBiome: this.caughtBiome,
       isShiny: Boolean(this.isShiny),
+      nickname: this.nickname,
+      bond: this.bond,
       movePp: { ...this.movePp },
     };
   }
@@ -293,6 +328,8 @@ export function createPokemon(speciesId, level = 5, biome = 'wild', options = {}
     level,
     caughtBiome: biome,
     isShiny: Boolean(options?.isShiny),
+    nickname: options?.nickname ?? null,
+    bond: options?.bond ?? 20,
   });
 }
 
@@ -402,7 +439,8 @@ export function calculateDamage(attacker, defender, move, options = {}) {
 
   const stab = attacker?.type && move?.type && attacker.type === move.type ? 1.25 : 1;
   const effectiveness = getTypeEffectiveness(move?.type, defender?.type);
-  const isCrit = options.forceCrit !== undefined ? Boolean(options.forceCrit) : Math.random() < 0.08;
+  const critChance = (Number(attacker?.bond) || 0) >= 60 ? 0.12 : 0.08;
+  const isCrit = options.forceCrit !== undefined ? Boolean(options.forceCrit) : Math.random() < critChance;
   const critMult = isCrit ? 1.5 : 1;
   const variance = Number.isFinite(Number(options.fixedVariance))
     ? Number(options.fixedVariance)

@@ -8,9 +8,13 @@ import {
   SPECIES,
   STARTER_IDS,
   TRAINERS,
+  TRAINER_ACCESSORIES,
+  TRAINER_STYLES,
   WORLD_COLS,
   WORLD_MAP,
   WORLD_ROWS,
+  findNearestSafePosition,
+  isTileWalkableAt,
 } from './config.js';
 import { Pokemon, createStarterPokemon } from './pokemon.js';
 
@@ -278,40 +282,30 @@ function isMapTileWalkable(x, y) {
   return tile !== undefined && !SOLID_TILE_IDS.has(tile);
 }
 
-export function sanitizePosition(rawPos) {
+function isSafeWorldTile(x, y) {
+  if (typeof isTileWalkableAt === 'function') {
+    return isTileWalkableAt(x, y);
+  }
+  return isMapTileWalkable(x, y);
+}
+
+function fallbackNearestSafe(x, y, dir) {
+  if (typeof findNearestSafePosition === 'function') {
+    return findNearestSafePosition(x, y, dir);
+  }
   const spawnX = GAME_META.spawn?.x ?? 8;
   const spawnY = GAME_META.spawn?.y ?? 15;
-  const spawnDir = GAME_META.spawn?.dir || 'down';
-  const dir = VALID_DIRS.has(rawPos?.dir) ? rawPos.dir : spawnDir;
-
-  const rawX = Number(rawPos?.x);
-  const rawY = Number(rawPos?.y);
-  if (!Number.isFinite(rawX) || !Number.isFinite(rawY)) {
-    return { x: spawnX, y: spawnY, dir };
-  }
-
-  const ix = Math.round(rawX);
-  const iy = Math.round(rawY);
-  if (ix < 0 || iy < 0 || ix >= WORLD_COLS || iy >= WORLD_ROWS) {
-    return { x: spawnX, y: spawnY, dir };
-  }
-
-  if (isMapTileWalkable(ix, iy)) {
-    return { x: ix, y: iy, dir };
-  }
-
-  const queue = [[ix, iy]];
-  const visited = new Set([`${ix},${iy}`]);
+  const queue = [[x, y]];
+  const visited = new Set([`${x},${y}`]);
   const deltas = [
     [0, 1],
     [1, 0],
     [0, -1],
     [-1, 0],
   ];
-
   for (let head = 0; head < queue.length; head += 1) {
     const [cx, cy] = queue[head];
-    if (isMapTileWalkable(cx, cy)) {
+    if (isSafeWorldTile(cx, cy)) {
       return { x: cx, y: cy, dir };
     }
     for (const [dx, dy] of deltas) {
@@ -324,8 +318,32 @@ export function sanitizePosition(rawPos) {
       queue.push([nx, ny]);
     }
   }
-
   return { x: spawnX, y: spawnY, dir };
+}
+
+export function sanitizePosition(rawPos) {
+  const spawnX = GAME_META.spawn?.x ?? 8;
+  const spawnY = GAME_META.spawn?.y ?? 15;
+  const spawnDir = GAME_META.spawn?.dir || 'down';
+  const dir = VALID_DIRS.has(rawPos?.dir) ? rawPos.dir : spawnDir;
+
+  const rawX = Number(rawPos?.x);
+  const rawY = Number(rawPos?.y);
+  if (!Number.isFinite(rawX) || !Number.isFinite(rawY)) {
+    return fallbackNearestSafe(spawnX, spawnY, dir);
+  }
+
+  const ix = Math.round(rawX);
+  const iy = Math.round(rawY);
+  if (ix < 0 || iy < 0 || ix >= WORLD_COLS || iy >= WORLD_ROWS) {
+    return fallbackNearestSafe(spawnX, spawnY, dir);
+  }
+
+  if (isSafeWorldTile(ix, iy)) {
+    return { x: ix, y: iy, dir };
+  }
+
+  return fallbackNearestSafe(ix, iy, dir);
 }
 
 function hydrateGems(rawGems) {
@@ -352,11 +370,24 @@ function hydrateUniqueStrings(rawList) {
   return [...new Set(rawList.map((item) => String(item)).filter(Boolean))];
 }
 
+function hydrateAppearance(rawAppearance) {
+  const rawStyleId = rawAppearance?.styleId;
+  const styleId = rawStyleId && TRAINER_STYLES?.[rawStyleId] ? rawStyleId : 'default';
+  const rawAccessory = rawAppearance?.accessory;
+  const accessory = rawAccessory && TRAINER_ACCESSORIES?.[rawAccessory] ? rawAccessory : 'cap';
+  return {
+    styleId,
+    accessory,
+    cape: Boolean(rawAppearance?.cape),
+  };
+}
+
 function createFreshProfile(trainerId) {
   return {
     trainerId,
     starterId: null,
     pos: { ...GAME_META.spawn },
+    appearance: hydrateAppearance(null),
     team: [],
     box: [],
     pokedex: {
@@ -369,9 +400,11 @@ function createFreshProfile(trainerId) {
     questsCompleted: [],
     npcsTalked: [],
     biomesVisited: [],
+    rivalsDefeated: [],
     bag: {
       potions: 5,
       greatBalls: 3,
+      starBalls: 1,
       gems: hydrateGems(null),
     },
     stats: {
@@ -449,6 +482,7 @@ function hydrateProfile(raw, trainerId) {
     trainerId,
     starterId,
     pos: sanitizePosition(raw.pos),
+    appearance: hydrateAppearance(raw.appearance),
     team,
     box,
     pokedex: {
@@ -461,9 +495,11 @@ function hydrateProfile(raw, trainerId) {
     questsCompleted: hydrateUniqueStrings(raw.questsCompleted),
     npcsTalked: hydrateUniqueStrings(raw.npcsTalked),
     biomesVisited: hydrateUniqueStrings(raw.biomesVisited),
+    rivalsDefeated: hydrateUniqueStrings(raw.rivalsDefeated),
     bag: {
       potions: Math.max(0, Number.isFinite(Number(raw.bag?.potions)) ? Number(raw.bag.potions) : 5),
       greatBalls: Math.max(0, Number.isFinite(Number(raw.bag?.greatBalls)) ? Number(raw.bag.greatBalls) : 3),
+      starBalls: Math.max(0, Math.floor(Number(raw.bag?.starBalls) || 0)),
       gems: hydrateGems(raw.bag?.gems),
     },
     stats: {
@@ -574,6 +610,8 @@ export class StorageManager {
   serializeProfile(profile) {
     return {
       ...profile,
+      appearance: hydrateAppearance(profile.appearance),
+      rivalsDefeated: hydrateUniqueStrings(profile.rivalsDefeated),
       team: profile.team.map((p) => p.toJSON()),
       box: profile.box.map((p) => p.toJSON()),
     };
@@ -610,7 +648,7 @@ export class StorageManager {
     const lead = profile.team[0];
     const dexCount = Object.keys(profile.pokedex.caught).length;
     const badgeCount = profile.badges.length;
-    const leadLabel = lead ? `Lv.${lead.level} ${lead.name}` : 'Ready';
+    const leadLabel = lead ? `Lv.${lead.level} ${lead.displayName || lead.name}` : 'Ready';
     return {
       started: true,
       label: `${leadLabel} • Dex ${dexCount}/${Object.keys(SPECIES).length} • ${badgeCount} Badges`,
@@ -748,7 +786,7 @@ export class StorageManager {
     if (EVOLUTION_ITEMS[itemKey]) {
       return this.useGem(itemKey);
     }
-    if (!profile.bag[itemKey] || profile.bag[itemKey] <= 0) return false;
+    if (!profile.bag || !profile.bag[itemKey] || profile.bag[itemKey] <= 0) return false;
     profile.bag[itemKey] -= 1;
     this.save();
     return true;
@@ -774,13 +812,18 @@ export class StorageManager {
     return true;
   }
 
-  addRewards({ potions = 0, greatBalls = 0, gems = {} } = {}, persist = true) {
+  addRewards({ potions = 0, greatBalls = 0, starBalls = 0, gems = {} } = {}, persist = true) {
     const profile = this.getActiveProfile();
     if (!profile) return;
+    if (!profile.bag || typeof profile.bag !== 'object') {
+      profile.bag = { potions: 0, greatBalls: 0, starBalls: 0, gems: hydrateGems(null) };
+    }
     const safePotions = Math.max(0, Math.round(Number(potions) || 0));
     const safeBalls = Math.max(0, Math.round(Number(greatBalls) || 0));
-    profile.bag.potions += safePotions;
-    profile.bag.greatBalls += safeBalls;
+    const safeStarBalls = Math.max(0, Math.round(Number(starBalls) || 0));
+    profile.bag.potions = (Number(profile.bag.potions) || 0) + safePotions;
+    profile.bag.greatBalls = (Number(profile.bag.greatBalls) || 0) + safeBalls;
+    profile.bag.starBalls = (Number(profile.bag.starBalls) || 0) + safeStarBalls;
     if (gems && typeof gems === 'object') {
       for (const [gemId, amount] of Object.entries(gems)) {
         if (EVOLUTION_ITEMS[gemId] && Number(amount) > 0) {
@@ -789,6 +832,34 @@ export class StorageManager {
       }
     }
     if (persist) this.save();
+  }
+
+  updateAppearance(partial = {}) {
+    const profile = this.getActiveProfile();
+    if (!profile) return null;
+    const current = hydrateAppearance(profile.appearance);
+    const patch = partial && typeof partial === 'object' ? partial : {};
+    profile.appearance = hydrateAppearance({
+      ...current,
+      ...patch,
+    });
+    this.save();
+    return profile.appearance;
+  }
+
+  setPokemonNickname(uid, nickname) {
+    const profile = this.getActiveProfile();
+    if (!profile || !uid) return null;
+    const mon = [...profile.team, ...profile.box].find((m) => m.uid === uid);
+    if (!mon) return null;
+    if (typeof mon.setNickname === 'function') {
+      mon.setNickname(nickname);
+    } else {
+      const cleaned = typeof nickname === 'string' ? nickname.trim().slice(0, 14).trim() : '';
+      mon.nickname = cleaned.length > 0 ? cleaned : null;
+    }
+    this.save();
+    return mon;
   }
 
   evolvePokemon(monOrUid, toSpeciesId, itemKey = null) {
@@ -882,6 +953,27 @@ export class StorageManager {
     const newBadges = this.evaluateBadges(false);
     this.save();
     return newBadges;
+  }
+
+  markRivalDefeated(rivalId, rewards = {}) {
+    const profile = this.getActiveProfile();
+    if (!profile || !rivalId) {
+      return { firstWin: false, newBadges: [] };
+    }
+    if (!Array.isArray(profile.rivalsDefeated)) {
+      profile.rivalsDefeated = [];
+    }
+    const id = String(rivalId);
+    const firstWin = !profile.rivalsDefeated.includes(id);
+    if (firstWin) {
+      profile.rivalsDefeated.push(id);
+    }
+    if (rewards && typeof rewards === 'object') {
+      this.addRewards(rewards, false);
+    }
+    const newBadges = this.evaluateBadges(false);
+    this.save();
+    return { firstWin, newBadges };
   }
 
   recordBattleWin() {
