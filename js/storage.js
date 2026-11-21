@@ -1,8 +1,12 @@
 import {
   BADGES,
+  BIOMES,
   EVOLUTION_ITEMS,
+  EVOLUTIONS,
   GAME_META,
+  SHRINES,
   SPECIES,
+  STARTER_IDS,
   TRAINERS,
   WORLD_COLS,
   WORLD_MAP,
@@ -15,6 +19,257 @@ export const STORAGE_KEY = 'starlight_pokemon_save_v1';
 const SOLID_TILE_IDS = new Set([3, 4, 8, 11, 12, 14, 16, 17, 18, 21, 25]);
 const VALID_DIRS = new Set(['up', 'down', 'left', 'right']);
 const VALID_PACES = new Set(['cinema', 'classic', 'fast']);
+
+const SPECIES_ID_BY_NAME = new Map(
+  Object.values(SPECIES || {}).map((sp) => [String(sp.name).trim().toLowerCase(), Number(sp.id)]),
+);
+
+const DIRECT_ENCOUNTER_IDS = new Set(
+  [
+    ...Object.values(BIOMES || {}).flatMap((b) => (b?.encounters || []).map((e) => Number(e?.id))),
+    ...Object.values(SHRINES || {}).map((s) => Number(s?.guardianId)),
+    ...(STARTER_IDS || []).map(Number),
+  ].filter((id) => Number.isInteger(id) && Boolean(SPECIES[id])),
+);
+
+const PARENTS_BY_SPECIES = new Map();
+for (const [fromKey, rules] of Object.entries(EVOLUTIONS || {})) {
+  const fromId = Number(fromKey);
+  if (!SPECIES[fromId] || !Array.isArray(rules)) continue;
+  for (const rule of rules) {
+    const toId = Number(rule?.to);
+    if (!SPECIES[toId]) continue;
+    const list = PARENTS_BY_SPECIES.get(toId) || [];
+    if (!list.includes(fromId)) {
+      list.push(fromId);
+      PARENTS_BY_SPECIES.set(toId, list);
+    }
+  }
+}
+
+const SHRINE_BY_ID = new Map(
+  Object.values(SHRINES || {})
+    .filter((shrine) => shrine && shrine.id)
+    .map((shrine) => [String(shrine.id), shrine]),
+);
+
+export function resolveSpeciesId(raw) {
+  if (typeof raw === 'number') {
+    return Number.isInteger(raw) && SPECIES[raw] ? raw : null;
+  }
+  if (typeof raw !== 'string') return null;
+
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+
+  const noHash = trimmed.startsWith('#') ? trimmed.slice(1).trim() : trimmed;
+  if (/^\d+$/.test(noHash)) {
+    const num = Number(noHash);
+    return Number.isSafeInteger(num) && SPECIES[num] ? num : null;
+  }
+
+  const byName = SPECIES_ID_BY_NAME.get(trimmed.toLowerCase());
+  return byName !== undefined && SPECIES[byName] ? byName : null;
+}
+
+function isPlainObject(val) {
+  return Boolean(val) && typeof val === 'object' && !Array.isArray(val);
+}
+
+function computeSyncedPokedexState(profile) {
+  const rawPokedex = isPlainObject(profile?.pokedex) ? profile.pokedex : null;
+  const rawCaught = rawPokedex?.caught;
+  const rawSeen = rawPokedex?.seen;
+
+  const caught = {};
+  if (Array.isArray(rawCaught)) {
+    for (const item of rawCaught) {
+      const id = resolveSpeciesId(item);
+      if (id !== null) {
+        caught[id] = Math.max(caught[id] || 0, 1);
+      }
+    }
+  } else if (isPlainObject(rawCaught)) {
+    for (const [k, v] of Object.entries(rawCaught)) {
+      const id = resolveSpeciesId(k);
+      if (id === null) continue;
+      if (v === false || v === null || v === undefined || v === '') continue;
+      const count = v === true ? 1 : Math.floor(Number(v));
+      if (Number.isFinite(count) && count >= 1) {
+        caught[id] = Math.max(caught[id] || 0, count);
+      }
+    }
+  }
+
+  const ownedCounts = new Map();
+  const ownedMons = [
+    ...(Array.isArray(profile?.team) ? profile.team : []),
+    ...(Array.isArray(profile?.box) ? profile.box : []),
+  ];
+  for (const mon of ownedMons) {
+    const spId = resolveSpeciesId(mon?.speciesId);
+    if (spId !== null) {
+      ownedCounts.set(spId, (ownedCounts.get(spId) || 0) + 1);
+    }
+  }
+  for (const [spId, ownedCount] of ownedCounts.entries()) {
+    caught[spId] = Math.max(caught[spId] || 0, ownedCount);
+  }
+
+  const starterId = resolveSpeciesId(profile?.starterId);
+  if (starterId !== null) {
+    caught[starterId] = Math.max(caught[starterId] || 0, 1);
+  }
+
+  // Walk non-wild single-parent evolution edges backwards to recover evolved starter/gift pre-evolutions
+  for (const spId of Object.keys(caught).map(Number)) {
+    let cur = spId;
+    const visited = new Set([cur]);
+    while (!DIRECT_ENCOUNTER_IDS.has(cur)) {
+      const parents = PARENTS_BY_SPECIES.get(cur);
+      if (!parents || parents.length !== 1) break;
+      const parentId = parents[0];
+      if (visited.has(parentId)) break;
+      visited.add(parentId);
+      if (SPECIES[parentId]) {
+        caught[parentId] = Math.max(caught[parentId] || 0, 1);
+      }
+      cur = parentId;
+    }
+  }
+
+  const seenSet = new Set();
+  if (Array.isArray(rawSeen)) {
+    for (const item of rawSeen) {
+      const id = resolveSpeciesId(item);
+      if (id !== null) seenSet.add(id);
+    }
+  } else if (isPlainObject(rawSeen)) {
+    for (const [k, v] of Object.entries(rawSeen)) {
+      if (!v) continue;
+      const id = resolveSpeciesId(k);
+      if (id !== null) seenSet.add(id);
+    }
+  }
+
+  for (const id of Object.keys(caught).map(Number)) {
+    seenSet.add(id);
+  }
+
+  const shrinesCleared = Array.isArray(profile?.shrinesCleared) ? profile.shrinesCleared : [];
+  for (const shrineId of shrinesCleared) {
+    const shrine = SHRINE_BY_ID.get(String(shrineId));
+    const guardianId = resolveSpeciesId(shrine?.guardianId);
+    if (guardianId !== null) {
+      seenSet.add(guardianId);
+    }
+  }
+
+  const seen = [...seenSet].sort((a, b) => a - b);
+  const sumOfCaughtCounts = Object.values(caught).reduce((sum, count) => sum + count, 0);
+  const prevTotalRaw = Number(profile?.stats?.totalCaught);
+  const safePrevTotal = Number.isFinite(prevTotalRaw) && prevTotalRaw >= 0 ? prevTotalRaw : 0;
+  const totalCaught = Math.max(safePrevTotal, sumOfCaughtCounts);
+
+  return {
+    rawPokedex,
+    rawCaught,
+    rawSeen,
+    caught,
+    seen,
+    totalCaught,
+  };
+}
+
+export function syncProfilePokedex(profile) {
+  if (!profile || typeof profile !== 'object') {
+    return { changed: false, seenCount: 0, caughtCount: 0 };
+  }
+
+  const {
+    rawPokedex,
+    rawCaught,
+    rawSeen,
+    caught,
+    seen,
+    totalCaught,
+  } = computeSyncedPokedexState(profile);
+
+  const nextCaughtKeys = Object.keys(caught);
+  let caughtChanged = !isPlainObject(rawCaught) || Object.keys(rawCaught).length !== nextCaughtKeys.length;
+  if (!caughtChanged) {
+    for (const key of nextCaughtKeys) {
+      if (!Object.prototype.hasOwnProperty.call(rawCaught, key) || rawCaught[key] !== caught[key]) {
+        caughtChanged = true;
+        break;
+      }
+    }
+  }
+
+  let seenChanged = !Array.isArray(rawSeen) || rawSeen.length !== seen.length;
+  if (!seenChanged) {
+    for (let i = 0; i < seen.length; i += 1) {
+      if (rawSeen[i] !== seen[i]) {
+        seenChanged = true;
+        break;
+      }
+    }
+  }
+
+  let statsChanged = false;
+  if (!isPlainObject(profile.stats)) {
+    profile.stats = {
+      battlesWon: 0,
+      totalCaught,
+      steps: 0,
+      evolutions: 0,
+      shiniesFound: 0,
+    };
+    statsChanged = true;
+  } else if (profile.stats.totalCaught !== totalCaught) {
+    profile.stats.totalCaught = totalCaught;
+    statsChanged = true;
+  }
+
+  if (!rawPokedex) {
+    profile.pokedex = { seen, caught };
+  } else {
+    profile.pokedex.seen = seen;
+    profile.pokedex.caught = caught;
+  }
+
+  const changed = !rawPokedex || caughtChanged || seenChanged || statsChanged;
+  return {
+    changed,
+    seenCount: seen.length,
+    caughtCount: nextCaughtKeys.length,
+  };
+}
+
+export function isSpeciesCaught(profile, speciesId) {
+  const id = resolveSpeciesId(speciesId);
+  if (!id || !profile || typeof profile !== 'object') return false;
+  const rawCaught = profile.pokedex?.caught;
+  if (isPlainObject(rawCaught) && typeof rawCaught[id] === 'number' && Number.isFinite(rawCaught[id]) && rawCaught[id] >= 1) {
+    return true;
+  }
+  const { caught } = computeSyncedPokedexState(profile);
+  return (caught[id] || 0) >= 1;
+}
+
+export function isSpeciesSeen(profile, speciesId) {
+  const id = resolveSpeciesId(speciesId);
+  if (!id || !profile || typeof profile !== 'object') return false;
+  const rawSeen = profile.pokedex?.seen;
+  if (Array.isArray(rawSeen) && rawSeen.includes(id)) {
+    return true;
+  }
+  if (isSpeciesCaught(profile, id)) {
+    return true;
+  }
+  const { seen } = computeSyncedPokedexState(profile);
+  return seen.includes(id);
+}
 
 function isMapTileWalkable(x, y) {
   if (!Array.isArray(WORLD_MAP) || WORLD_ROWS <= 0 || WORLD_COLS <= 0) return true;
@@ -181,20 +436,24 @@ function hydrateProfile(raw, trainerId) {
     ? raw.box.map(safeHydrateMon).filter(Boolean)
     : [];
 
-  const starterNum = Number(raw.starterId);
-  const starterId = Number.isFinite(starterNum) && SPECIES[starterNum] ? starterNum : null;
+  const starterId = resolveSpeciesId(raw.starterId);
+  const rawPokedex = isPlainObject(raw.pokedex) ? raw.pokedex : {};
+  const rawSeen = Array.isArray(rawPokedex.seen)
+    ? [...rawPokedex.seen]
+    : (isPlainObject(rawPokedex.seen) ? { ...rawPokedex.seen } : []);
+  const rawCaught = Array.isArray(rawPokedex.caught)
+    ? [...rawPokedex.caught]
+    : (isPlainObject(rawPokedex.caught) ? { ...rawPokedex.caught } : {});
 
-  return repairProfileParty({
+  const profile = repairProfileParty({
     trainerId,
     starterId,
     pos: sanitizePosition(raw.pos),
     team,
     box,
     pokedex: {
-      seen: Array.isArray(raw.pokedex?.seen)
-        ? [...new Set(raw.pokedex.seen.map(Number).filter((id) => Number.isFinite(id)))]
-        : [],
-      caught: raw.pokedex?.caught && typeof raw.pokedex.caught === 'object' ? { ...raw.pokedex.caught } : {},
+      seen: rawSeen,
+      caught: rawCaught,
     },
     badges: hydrateUniqueStrings(raw.badges),
     shrinesCleared: hydrateUniqueStrings(raw.shrinesCleared),
@@ -215,6 +474,9 @@ function hydrateProfile(raw, trainerId) {
       shiniesFound: Math.max(0, Number.isFinite(Number(raw.stats?.shiniesFound)) ? Number(raw.stats.shiniesFound) : 0),
     },
   });
+
+  syncProfilePokedex(profile);
+  return profile;
 }
 
 export class StorageManager {
@@ -278,11 +540,21 @@ export class StorageManager {
     }
   }
 
+  syncPokedex(profile = this.getActiveProfile(), persist = true) {
+    if (!profile) return null;
+    const { changed } = syncProfilePokedex(profile);
+    if (changed && persist) {
+      this.save();
+    }
+    return profile.pokedex || null;
+  }
+
   ensureValidParty(profile = this.getActiveProfile()) {
     if (!profile) return null;
     const beforeLen = profile.team.length;
     repairProfileParty(profile);
-    if (profile.team.length !== beforeLen) {
+    const { changed: dexChanged } = syncProfilePokedex(profile);
+    if (profile.team.length !== beforeLen || dexChanged) {
       this.save();
     }
     return profile.team;
@@ -310,8 +582,10 @@ export class StorageManager {
   selectTrainer(trainerId) {
     if (!TRAINERS[trainerId]) throw new Error(`Unknown trainerId: ${trainerId}`);
     this.state.activeTrainerId = trainerId;
+    const profile = this.getActiveProfile();
+    this.syncPokedex(profile, true);
     this.save();
-    return this.getActiveProfile();
+    return profile;
   }
 
   getActiveTrainerId() {
@@ -332,6 +606,7 @@ export class StorageManager {
     if (!profile || !profile.starterId) {
       return { started: false, label: 'New Adventure!', leadId: null, dexCount: 0, badgeCount: 0 };
     }
+    syncProfilePokedex(profile);
     const lead = profile.team[0];
     const dexCount = Object.keys(profile.pokedex.caught).length;
     const badgeCount = profile.badges.length;
@@ -348,14 +623,20 @@ export class StorageManager {
   chooseStarter(speciesId) {
     const profile = this.getActiveProfile();
     if (!profile) return null;
-    const starter = createStarterPokemon(speciesId);
-    profile.starterId = Number(speciesId);
+    const resolvedInput = resolveSpeciesId(speciesId) ?? speciesId;
+    const starter = createStarterPokemon(resolvedInput);
+    const numId = Number(starter.speciesId);
+    profile.starterId = numId;
     profile.team = [starter];
     profile.box = [];
     profile.pos = { ...GAME_META.spawn };
-    this.recordSeen(speciesId, false);
-    profile.pokedex.caught[Number(speciesId)] = (profile.pokedex.caught[Number(speciesId)] || 0) + 1;
-    profile.stats.totalCaught += 1;
+    if (!isPlainObject(profile.pokedex) || !isPlainObject(profile.pokedex.caught)) {
+      syncProfilePokedex(profile);
+    }
+    this.recordSeen(numId, false);
+    profile.pokedex.caught[numId] = (profile.pokedex.caught[numId] || 0) + 1;
+    profile.stats.totalCaught = (Number(profile.stats?.totalCaught) || 0) + 1;
+    syncProfilePokedex(profile);
     this.evaluateBadges(false);
     this.save();
     return starter;
@@ -372,10 +653,18 @@ export class StorageManager {
   recordSeen(speciesId, persist = true) {
     const profile = this.getActiveProfile();
     if (!profile) return;
-    const numId = Number(speciesId);
-    if (!profile.pokedex.seen.includes(numId)) {
+    const numId = resolveSpeciesId(speciesId);
+    if (!numId || !SPECIES[numId]) return;
+    if (!isPlainObject(profile.pokedex) || !Array.isArray(profile.pokedex.seen)) {
+      syncProfilePokedex(profile);
+    }
+    const alreadySeen = profile.pokedex.seen.includes(numId);
+    if (!alreadySeen) {
       profile.pokedex.seen.push(numId);
-      if (persist) this.save();
+    }
+    const { changed } = syncProfilePokedex(profile);
+    if (persist && (!alreadySeen || changed)) {
+      this.save();
     }
   }
 
@@ -391,10 +680,15 @@ export class StorageManager {
     const profile = this.getActiveProfile();
     if (!profile || !pokemonInstance) return { destination: 'team', newBadges: [] };
 
-    const numId = Number(pokemonInstance.speciesId);
+    const numId = resolveSpeciesId(pokemonInstance.speciesId);
+    if (!numId || !SPECIES[numId]) return { destination: 'team', newBadges: [] };
+
+    if (!isPlainObject(profile.pokedex) || !isPlainObject(profile.pokedex.caught)) {
+      syncProfilePokedex(profile);
+    }
     this.recordSeen(numId, false);
     profile.pokedex.caught[numId] = (profile.pokedex.caught[numId] || 0) + 1;
-    profile.stats.totalCaught += 1;
+    profile.stats.totalCaught = (Number(profile.stats?.totalCaught) || 0) + 1;
     if (pokemonInstance.isShiny) {
       profile.stats.shiniesFound = (profile.stats.shiniesFound || 0) + 1;
     }
@@ -407,6 +701,7 @@ export class StorageManager {
       destination = 'box';
     }
 
+    syncProfilePokedex(profile);
     const newBadges = this.evaluateBadges(false);
     this.save();
     return { destination, newBadges };
@@ -420,6 +715,7 @@ export class StorageManager {
     const temp = profile.team[teamIdx];
     profile.team[teamIdx] = profile.box[boxIdx];
     profile.box[boxIdx] = temp;
+    syncProfilePokedex(profile);
     this.save();
     return true;
   }
@@ -429,6 +725,7 @@ export class StorageManager {
     if (!profile || teamIdx <= 0 || teamIdx >= profile.team.length) return false;
     const [picked] = profile.team.splice(teamIdx, 1);
     profile.team.unshift(picked);
+    syncProfilePokedex(profile);
     this.save();
     return true;
   }
@@ -497,8 +794,8 @@ export class StorageManager {
   evolvePokemon(monOrUid, toSpeciesId, itemKey = null) {
     const profile = this.getActiveProfile();
     if (!profile) return null;
-    const targetId = Number(toSpeciesId);
-    if (!SPECIES[targetId]) return null;
+    const targetId = resolveSpeciesId(toSpeciesId);
+    if (!targetId || !SPECIES[targetId]) return null;
 
     const targetUid = typeof monOrUid === 'string' ? monOrUid : monOrUid?.uid;
     const mon = [...profile.team, ...profile.box].find((m) => m.uid === targetUid)
@@ -509,10 +806,21 @@ export class StorageManager {
       if (!this.useGem(itemKey, false)) return null;
     }
 
+    if (!isPlainObject(profile.pokedex) || !isPlainObject(profile.pokedex.caught)) {
+      syncProfilePokedex(profile);
+    }
+
+    const preEvoId = resolveSpeciesId(mon.speciesId);
+    if (preEvoId && SPECIES[preEvoId]) {
+      this.recordSeen(preEvoId, false);
+      profile.pokedex.caught[preEvoId] = Math.max(profile.pokedex.caught[preEvoId] || 0, 1);
+    }
+
     const evolution = mon.evolve(targetId);
     this.recordSeen(targetId, false);
     profile.pokedex.caught[targetId] = (profile.pokedex.caught[targetId] || 0) + 1;
     profile.stats.evolutions = (profile.stats.evolutions || 0) + 1;
+    syncProfilePokedex(profile);
 
     const newBadges = this.evaluateBadges(false);
     this.save();
@@ -570,6 +878,7 @@ export class StorageManager {
     if (!profile.shrinesCleared.includes(shrineId)) {
       profile.shrinesCleared.push(shrineId);
     }
+    syncProfilePokedex(profile);
     const newBadges = this.evaluateBadges(false);
     this.save();
     return newBadges;
