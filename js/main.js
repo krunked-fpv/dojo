@@ -1,3 +1,5 @@
+import * as Config from './config.js';
+import * as PokemonMod from './pokemon.js';
 import {
   BADGES,
   BIOMES,
@@ -21,7 +23,12 @@ import { THEMES, audio } from './audio.js';
 import { InputController } from './input.js';
 import { OverworldEngine, drawTrainerPortrait } from './overworld.js';
 import { BattleEngine } from './battle.js';
-import { PokedexUI } from './pokedex.js';
+import {
+  PokedexUI,
+  getBiomeScaledInfo,
+  getTrainerAppearanceOptions,
+  hasAnyReadyEvolutionSafe,
+} from './pokedex.js';
 
 function resolveValidSpeciesId(raw) {
   if (typeof raw === 'number') {
@@ -88,6 +95,7 @@ class GameApp {
     this.gameShellEl = document.getElementById('game-shell');
 
     this.starterGreetingEl = document.getElementById('starter-greeting');
+    this.starterStyleBarEl = document.getElementById('starter-style-bar');
     this.starterCardsEl = document.getElementById('starter-cards');
 
     this.hudPortraitEl = document.getElementById('hud-portrait');
@@ -99,6 +107,7 @@ class GameApp {
     this.hudMuteBtn = document.getElementById('hud-btn-mute');
     this.hudPadBtn = document.getElementById('hud-btn-pad');
     this.hudSettingsBtn = document.getElementById('hud-btn-settings');
+    this.quickDexBtn = document.getElementById('quick-dex-btn');
 
     this.biomeBannerEl = document.getElementById('biome-banner');
     this.compassHudEl = document.getElementById('compass-hud');
@@ -134,6 +143,7 @@ class GameApp {
     this._wasInBattle = false;
     this._wasModalOpen = false;
     this._lastCompassHidden = null;
+    this._starterFallbackAura = null;
     this.biomeBannerTimer = null;
     this.badgeToastTimer = null;
     this.resetRedirectTimer = null;
@@ -162,6 +172,9 @@ class GameApp {
           drawTrainerPortrait(this.hudPortraitEl, p.trainerId, p.appearance);
         }
         this.overworld.syncFollower?.();
+        if (this.overworld?.active) {
+          this.overworld.render?.(performance.now());
+        }
       },
       onClose: () => {
         this.syncControlVisibility();
@@ -602,6 +615,7 @@ class GameApp {
       this.settingsModalEl.hidden = true;
     }
     this.manualBattlePad = false;
+    this._starterFallbackAura = null;
     this.input.clearAll();
     this.overworld.setActive(false);
     this.bootScreenEl.hidden = false;
@@ -623,6 +637,7 @@ class GameApp {
   }
 
   selectTrainer(trainerId) {
+    this._starterFallbackAura = null;
     storage.selectTrainer(trainerId);
     const profile = storage.getActiveProfile();
     this.applyTrainerTheme(trainerId, profile?.appearance);
@@ -642,6 +657,7 @@ class GameApp {
     this.updateCompassHud();
 
     this.starterGreetingEl.textContent = `Welcome, ${trainer.name}! Choose your first partner Pokémon!`;
+    this.renderStarterStyleBar(trainerId);
     this.starterCardsEl.innerHTML = '';
 
     for (const id of STARTER_IDS) {
@@ -688,6 +704,151 @@ class GameApp {
       card.appendChild(btn);
       this.starterCardsEl.appendChild(card);
     }
+  }
+
+  renderStarterStyleBar(trainerId) {
+    const bar = this.starterStyleBarEl || document.getElementById('starter-style-bar');
+    if (!bar) return;
+
+    const profile = storage.getProfile?.(trainerId) || storage.getActiveProfile();
+    const appearance = profile?.appearance || { styleId: 'default', accessory: 'cap', cape: false, aura: 'none' };
+    const { stylesMap, accMap, aurasMap } = getTrainerAppearanceOptions();
+    const styles = Object.values(stylesMap);
+    const accessories = Object.values(accMap);
+    const auras = Object.values(aurasMap);
+
+    const currentStyleId = stylesMap[appearance.styleId] ? appearance.styleId : (styles[0]?.id || 'default');
+    const currentAccId = accMap[appearance.accessory] ? appearance.accessory : (accessories[0]?.id || 'cap');
+    const rawAura = appearance.aura ?? this._starterFallbackAura ?? 'none';
+    const currentAuraId = aurasMap[rawAura] ? rawAura : 'none';
+    const currentStyle = stylesMap[currentStyleId] || styles[0];
+    const currentAcc = accMap[currentAccId] || accessories[0];
+    const previewLook = appearance.aura !== undefined ? appearance : { ...appearance, aura: currentAuraId };
+
+    bar.innerHTML = '';
+
+    const previewWrap = document.createElement('div');
+    previewWrap.className = 'starter-style-preview-wrap';
+    previewWrap.dataset.aura = currentAuraId;
+    const previewCanvas = document.createElement('canvas');
+    previewCanvas.id = 'starter-style-preview';
+    previewCanvas.width = 56;
+    previewCanvas.height = 56;
+    previewCanvas.className = 'starter-style-preview';
+    previewWrap.appendChild(previewCanvas);
+    bar.appendChild(previewWrap);
+
+    const controls = document.createElement('div');
+    controls.className = 'starter-style-controls';
+
+    const topMeta = document.createElement('div');
+    topMeta.className = 'starter-style-head';
+    const labelEl = document.createElement('span');
+    labelEl.className = 'starter-style-label';
+    labelEl.innerHTML = `🎨 Look: <strong>${currentStyle?.icon || '✨'} ${currentStyle?.name || 'Signature'}</strong> • ${currentAcc?.icon || '🧢'} ${currentAcc?.name || 'Cap'}`;
+
+    const capeBtn = document.createElement('button');
+    capeBtn.id = 'starter-cape-toggle';
+    capeBtn.type = 'button';
+    capeBtn.className = `starter-cape-btn ${appearance.cape ? 'is-active' : ''}`;
+    capeBtn.textContent = `🦸 Cape: ${appearance.cape ? 'ON' : 'OFF'}`;
+    capeBtn.addEventListener('click', () => {
+      const updated = storage.updateAppearance?.({ cape: !appearance.cape }) || { ...previewLook, cape: !appearance.cape };
+      audio.playMenuBlip(740);
+      this.applyTrainerTheme(trainerId, updated);
+      this.renderStarterStyleBar(trainerId);
+    });
+
+    topMeta.appendChild(labelEl);
+    topMeta.appendChild(capeBtn);
+    controls.appendChild(topMeta);
+
+    const styleRow = document.createElement('div');
+    styleRow.className = 'starter-style-row';
+    const styleTag = document.createElement('span');
+    styleTag.className = 'starter-row-tag';
+    styleTag.textContent = 'Outfit';
+    styleRow.appendChild(styleTag);
+
+    for (const style of styles) {
+      const look = typeof resolveTrainerLook === 'function'
+        ? resolveTrainerLook(trainerId, { ...previewLook, styleId: style.id })
+        : style;
+      const primary = look?.outfitPrimary || style.outfitPrimary || '#a855f7';
+      const secondary = look?.outfitSecondary || style.outfitSecondary || '#f472b6';
+      const chip = document.createElement('button');
+      chip.type = 'button';
+      chip.dataset.starterStyleId = style.id;
+      chip.className = `starter-style-chip ${currentStyleId === style.id ? 'is-active' : ''}`;
+      chip.title = style.name;
+      chip.setAttribute('aria-label', style.name);
+      chip.innerHTML = `
+        <span class="style-swatch-pair" aria-hidden="true">
+          <span class="style-swatch" style="background:${primary}"></span>
+          <span class="style-swatch" style="background:${secondary}"></span>
+        </span>
+        <span class="starter-chip-icon">${style.icon || '✨'}</span>
+      `;
+      chip.addEventListener('click', () => {
+        const updated = storage.updateAppearance?.({ styleId: style.id }) || { ...previewLook, styleId: style.id };
+        audio.playMenuBlip(720);
+        this.applyTrainerTheme(trainerId, updated);
+        this.renderStarterStyleBar(trainerId);
+      });
+      styleRow.appendChild(chip);
+    }
+    controls.appendChild(styleRow);
+
+    const gearRow = document.createElement('div');
+    gearRow.className = 'starter-style-row';
+    const accTag = document.createElement('span');
+    accTag.className = 'starter-row-tag';
+    accTag.textContent = 'Gear';
+    gearRow.appendChild(accTag);
+
+    for (const acc of accessories) {
+      const chip = document.createElement('button');
+      chip.type = 'button';
+      chip.dataset.starterAccId = acc.id;
+      chip.className = `starter-acc-chip ${currentAccId === acc.id ? 'is-active' : ''}`;
+      chip.title = acc.name;
+      chip.setAttribute('aria-label', acc.name);
+      chip.textContent = acc.icon || '🧢';
+      chip.addEventListener('click', () => {
+        const updated = storage.updateAppearance?.({ accessory: acc.id }) || { ...previewLook, accessory: acc.id };
+        audio.playMenuBlip(740);
+        this.applyTrainerTheme(trainerId, updated);
+        this.renderStarterStyleBar(trainerId);
+      });
+      gearRow.appendChild(chip);
+    }
+
+    const auraDivider = document.createElement('span');
+    auraDivider.className = 'starter-row-tag starter-row-tag-aura';
+    auraDivider.textContent = 'Aura';
+    gearRow.appendChild(auraDivider);
+
+    for (const aura of auras) {
+      const chip = document.createElement('button');
+      chip.type = 'button';
+      chip.dataset.starterAuraId = aura.id;
+      chip.className = `starter-aura-chip ${currentAuraId === aura.id ? 'is-active' : ''}`;
+      chip.title = aura.name;
+      chip.setAttribute('aria-label', aura.name);
+      chip.textContent = aura.icon || '✨';
+      chip.addEventListener('click', () => {
+        const updated = storage.updateAppearance?.({ aura: aura.id }) || { ...previewLook, aura: aura.id };
+        this._starterFallbackAura = updated?.aura === undefined ? aura.id : null;
+        audio.playMenuBlip(760);
+        this.applyTrainerTheme(trainerId, updated);
+        this.renderStarterStyleBar(trainerId);
+      });
+      gearRow.appendChild(chip);
+    }
+
+    controls.appendChild(gearRow);
+    bar.appendChild(controls);
+    drawTrainerPortrait(previewCanvas, trainerId, previewLook);
   }
 
   enterOverworld(isBrandNew) {
@@ -747,6 +908,22 @@ class GameApp {
     const caughtCount = countCaughtSpecies(profile);
     this.hudDexBtn.textContent = `📖 Dex ${caughtCount}/${totalSpecies}`;
     this.hudBadgesBtn.textContent = `🏅 ${profile.badges.length}/${BADGES.length}`;
+
+    const evoReady = hasAnyReadyEvolutionSafe(profile, storage);
+    const quickDexBtn = this.quickDexBtn || document.getElementById('quick-dex-btn');
+    this.hudDexBtn?.classList.toggle('has-evo-ready', evoReady);
+    quickDexBtn?.classList.toggle('has-evo-ready', evoReady);
+    if (this.hudDexBtn) {
+      this.hudDexBtn.title = evoReady
+        ? 'Open Pokédex & Team (P) — ✨ Evolution Ready!'
+        : 'Open Pokédex & Team (P)';
+    }
+    if (quickDexBtn) {
+      quickDexBtn.title = evoReady
+        ? 'Open Pokédex & Team — ✨ Evolution Ready!'
+        : 'Open Pokédex & Team';
+    }
+
     this.overworld?.syncFollower?.();
     this.updateCompassHud();
   }
@@ -815,6 +992,12 @@ class GameApp {
     const stats = typeof getBiomeDiscoveryStats === 'function' && currentBiome
       ? getBiomeDiscoveryStats(profile, currentBiome.id)
       : null;
+    const scaled = getBiomeScaledInfo(currentBiome, profile);
+
+    this.compassHudEl.dataset.threat = scaled.threatTone || 'balanced';
+    this.compassHudEl.title = scaled.isSafe
+      ? `Tap to open Island Guide — ${currentBiome.name} (Safe Zone)`
+      : `Tap to open Island Guide — ${currentBiome.name}: Lv.${scaled.minLv}–${scaled.maxLv} (${scaled.threatLabel})`;
 
     const dirLabel = this.formatCompassDirection(guidance, profile);
     if (this.compassArrowEl) {
@@ -829,12 +1012,13 @@ class GameApp {
       const totalCaught = countCaughtSpecies(profile);
       const totalShrines = Object.keys(SHRINES).length;
       if (stats && stats.totalSpecies > 0) {
-        const chestPart = stats.chestsTotal > 0 ? ` • 📦 ${stats.chestsOpened}/${stats.chestsTotal}` : '';
+        const rangePart = !scaled.isSafe ? ` • Lv.${scaled.minLv}-${scaled.maxLv} ${scaled.threatLabel}` : '';
+        const chestPart = stats.chestsTotal > 0 ? ` • 📦${stats.chestsOpened}/${stats.chestsTotal}` : '';
         const hasShrine = Object.values(SHRINES).some((s) => s.biome === currentBiome.id);
-        const shrinePart = hasShrine ? ` • ${stats.shrineCleared ? '⛩️ ✓' : '⛩️ Open'}` : '';
-        this.compassSubEl.textContent = `${currentBiome.icon} Dex ${stats.caught}/${stats.totalSpecies}${chestPart}${shrinePart}`;
+        const shrinePart = hasShrine ? ` • ${stats.shrineCleared ? '⛩️✓' : '⛩️Open'}` : '';
+        this.compassSubEl.textContent = `${currentBiome.icon} Dex ${stats.caught}/${stats.totalSpecies}${rangePart}${chestPart}${shrinePart}`;
       } else {
-        this.compassSubEl.textContent = `${currentBiome?.icon || '🏡'} Dex ${totalCaught}/${totalSpecies} • Shrines ${profile.shrinesCleared.length}/${totalShrines}`;
+        this.compassSubEl.textContent = `${currentBiome?.icon || '🏡'} Safe Zone • Dex ${totalCaught}/${totalSpecies} • Shrines ${profile.shrinesCleared.length}/${totalShrines}`;
       }
     }
   }
@@ -888,7 +1072,12 @@ class GameApp {
     this.updateCompassHud();
 
     if (!this.biomeBannerEl || !biome) return;
-    this.biomeBannerEl.textContent = `${biome.icon} ${biome.name}`;
+    const profile = storage.getActiveProfile();
+    const scaled = getBiomeScaledInfo(biome, profile);
+    this.biomeBannerEl.dataset.threat = scaled.threatTone || 'balanced';
+    this.biomeBannerEl.textContent = scaled.isSafe
+      ? `${biome.icon} ${biome.name}`
+      : `${biome.icon} ${biome.name} • Lv.${scaled.minLv}–${scaled.maxLv} (${scaled.threatLabel})`;
     this.biomeBannerEl.hidden = false;
     clearTimeout(this.biomeBannerTimer);
     this.biomeBannerTimer = setTimeout(() => {
@@ -911,6 +1100,7 @@ class GameApp {
     if (rewards.potions) parts.push(`+${rewards.potions} Berry Potion${rewards.potions > 1 ? 's' : ''}`);
     if (rewards.greatBalls) parts.push(`+${rewards.greatBalls} Great Ball${rewards.greatBalls > 1 ? 's' : ''}`);
     if (rewards.starBalls) parts.push(`+${rewards.starBalls} Star Ball${rewards.starBalls > 1 ? 's' : ''}`);
+    if (rewards.starShards) parts.push(`+${rewards.starShards} ✨ Star Shard${rewards.starShards > 1 ? 's' : ''}`);
     if (rewards.gems && typeof rewards.gems === 'object') {
       for (const [gemId, count] of Object.entries(rewards.gems)) {
         if (count > 0) {
@@ -1029,6 +1219,7 @@ class GameApp {
     const token = ++this.encounterToken;
     this.encounterTransitioning = true;
     this.manualBattlePad = false;
+    this._starterFallbackAura = null;
     this.input.clearAll();
     this.syncControlVisibility();
     this.syncOverworldPause();
@@ -1065,7 +1256,11 @@ class GameApp {
   async startWildEncounter(biomeId, encounterMeta = {}) {
     if (this.battle.active || this.encounterTransitioning) return;
     if (!storage.ensureHealthyParty()) return;
-    const wild = rollWildPokemon(biomeId, this.getAverageTeamLevel(), encounterMeta);
+    const profile = storage.getActiveProfile();
+    const avgLevel = this.getAverageTeamLevel();
+    const supportsProfileRoll = typeof PokemonMod.getBiomeScaledRange === 'function'
+      || typeof PokemonMod.getTrainerPowerLevel === 'function';
+    const wild = rollWildPokemon(biomeId, supportsProfileRoll ? (profile || avgLevel) : avgLevel, encounterMeta);
     if (!wild) return;
 
     const ready = await this.triggerEncounterTransition('battle');
@@ -1085,7 +1280,14 @@ class GameApp {
   async startShrineEncounter(shrine) {
     if (this.battle.active || this.encounterTransitioning) return;
     if (!storage.ensureHealthyParty()) return;
-    const guardian = createPokemon(shrine.guardianId, shrine.level, shrine.biome);
+    const profile = storage.getActiveProfile();
+    const guardSpec = typeof PokemonMod.getScaledShrineGuard === 'function'
+      ? (PokemonMod.getScaledShrineGuard(shrine, profile) || {})
+      : {};
+    const guardianId = guardSpec.guardianId ?? shrine.guardianId;
+    const guardianLevel = Math.max(1, Math.min(50, Number(guardSpec.level ?? shrine.level) || shrine.level || 10));
+    const upgradeTier = Math.max(0, Number(guardSpec.upgradeTier) || 0);
+    const guardian = createPokemon(guardianId, guardianLevel, shrine.biome, { upgradeTier });
     const ready = await this.triggerEncounterTransition('shrine');
     if (!ready || this.battle.active) return;
     this.manualBattlePad = false;
@@ -1110,12 +1312,20 @@ class GameApp {
     const profile = storage.getActiveProfile();
     const isRematch = Boolean(profile?.rivalsDefeated?.includes(rival.id));
     const levelBoost = isRematch ? 2 : 0;
-    const rawParty = Array.isArray(rival.party) && rival.party.length > 0 ? rival.party : [{ speciesId: 25, level: 6 }];
+    const scaledParty = typeof PokemonMod.getScaledRivalParty === 'function'
+      ? PokemonMod.getScaledRivalParty(rival, profile)
+      : null;
+    const usingScaled = Array.isArray(scaledParty) && scaledParty.length > 0;
+    const rawParty = usingScaled
+      ? scaledParty
+      : (Array.isArray(rival.party) && rival.party.length > 0 ? rival.party : [{ speciesId: 25, level: 6 }]);
     const enemyParty = rawParty
       .map((entry) => {
         const spId = entry.speciesId ?? entry.id;
-        const lv = Math.min(50, Math.max(1, (Number(entry.level) || 6) + levelBoost));
-        return SPECIES[spId] ? createPokemon(spId, lv, rival.biome || 'forest') : null;
+        const baseLv = Number(entry.level) || 6;
+        const lv = Math.min(50, Math.max(1, usingScaled ? baseLv : baseLv + levelBoost));
+        const upgradeTier = Math.max(0, Number(entry.upgradeTier) || 0);
+        return SPECIES[spId] ? createPokemon(spId, lv, rival.biome || 'forest', { upgradeTier }) : null;
       })
       .filter(Boolean);
     if (enemyParty.length === 0) return;

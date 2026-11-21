@@ -208,6 +208,7 @@ body.in-battle.manual-battle-pad .touch-controls {
 }
 
 .controls-quick-dex {
+  position: relative;
   padding: 10px 16px;
   border-radius: 999px;
   border: 2px solid rgba(255, 255, 255, 0.22);
@@ -217,6 +218,11 @@ body.in-battle.manual-battle-pad .touch-controls {
   font-size: 0.85rem;
   cursor: pointer;
   box-shadow: 0 3px 0 #0f172a;
+}
+
+.controls-quick-dex.has-evo-ready {
+  border-color: #fde047;
+  box-shadow: 0 0 14px rgba(250, 204, 21, 0.58), 0 3px 0 #0f172a;
 }
 
 .controls-quick-dex:active {
@@ -277,15 +283,15 @@ body.in-battle.manual-battle-pad .touch-controls {
   box-shadow: 0 2px 0 #0f172a;
 }
 
-@media (max-height: 800px) and (pointer: coarse), (max-width: 1024px) and (max-height: 780px) {
+@media (max-height: 800px) and (pointer: coarse), (max-height: 780px) {
   .touch-controls {
     padding: 6px 14px calc(6px + env(safe-area-inset-bottom, 0px));
     gap: 10px;
   }
   .dpad {
-    width: 118px;
-    height: 118px;
-    flex-basis: 118px;
+    width: 116px;
+    height: 116px;
+    flex-basis: 116px;
     padding: 8px;
   }
   .dpad-glyph {
@@ -302,10 +308,24 @@ body.in-battle.manual-battle-pad .touch-controls {
     font-size: 1.05rem;
   }
   .action-pad-b {
-    margin-top: 10px;
+    margin-top: 8px;
   }
   .action-pad-a {
-    margin-bottom: 8px;
+    margin-bottom: 6px;
+  }
+  .controls-quick-dex {
+    padding: 8px 13px;
+    font-size: 0.8rem;
+  }
+}
+
+@media (max-width: 720px) and (min-width: 541px) {
+  .touch-controls {
+    padding: 6px 12px calc(6px + env(safe-area-inset-bottom, 0px));
+    gap: 8px;
+  }
+  .controls-center-hint span {
+    font-size: 0.7rem;
   }
 }
 

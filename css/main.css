@@ -75,13 +75,23 @@ button {
     display: flex;
     align-items: center;
     justify-content: center;
-    padding: clamp(6px, 1dvh, 10px);
+    padding: clamp(4px, 0.9dvh, 10px);
   }
   .app-cabinet {
-    height: min(96dvh, 840px);
+    height: min(97dvh, 840px);
     border-radius: 22px;
     border: 3px solid rgba(255, 255, 255, 0.15);
     overflow: hidden;
+  }
+}
+
+@media (min-width: 990px) and (max-height: 780px) {
+  body {
+    padding: 4px;
+  }
+  .app-cabinet {
+    height: 98.5dvh;
+    border-radius: 18px;
   }
 }
 
@@ -122,9 +132,9 @@ button {
   flex: 1 1 auto;
   overflow-y: auto;
   display: flex;
-  align-items: center;
+  align-items: safe center;
   justify-content: center;
-  padding: 20px;
+  padding: 16px 20px;
 }
 
 .boot-screen {
@@ -152,6 +162,7 @@ button {
   z-index: 2;
   width: 100%;
   max-width: 760px;
+  margin: auto;
   text-align: center;
 }
 
@@ -329,11 +340,162 @@ button {
 .starter-inner {
   width: 100%;
   max-width: 820px;
+  margin: auto;
   text-align: center;
 }
 
 .lab-banner {
-  margin-bottom: 18px;
+  margin-bottom: 12px;
+}
+
+.starter-style-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  margin-bottom: 14px;
+  border-radius: 16px;
+  background: rgba(15, 23, 42, 0.9);
+  border: 2px solid var(--trainer-accent);
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.42);
+  text-align: left;
+}
+
+.starter-style-preview-wrap {
+  width: 64px;
+  height: 64px;
+  border-radius: 14px;
+  background: radial-gradient(circle at 50% 45%, var(--trainer-accent-soft), #0f172a 78%);
+  border: 2px solid var(--trainer-accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.starter-style-preview-wrap[data-aura='stars'] {
+  box-shadow: 0 0 14px rgba(250, 204, 21, 0.55);
+}
+
+.starter-style-preview-wrap[data-aura='hearts'] {
+  box-shadow: 0 0 14px rgba(244, 114, 182, 0.55);
+}
+
+.starter-style-preview-wrap[data-aura='lightning'] {
+  box-shadow: 0 0 14px rgba(56, 189, 248, 0.6);
+}
+
+.starter-style-preview {
+  width: 56px;
+  height: 56px;
+  image-rendering: pixelated;
+}
+
+.starter-style-controls {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.starter-style-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.starter-style-label {
+  font-size: 0.78rem;
+  color: #cbd5e1;
+}
+
+.starter-style-label strong {
+  color: #fef08a;
+}
+
+.starter-cape-btn {
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1.5px solid rgba(255, 255, 255, 0.24);
+  background: #1e293b;
+  color: #f8fafc;
+  font-size: 0.72rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.starter-cape-btn.is-active {
+  background: var(--trainer-accent-dark);
+  border-color: var(--trainer-accent);
+  box-shadow: 0 0 10px var(--trainer-accent-soft);
+}
+
+.starter-style-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.starter-row-tag {
+  font-size: 0.66rem;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #94a3b8;
+  min-width: 42px;
+}
+
+.starter-row-tag-aura {
+  min-width: auto;
+  margin-left: 6px;
+}
+
+.starter-style-chip,
+.starter-acc-chip,
+.starter-aura-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 7px;
+  border-radius: 999px;
+  border: 1.5px solid rgba(255, 255, 255, 0.18);
+  background: #1a233a;
+  color: #f8fafc;
+  font-size: 0.74rem;
+  font-weight: 800;
+  cursor: pointer;
+  transition: transform 90ms ease, border-color 120ms ease, background 120ms ease;
+}
+
+.starter-style-chip:hover,
+.starter-acc-chip:hover,
+.starter-aura-chip:hover {
+  border-color: var(--trainer-accent);
+  transform: translateY(-1px);
+}
+
+.starter-style-chip.is-active,
+.starter-acc-chip.is-active,
+.starter-aura-chip.is-active {
+  background: linear-gradient(135deg, var(--trainer-accent-soft), rgba(30, 41, 59, 0.96));
+  border-color: var(--trainer-accent);
+  box-shadow: 0 0 0 1px var(--trainer-accent);
+}
+
+@media (max-width: 600px) {
+  .starter-style-bar {
+    flex-direction: column;
+    text-align: center;
+    padding: 10px;
+  }
+  .starter-style-head,
+  .starter-style-row {
+    justify-content: center;
+  }
 }
 
 .lab-pill {
@@ -564,13 +726,67 @@ button {
   transform: translateY(1px);
 }
 
+.hud-pill.has-evo-ready,
+.controls-quick-dex.has-evo-ready {
+  position: relative;
+  border-color: #fde047;
+  box-shadow: 0 0 14px rgba(250, 204, 21, 0.58), 0 2px 0 #090d1a;
+  animation: evo-ready-pulse 1.7s ease-in-out infinite;
+}
+
+.hud-pill.has-evo-ready::after,
+.controls-quick-dex.has-evo-ready::after {
+  content: '✨';
+  position: absolute;
+  top: -6px;
+  right: -5px;
+  font-size: 0.62rem;
+  line-height: 1;
+  padding: 2px 4px;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #f59e0b, #ec4899);
+  border: 1px solid #fef08a;
+  color: #ffffff;
+  pointer-events: none;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.5);
+}
+
+@keyframes evo-ready-pulse {
+  0%, 100% {
+    box-shadow: 0 0 10px rgba(250, 204, 21, 0.45), 0 2px 0 #090d1a;
+  }
+  50% {
+    box-shadow: 0 0 18px rgba(250, 204, 21, 0.85), 0 0 6px rgba(232, 121, 249, 0.5), 0 2px 0 #090d1a;
+  }
+}
+
+@media (max-width: 780px) {
+  .hud-bar {
+    padding: 6px 10px;
+    gap: 8px;
+  }
+  .hud-actions {
+    gap: 4px;
+    flex-wrap: nowrap;
+  }
+  .hud-pill,
+  .hud-icon-btn {
+    padding: 5px 8px;
+    font-size: 0.74rem;
+    white-space: nowrap;
+  }
+}
+
 @media (max-width: 560px) {
   .hud-mini-hp-wrap {
     display: none;
   }
   .hud-pill {
-    padding: 5px 8px;
-    font-size: 0.72rem;
+    padding: 5px 7px;
+    font-size: 0.71rem;
+  }
+  .hud-icon-btn {
+    padding: 5px 7px;
   }
 }
 
@@ -598,17 +814,21 @@ button {
 
 .biome-banner {
   position: absolute;
-  top: 12px;
+  top: 58px;
   left: 50%;
   transform: translateX(-50%);
   z-index: 8;
-  padding: 6px 16px;
+  padding: 5px 14px;
   border-radius: 999px;
-  background: rgba(15, 23, 42, 0.88);
+  background: rgba(15, 23, 42, 0.9);
   border: 2px solid var(--trainer-accent);
   color: #ffffff;
   font-weight: 900;
-  font-size: 0.85rem;
+  font-size: 0.82rem;
+  white-space: nowrap;
+  max-width: calc(100% - 24px);
+  overflow: hidden;
+  text-overflow: ellipsis;
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
   pointer-events: none;
   animation: pop-in 200ms ease;
@@ -622,7 +842,7 @@ button {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  max-width: min(270px, calc(100% - 20px));
+  max-width: min(345px, calc(100% - 20px));
   padding: 6px 11px;
   border-radius: 14px;
   border: 1.5px solid rgba(255, 255, 255, 0.22);
@@ -634,6 +854,18 @@ button {
   cursor: pointer;
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.42);
   transition: transform 120ms ease, border-color 140ms ease, background 140ms ease;
+}
+
+.compass-hud[data-threat='challenging'] {
+  border-color: rgba(250, 204, 21, 0.55);
+}
+
+.compass-hud[data-threat='veteran'] {
+  border-color: rgba(251, 146, 60, 0.65);
+}
+
+.compass-hud[data-threat='apex'] {
+  border-color: rgba(244, 63, 94, 0.75);
 }
 
 .compass-hud:hover {
@@ -685,13 +917,22 @@ button {
   text-overflow: ellipsis;
 }
 
+@media (max-width: 820px) {
+  .biome-banner {
+    top: 60px;
+    font-size: 0.78rem;
+    padding: 5px 12px;
+    white-space: nowrap;
+  }
+}
+
 @media (max-width: 680px) {
   .compass-hud {
     top: 8px;
     left: 8px;
     padding: 5px 9px;
     gap: 6px;
-    max-width: min(230px, calc(100% - 16px));
+    max-width: min(255px, calc(100% - 16px));
   }
   .compass-arrow {
     width: 24px;
@@ -703,11 +944,6 @@ button {
   }
   .compass-sub {
     font-size: 0.63rem;
-  }
-  .biome-banner {
-    top: 56px;
-    font-size: 0.78rem;
-    padding: 5px 12px;
   }
 }
 
@@ -2073,4 +2309,245 @@ button {
   background: linear-gradient(180deg, #9333ea 0%, #5b21b6 100%);
   border-color: rgba(253, 224, 71, 0.65);
   color: #fef9c3;
+}
+
+/* --- Sprint 4: Star Rank Power-Up Loop, Threat Tags, Style Auras & Chromebook/Tablet Polish --- */
+.team-card .rank-pill,
+.box-card .rank-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-size: 0.68rem;
+  font-weight: 900;
+  background: rgba(51, 65, 85, 0.85);
+  border: 1px solid rgba(148, 163, 184, 0.45);
+  color: #e2e8f0;
+  white-space: nowrap;
+}
+
+.team-card .rank-pill.is-upgraded,
+.box-card .rank-pill.is-upgraded {
+  background: linear-gradient(135deg, rgba(14, 165, 233, 0.28), rgba(168, 85, 247, 0.28));
+  border-color: #38bdf8;
+  color: #bae6fd;
+}
+
+.team-card .rank-pill.is-max-rank,
+.box-card .rank-pill.is-max-rank {
+  background: linear-gradient(135deg, rgba(245, 158, 11, 0.32), rgba(236, 72, 153, 0.32));
+  border-color: #fde047;
+  color: #fef08a;
+}
+
+.mon-stats-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 5px;
+  font-size: 0.69rem;
+  font-weight: 700;
+  color: #94a3b8;
+}
+
+.mon-stats-row strong {
+  color: #e2e8f0;
+}
+
+.mon-stats-row.is-compact {
+  margin-top: 1px;
+  gap: 6px;
+  font-size: 0.66rem;
+}
+
+.mon-power-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.upgrade-btn {
+  width: 100%;
+  padding: 6px 10px;
+  border-radius: 9px;
+  border: 1.5px solid #38bdf8;
+  background: linear-gradient(120deg, #0284c7 0%, #6366f1 100%);
+  color: #ffffff;
+  font-weight: 900;
+  font-size: 0.75rem;
+  cursor: pointer;
+  box-shadow: 0 2px 0 #1e1b4b, 0 0 10px rgba(56, 189, 248, 0.28);
+  transition: transform 90ms ease, filter 120ms ease;
+}
+
+.upgrade-btn:hover:not(:disabled) {
+  filter: brightness(1.1);
+}
+
+.upgrade-btn:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.upgrade-btn:disabled {
+  opacity: 0.52;
+  cursor: not-allowed;
+  border-color: rgba(148, 163, 184, 0.35);
+  background: #1e293b;
+  color: #94a3b8;
+  box-shadow: none;
+}
+
+.upgrade-btn.is-compact {
+  padding: 5px 8px;
+  font-size: 0.71rem;
+}
+
+.rank-max-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  padding: 5px 9px;
+  border-radius: 9px;
+  background: linear-gradient(135deg, rgba(234, 179, 8, 0.25), rgba(236, 72, 153, 0.25));
+  border: 1.5px solid #fde047;
+  color: #fef08a;
+  font-size: 0.72rem;
+  font-weight: 900;
+  letter-spacing: 0.05em;
+}
+
+.rank-max-pill.is-compact {
+  padding: 4px 8px;
+  font-size: 0.68rem;
+}
+
+.biome-card-pills {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.biome-threat-tag {
+  font-size: 0.66rem;
+  font-weight: 900;
+  padding: 2px 7px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  white-space: nowrap;
+}
+
+.biome-threat-tag.is-balanced {
+  background: rgba(34, 197, 94, 0.18);
+  border-color: rgba(74, 222, 128, 0.55);
+  color: #86efac;
+}
+
+.biome-threat-tag.is-challenging {
+  background: rgba(250, 204, 21, 0.18);
+  border-color: rgba(250, 204, 21, 0.6);
+  color: #fde047;
+}
+
+.biome-threat-tag.is-veteran {
+  background: rgba(249, 115, 22, 0.2);
+  border-color: rgba(251, 146, 60, 0.65);
+  color: #fdba74;
+}
+
+.biome-threat-tag.is-apex {
+  background: rgba(244, 63, 94, 0.22);
+  border-color: rgba(251, 113, 133, 0.75);
+  color: #fda4af;
+}
+
+.aura-chip-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(156px, 1fr));
+  gap: 8px;
+}
+
+.aura-chip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 11px;
+  border-radius: 12px;
+  border: 2px solid rgba(255, 255, 255, 0.16);
+  background: #1a233a;
+  color: #f8fafc;
+  font-weight: 800;
+  font-size: 0.8rem;
+  cursor: pointer;
+  text-align: left;
+  transition: transform 100ms ease, border-color 120ms ease, background 120ms ease;
+}
+
+.aura-chip:hover {
+  border-color: var(--trainer-accent);
+  transform: translateY(-1px);
+}
+
+.aura-chip.is-active {
+  background: linear-gradient(135deg, var(--trainer-accent-soft), rgba(30, 41, 59, 0.96));
+  border-color: var(--trainer-accent);
+  box-shadow: 0 0 0 1px var(--trainer-accent);
+}
+
+.aura-chip-icon {
+  font-size: 1.15rem;
+  flex-shrink: 0;
+}
+
+.trainer-studio-preview-wrap[data-aura='stars'] {
+  box-shadow: 0 0 18px rgba(250, 204, 21, 0.55);
+}
+
+.trainer-studio-preview-wrap[data-aura='hearts'] {
+  box-shadow: 0 0 18px rgba(244, 114, 182, 0.55);
+}
+
+.trainer-studio-preview-wrap[data-aura='lightning'] {
+  box-shadow: 0 0 18px rgba(56, 189, 248, 0.6);
+}
+
+/* Tablet & Chromebook Compact Polish */
+@media (max-height: 780px) {
+  .starter-card {
+    padding: 12px 12px;
+    gap: 6px;
+  }
+  .starter-sprite-box {
+    width: 78px;
+    height: 78px;
+  }
+  .starter-sprite-box img {
+    width: 72px;
+    height: 72px;
+  }
+  .lab-banner h2 {
+    margin: 6px 0 4px;
+  }
+}
+
+@media (max-width: 760px) {
+  .modal-backdrop {
+    padding: 8px;
+  }
+  .modal-card {
+    max-height: 95%;
+  }
+  .modal-header {
+    padding: 8px 10px;
+  }
+  .tab-btn {
+    padding: 6px 9px;
+    font-size: 0.76rem;
+  }
+  .modal-body {
+    padding: 10px;
+  }
 }
