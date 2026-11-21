@@ -1325,8 +1325,11 @@ export class BattleEngine {
         return;
       }
 
+      const startedAt = typeof performance !== 'undefined' ? performance.now() : Date.now();
       this.typingTimer = setInterval(() => {
-        idx += 1;
+        const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+        const elapsedChars = Math.floor((now - startedAt) / Math.max(1, resolvedSpeed));
+        idx = Math.min(safeText.length, Math.max(idx + 1, elapsedChars));
         if (this.logEl) {
           this.logEl.textContent = safeText.slice(0, idx);
         }

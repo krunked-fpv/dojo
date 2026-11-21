@@ -714,7 +714,7 @@
 /* --- Innate Ability Cut-In Banner --- */
 .battle-ability-banner {
   position: absolute;
-  top: 43%;
+  top: 41%;
   left: clamp(10px, 2.6cqw, 20px);
   right: auto;
   z-index: 16;
@@ -743,6 +743,7 @@
 }
 
 .battle-ability-banner[data-side='enemy'] {
+  top: 57%;
   left: auto;
   right: clamp(10px, 2.6cqw, 20px);
   border-radius: 14px 10px 4px 10px;
