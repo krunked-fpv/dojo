@@ -131,6 +131,17 @@ class GameApp {
     this.settingPadBtn = document.getElementById('setting-pad-btn');
     this.settingPaceBtn = document.getElementById('setting-pace-btn');
     this.settingSwitchBtn = document.getElementById('setting-switch-trainer-btn');
+    this.settingInstallRowEl = document.getElementById('setting-install-row');
+    this.settingInstallBtn = document.getElementById('setting-install-btn');
+
+    this.pwaInstallBannerEl = document.getElementById('pwa-install-banner');
+    this.pwaInstallBtn = document.getElementById('pwa-install-btn');
+    this.pwaInstallDismissBtn = document.getElementById('pwa-install-dismiss');
+    this.hudInstallGroupEl = document.getElementById('hud-install-group');
+    this.hudInstallBtn = document.getElementById('hud-btn-install');
+    this.hudInstallDismissBtn = document.getElementById('hud-btn-install-dismiss');
+    this.deferredInstallPrompt = null;
+    this.installPromptDismissed = false;
 
     this.resetTrainerBtn = document.getElementById('reset-trainer-btn');
     this.resetTrainerFill = document.getElementById('reset-trainer-fill');
@@ -143,6 +154,8 @@ class GameApp {
     this._wasInBattle = false;
     this._wasModalOpen = false;
     this._lastCompassHidden = null;
+    this._starterFallbackStyle = null;
+    this._starterFallbackAcc = null;
     this._starterFallbackAura = null;
     this.biomeBannerTimer = null;
     this.badgeToastTimer = null;
@@ -165,11 +178,14 @@ class GameApp {
       audio,
       onTeamChanged: () => this.refreshHud(),
       onBadgesUnlocked: (badges) => this.showBadgeToast(badges),
-      onAppearanceChanged: () => {
+      onAppearanceChanged: (overrideAppearance = null) => {
         const p = storage.getActiveProfile();
         if (p) {
-          this.applyTrainerTheme(p.trainerId, p.appearance);
-          drawTrainerPortrait(this.hudPortraitEl, p.trainerId, p.appearance);
+          const look = overrideAppearance && typeof overrideAppearance === 'object'
+            ? overrideAppearance
+            : p.appearance;
+          this.applyTrainerTheme(p.trainerId, look);
+          drawTrainerPortrait(this.hudPortraitEl, p.trainerId, look);
         }
         this.overworld.syncFollower?.();
         if (this.overworld?.active) {
@@ -211,6 +227,8 @@ class GameApp {
     this.bindBootEvents();
     this.bindHudAndModalEvents();
     this.bindInputEvents();
+    this.bindPwaEvents();
+    this.syncInstallBanner();
     this.showBootScreen();
 
     if (this.cabinetEl) {
@@ -304,13 +322,89 @@ class GameApp {
   applyTrainerTheme(trainerId, appearance = null) {
     const profile = appearance === null ? storage.getProfile?.(trainerId) : null;
     const effectiveAppearance = appearance ?? profile?.appearance ?? null;
-    const trainer = typeof resolveTrainerLook === 'function'
+    const resolvedBase = typeof resolveTrainerLook === 'function'
       ? resolveTrainerLook(trainerId, effectiveAppearance)
       : (TRAINERS[trainerId] || TRAINERS.violet);
+    const styleId = effectiveAppearance?.styleId;
+    let trainer = resolvedBase;
+    if (styleId && styleId !== 'default' && !Config.TRAINER_STYLES?.[styleId]) {
+      const { stylesMap } = getTrainerAppearanceOptions();
+      if (stylesMap[styleId]) {
+        trainer = { ...resolvedBase, ...stylesMap[styleId] };
+      }
+    }
     const root = document.documentElement.style;
     root.setProperty('--trainer-accent', trainer.accent);
-    root.setProperty('--trainer-accent-dark', trainer.accentDark);
-    root.setProperty('--trainer-accent-soft', trainer.accentSoft);
+    root.setProperty('--trainer-accent-dark', trainer.accentDark || resolvedBase.accentDark);
+    root.setProperty('--trainer-accent-soft', trainer.accentSoft || resolvedBase.accentSoft);
+  }
+
+  isStandaloneMode() {
+    return Boolean(
+      window.matchMedia?.('(display-mode: standalone)')?.matches ||
+      window.navigator?.standalone === true
+    );
+  }
+
+  bindPwaEvents() {
+    window.addEventListener('beforeinstallprompt', (e) => {
+      e.preventDefault();
+      this.deferredInstallPrompt = e;
+      this.syncInstallBanner();
+    });
+
+    window.addEventListener('appinstalled', () => {
+      this.deferredInstallPrompt = null;
+      this.syncInstallBanner();
+    });
+
+    window.matchMedia?.('(display-mode: standalone)')?.addEventListener?.('change', () => {
+      this.syncInstallBanner();
+    });
+
+    this.pwaInstallBtn?.addEventListener('click', () => this.triggerPwaInstall());
+    this.hudInstallBtn?.addEventListener('click', () => this.triggerPwaInstall());
+    this.settingInstallBtn?.addEventListener('click', () => this.triggerPwaInstall());
+    this.pwaInstallDismissBtn?.addEventListener('click', () => this.dismissPwaInstall());
+    this.hudInstallDismissBtn?.addEventListener('click', () => this.dismissPwaInstall());
+  }
+
+  syncInstallBanner() {
+    const canShow = Boolean(
+      this.deferredInstallPrompt &&
+      !this.isStandaloneMode() &&
+      !this.installPromptDismissed
+    );
+    if (this.pwaInstallBannerEl) this.pwaInstallBannerEl.hidden = !canShow;
+    if (this.hudInstallGroupEl) this.hudInstallGroupEl.hidden = !canShow;
+    if (this.settingInstallRowEl) this.settingInstallRowEl.hidden = !canShow;
+  }
+
+  async triggerPwaInstall() {
+    const promptEvent = this.deferredInstallPrompt;
+    if (!promptEvent || typeof promptEvent.prompt !== 'function') {
+      this.syncInstallBanner();
+      return null;
+    }
+    audio.playMenuBlip(720);
+    try {
+      await promptEvent.prompt();
+      const choice = promptEvent.userChoice ? await promptEvent.userChoice : null;
+      this.deferredInstallPrompt = null;
+      return choice;
+    } catch {
+      return null;
+    } finally {
+      this.syncInstallBanner();
+      this.blurFocusedControl();
+    }
+  }
+
+  dismissPwaInstall() {
+    audio.playMenuBlip(500);
+    this.installPromptDismissed = true;
+    this.syncInstallBanner();
+    this.blurFocusedControl();
   }
 
   bindBootEvents() {
@@ -615,6 +709,8 @@ class GameApp {
       this.settingsModalEl.hidden = true;
     }
     this.manualBattlePad = false;
+    this._starterFallbackStyle = null;
+    this._starterFallbackAcc = null;
     this._starterFallbackAura = null;
     this.input.clearAll();
     this.overworld.setActive(false);
@@ -623,6 +719,7 @@ class GameApp {
     this.gameShellEl.hidden = true;
     this.closeDialogue();
     this.syncControlVisibility();
+    this.syncInstallBanner();
     this.updateCompassHud();
 
     drawTrainerPortrait(document.getElementById('portrait-violet'), 'violet', storage.getProfile('violet')?.appearance);
@@ -637,6 +734,8 @@ class GameApp {
   }
 
   selectTrainer(trainerId) {
+    this._starterFallbackStyle = null;
+    this._starterFallbackAcc = null;
     this._starterFallbackAura = null;
     storage.selectTrainer(trainerId);
     const profile = storage.getActiveProfile();
@@ -717,13 +816,20 @@ class GameApp {
     const accessories = Object.values(accMap);
     const auras = Object.values(aurasMap);
 
-    const currentStyleId = stylesMap[appearance.styleId] ? appearance.styleId : (styles[0]?.id || 'default');
-    const currentAccId = accMap[appearance.accessory] ? appearance.accessory : (accessories[0]?.id || 'cap');
-    const rawAura = appearance.aura ?? this._starterFallbackAura ?? 'none';
+    const rawStyleId = this._starterFallbackStyle ?? appearance.styleId ?? 'default';
+    const currentStyleId = stylesMap[rawStyleId] ? rawStyleId : (styles[0]?.id || 'default');
+    const rawAccId = this._starterFallbackAcc ?? appearance.accessory ?? 'cap';
+    const currentAccId = accMap[rawAccId] ? rawAccId : (accessories[0]?.id || 'cap');
+    const rawAura = this._starterFallbackAura ?? appearance.aura ?? 'none';
     const currentAuraId = aurasMap[rawAura] ? rawAura : 'none';
     const currentStyle = stylesMap[currentStyleId] || styles[0];
     const currentAcc = accMap[currentAccId] || accessories[0];
-    const previewLook = appearance.aura !== undefined ? appearance : { ...appearance, aura: currentAuraId };
+    const previewLook = {
+      ...appearance,
+      styleId: currentStyleId,
+      accessory: currentAccId,
+      aura: currentAuraId,
+    };
 
     bar.innerHTML = '';
 
@@ -754,8 +860,9 @@ class GameApp {
     capeBtn.textContent = `🦸 Cape: ${appearance.cape ? 'ON' : 'OFF'}`;
     capeBtn.addEventListener('click', () => {
       const updated = storage.updateAppearance?.({ cape: !appearance.cape }) || { ...previewLook, cape: !appearance.cape };
+      const resolved = { ...previewLook, ...updated, styleId: currentStyleId, accessory: currentAccId, aura: currentAuraId, cape: Boolean(updated?.cape) };
       audio.playMenuBlip(740);
-      this.applyTrainerTheme(trainerId, updated);
+      this.applyTrainerTheme(trainerId, resolved);
       this.renderStarterStyleBar(trainerId);
     });
 
@@ -771,7 +878,7 @@ class GameApp {
     styleRow.appendChild(styleTag);
 
     for (const style of styles) {
-      const look = typeof resolveTrainerLook === 'function'
+      const look = (typeof resolveTrainerLook === 'function' && (style.id === 'default' || Config.TRAINER_STYLES?.[style.id]))
         ? resolveTrainerLook(trainerId, { ...previewLook, styleId: style.id })
         : style;
       const primary = look?.outfitPrimary || style.outfitPrimary || '#a855f7';
@@ -791,8 +898,10 @@ class GameApp {
       `;
       chip.addEventListener('click', () => {
         const updated = storage.updateAppearance?.({ styleId: style.id }) || { ...previewLook, styleId: style.id };
+        this._starterFallbackStyle = updated?.styleId !== style.id ? style.id : null;
+        const resolved = { ...previewLook, ...updated, styleId: style.id };
         audio.playMenuBlip(720);
-        this.applyTrainerTheme(trainerId, updated);
+        this.applyTrainerTheme(trainerId, resolved);
         this.renderStarterStyleBar(trainerId);
       });
       styleRow.appendChild(chip);
@@ -816,17 +925,22 @@ class GameApp {
       chip.textContent = acc.icon || '🧢';
       chip.addEventListener('click', () => {
         const updated = storage.updateAppearance?.({ accessory: acc.id }) || { ...previewLook, accessory: acc.id };
+        this._starterFallbackAcc = updated?.accessory !== acc.id ? acc.id : null;
+        const resolved = { ...previewLook, ...updated, accessory: acc.id };
         audio.playMenuBlip(740);
-        this.applyTrainerTheme(trainerId, updated);
+        this.applyTrainerTheme(trainerId, resolved);
         this.renderStarterStyleBar(trainerId);
       });
       gearRow.appendChild(chip);
     }
+    controls.appendChild(gearRow);
 
+    const auraRow = document.createElement('div');
+    auraRow.className = 'starter-style-row';
     const auraDivider = document.createElement('span');
-    auraDivider.className = 'starter-row-tag starter-row-tag-aura';
+    auraDivider.className = 'starter-row-tag';
     auraDivider.textContent = 'Aura';
-    gearRow.appendChild(auraDivider);
+    auraRow.appendChild(auraDivider);
 
     for (const aura of auras) {
       const chip = document.createElement('button');
@@ -838,15 +952,16 @@ class GameApp {
       chip.textContent = aura.icon || '✨';
       chip.addEventListener('click', () => {
         const updated = storage.updateAppearance?.({ aura: aura.id }) || { ...previewLook, aura: aura.id };
-        this._starterFallbackAura = updated?.aura === undefined ? aura.id : null;
+        this._starterFallbackAura = updated?.aura !== aura.id ? aura.id : null;
+        const resolved = { ...previewLook, ...updated, aura: aura.id };
         audio.playMenuBlip(760);
-        this.applyTrainerTheme(trainerId, updated);
+        this.applyTrainerTheme(trainerId, resolved);
         this.renderStarterStyleBar(trainerId);
       });
-      gearRow.appendChild(chip);
+      auraRow.appendChild(chip);
     }
 
-    controls.appendChild(gearRow);
+    controls.appendChild(auraRow);
     bar.appendChild(controls);
     drawTrainerPortrait(previewCanvas, trainerId, previewLook);
   }
@@ -879,7 +994,7 @@ class GameApp {
       const lead = profile.team[0];
       const trainerName = TRAINERS[profile.trainerId]?.name || 'Trainer';
       this.openDialogue(
-        `${trainerName} & ${lead?.displayName || lead?.name || 'Partner'} set out on Starlight Island! Follow the Starlight Compass to Whispering Forest, Crystal Cavern, Sapphire Lagoon, Ember Caldera, and Starfall Peak!`
+        `${trainerName} & ${lead?.displayName || lead?.name || 'Partner'} set out on Starlight Island! Follow the Starlight Compass to Whispering Forest, Crystal Cavern, Sapphire Lagoon, Ember Caldera, Starfall Peak, and Celestial Grove!`
       );
     }
   }
@@ -1219,6 +1334,8 @@ class GameApp {
     const token = ++this.encounterToken;
     this.encounterTransitioning = true;
     this.manualBattlePad = false;
+    this._starterFallbackStyle = null;
+    this._starterFallbackAcc = null;
     this._starterFallbackAura = null;
     this.input.clearAll();
     this.syncControlVisibility();
@@ -1370,7 +1487,9 @@ class GameApp {
           this.showBadgeToast(winRes.newBadges);
         }
         const rewardText = this.formatRewardSummary(rewards);
-        const winText = rival.winText || rival.defeatText || `${rival.name}: "What an awesome battle!"`;
+        const winText = (isRematch && rival.rematchWinText)
+          ? rival.rematchWinText
+          : (rival.winText || rival.defeatText || `${rival.name}: "What an awesome battle!"`);
         pendingDialogue = rewardText
           ? `${winText} [Earned ${rewardText}!]`
           : winText;

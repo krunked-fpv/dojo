@@ -21,17 +21,19 @@ import {
 import { attachPokemonSprite } from './pokemon.js';
 import { drawTrainerPortrait } from './overworld.js';
 
-const BIOME_ORDER = ['village', 'forest', 'cave', 'water', 'volcano', 'peak'];
+const BIOME_ORDER = ['village', 'forest', 'cave', 'water', 'volcano', 'peak', 'grove'];
 
 const FALLBACK_STYLES = {
-  default: { id: 'default', name: 'Signature Outfit', icon: '⭐', outfitPrimary: '#a855f7', outfitSecondary: '#f472b6', accent: '#c084fc' },
-  royal: { id: 'royal', name: 'Starlight Royal', icon: '👑', outfitPrimary: '#6366f1', outfitSecondary: '#fde047', accent: '#818cf8' },
-  aurora: { id: 'aurora', name: 'Aurora Frost', icon: '❄️', outfitPrimary: '#0ea5e9', outfitSecondary: '#a5f3fc', accent: '#38bdf8' },
-  ember: { id: 'ember', name: 'Ember Explorer', icon: '🔥', outfitPrimary: '#ea580c', outfitSecondary: '#fde047', accent: '#fb923c' },
-  ranger: { id: 'ranger', name: 'Emerald Ranger', icon: '🌿', outfitPrimary: '#16a34a', outfitSecondary: '#fde047', accent: '#4ade80' },
-  nebula: { id: 'nebula', name: 'Cosmic Nebula', icon: '🌌', outfitPrimary: '#7e22ce', outfitSecondary: '#22d3ee', accent: '#e879f9' },
-  solstice: { id: 'solstice', name: 'Solar Sovereign', icon: '☀️', outfitPrimary: '#f59e0b', outfitSecondary: '#fef08a', accent: '#fbbf24' },
-  twilight: { id: 'twilight', name: 'Eclipse Mystic', icon: '🔮', outfitPrimary: '#6d28d9', outfitSecondary: '#f472b6', accent: '#a855f7' },
+  default: { id: 'default', name: 'Signature Outfit', icon: '✨', outfitPrimary: '#a855f7', outfitSecondary: '#f472b6', accent: '#c084fc', accentDark: '#7e22ce', accentSoft: 'rgba(192, 132, 252, 0.22)' },
+  royal: { id: 'royal', name: 'Starlight Royal', icon: '👑', outfitPrimary: '#6366f1', outfitSecondary: '#fbbf24', accent: '#818cf8', accentDark: '#4338ca', accentSoft: 'rgba(129, 140, 248, 0.22)' },
+  aurora: { id: 'aurora', name: 'Aurora Frost', icon: '❄️', outfitPrimary: '#06b6d4', outfitSecondary: '#a5f3fc', accent: '#22d3ee', accentDark: '#0e7490', accentSoft: 'rgba(34, 211, 238, 0.22)' },
+  ember: { id: 'ember', name: 'Ember Explorer', icon: '🔥', outfitPrimary: '#ea580c', outfitSecondary: '#fde047', accent: '#fb923c', accentDark: '#9a3412', accentSoft: 'rgba(251, 146, 60, 0.22)' },
+  ranger: { id: 'ranger', name: 'Emerald Ranger', icon: '🌿', outfitPrimary: '#16a34a', outfitSecondary: '#bef264', accent: '#4ade80', accentDark: '#15803d', accentSoft: 'rgba(74, 222, 128, 0.22)' },
+  nebula: { id: 'nebula', name: 'Cosmic Nebula', icon: '🌌', outfitPrimary: '#db2777', outfitSecondary: '#67e8f9', accent: '#f472b6', accentDark: '#9d174d', accentSoft: 'rgba(244, 114, 182, 0.22)' },
+  solstice: { id: 'solstice', name: 'Solar Sovereign', icon: '☀️', outfitPrimary: '#d97706', outfitSecondary: '#fef08a', accent: '#fbbf24', accentDark: '#92400e', accentSoft: 'rgba(251, 191, 36, 0.24)' },
+  twilight: { id: 'twilight', name: 'Eclipse Mystic', icon: '🔮', outfitPrimary: '#581c87', outfitSecondary: '#c084fc', accent: '#a855f7', accentDark: '#3b0764', accentSoft: 'rgba(168, 85, 247, 0.24)' },
+  celestial: { id: 'celestial', name: 'Astral Guardian', icon: '🌠', outfitPrimary: '#0f766e', outfitSecondary: '#fde68a', accent: '#2dd4bf', accentDark: '#115e59', accentSoft: 'rgba(45, 212, 191, 0.24)' },
+  sakura: { id: 'sakura', name: 'Starlight Blossom', icon: '🌸', outfitPrimary: '#e11d48', outfitSecondary: '#fbcfe8', accent: '#fb7185', accentDark: '#9f1239', accentSoft: 'rgba(251, 113, 133, 0.24)' },
 };
 
 const FALLBACK_ACCESSORIES = {
@@ -41,13 +43,17 @@ const FALLBACK_ACCESSORIES = {
   headband: { id: 'headband', name: 'Thunder Headband', icon: '🎀' },
   goggles: { id: 'goggles', name: 'Explorer Goggles', icon: '🥽' },
   halo: { id: 'halo', name: 'Starlight Halo', icon: '💫' },
+  visor: { id: 'visor', name: 'Astral Visor', icon: '🕶️' },
+  antlers: { id: 'antlers', name: 'Grove Blossom', icon: '🌸' },
 };
 
 const FALLBACK_AURAS = {
-  none: { id: 'none', name: 'No Aura', icon: '◎' },
-  stars: { id: 'stars', name: 'Starlight Sparkles', icon: '✨' },
-  hearts: { id: 'hearts', name: 'Heart Glow', icon: '💖' },
-  lightning: { id: 'lightning', name: 'Volt Sparks', icon: '⚡' },
+  none: { id: 'none', name: 'No Aura', icon: '⚪', color: '#94a3b8' },
+  stars: { id: 'stars', name: 'Starlight Sparks', icon: '✨', color: '#fde047' },
+  hearts: { id: 'hearts', name: 'Buddy Hearts', icon: '💖', color: '#f472b6' },
+  lightning: { id: 'lightning', name: 'Storm Sparks', icon: '⚡', color: '#38bdf8' },
+  blossom: { id: 'blossom', name: 'Sakura Petals', icon: '🌸', color: '#fb7185' },
+  cosmic: { id: 'cosmic', name: 'Astral Orbit', icon: '🪐', color: '#2dd4bf' },
 };
 
 const FALLBACK_BIOME_OFFSETS = {
@@ -56,18 +62,47 @@ const FALLBACK_BIOME_OFFSETS = {
   water: 0,
   volcano: 1,
   peak: 2,
+  grove: 2,
 };
 
+function escapeHtml(raw) {
+  return String(raw ?? '')
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
+}
+
+export function getBondTierSafe(rawBond) {
+  const num = Number(rawBond);
+  const bond = Number.isFinite(num) ? Math.max(0, Math.min(100, Math.round(num))) : 20;
+  if (typeof PokemonMod.getBondTier === 'function') {
+    const res = PokemonMod.getBondTier(bond);
+    if (res && typeof res === 'object') return res;
+  }
+  if (bond >= 85) {
+    return { tier: 3, id: 'soulmate', label: 'Best Buddy', icon: '🌟', xpMult: 1.2, critBonus: 0.04, endureChance: 0.25 };
+  }
+  if (bond >= 60) {
+    return { tier: 2, id: 'trusted', label: 'Trusted Buddy', icon: '💖', xpMult: 1.12, critBonus: 0.04, endureChance: 0.15 };
+  }
+  if (bond >= 40) {
+    return { tier: 1, id: 'friend', label: 'Good Friend', icon: '💛', xpMult: 1.08, critBonus: 0.02, endureChance: 0 };
+  }
+  return { tier: 0, id: 'partner', label: 'New Partner', icon: '🌱', xpMult: 1.0, critBonus: 0, endureChance: 0 };
+}
+
 export function getTrainerAppearanceOptions() {
-  const stylesMap = Config.TRAINER_STYLES && Object.keys(Config.TRAINER_STYLES).length
+  const stylesMap = Config.TRAINER_STYLES && Object.keys(Config.TRAINER_STYLES).length >= Object.keys(FALLBACK_STYLES).length
     ? Config.TRAINER_STYLES
-    : (TRAINER_STYLES && Object.keys(TRAINER_STYLES).length ? TRAINER_STYLES : FALLBACK_STYLES);
-  const accMap = Config.TRAINER_ACCESSORIES && Object.keys(Config.TRAINER_ACCESSORIES).length
+    : { ...FALLBACK_STYLES, ...(Config.TRAINER_STYLES || TRAINER_STYLES || {}) };
+  const accMap = Config.TRAINER_ACCESSORIES && Object.keys(Config.TRAINER_ACCESSORIES).length >= Object.keys(FALLBACK_ACCESSORIES).length
     ? Config.TRAINER_ACCESSORIES
-    : (TRAINER_ACCESSORIES && Object.keys(TRAINER_ACCESSORIES).length ? TRAINER_ACCESSORIES : FALLBACK_ACCESSORIES);
-  const aurasMap = Config.TRAINER_AURAS && Object.keys(Config.TRAINER_AURAS).length
+    : { ...FALLBACK_ACCESSORIES, ...(Config.TRAINER_ACCESSORIES || TRAINER_ACCESSORIES || {}) };
+  const aurasMap = Config.TRAINER_AURAS && Object.keys(Config.TRAINER_AURAS).length >= Object.keys(FALLBACK_AURAS).length
     ? Config.TRAINER_AURAS
-    : FALLBACK_AURAS;
+    : { ...FALLBACK_AURAS, ...(Config.TRAINER_AURAS || {}) };
   return { stylesMap, accMap, aurasMap };
 }
 
@@ -347,6 +382,8 @@ export class PokedexUI {
     this.swapBoxIndex = null;
     this.evoBanner = null;
     this.editingNicknameUid = null;
+    this._fallbackStyle = null;
+    this._fallbackAcc = null;
     this._fallbackAura = null;
 
     this.bindUI();
@@ -388,6 +425,8 @@ export class PokedexUI {
     this.swapBoxIndex = null;
     this.evoBanner = null;
     this.editingNicknameUid = null;
+    this._fallbackStyle = null;
+    this._fallbackAcc = null;
     this._fallbackAura = null;
     if (tab === 'dex') {
       this.dexFilter = 'all';
@@ -402,6 +441,8 @@ export class PokedexUI {
     const wasOpen = this.isOpen();
     this.evoBanner = null;
     this.editingNicknameUid = null;
+    this._fallbackStyle = null;
+    this._fallbackAcc = null;
     this._fallbackAura = null;
     if (this.modalEl) {
       this.modalEl.hidden = true;
@@ -507,6 +548,7 @@ export class PokedexUI {
       { id: 'water', label: '🌊 Lagoon' },
       { id: 'volcano', label: '🌋 Caldera' },
       { id: 'peak', label: '❄️ Peak' },
+      { id: 'grove', label: '🌸 Grove' },
       { id: 'starter', label: '🌟 Starters' },
     ];
     if (!filterDefs.some((f) => f.id === this.dexFilter)) {
@@ -680,6 +722,7 @@ export class PokedexUI {
     const itemEvos = typeof mon.getAvailableItemEvolutions === 'function'
       ? mon.getAvailableItemEvolutions(bagGems)
       : [];
+    const rules = EVOLUTIONS?.[mon.speciesId] || [];
 
     const ready = [];
     const hints = [];
@@ -697,6 +740,8 @@ export class PokedexUI {
     for (const opt of itemEvos) {
       if (levelEvo && opt.toId === levelEvo.toId) continue;
       const targetName = opt.toSpecies?.name || SPECIES[opt.toId]?.name || 'Evolution';
+      const matchedRule = rules.find((rule) => rule.to === opt.toId && rule.item === opt.item);
+      const minLevel = Number(opt.minLevel ?? matchedRule?.minLevel);
       if (opt.canUse) {
         ready.push({
           toId: opt.toId,
@@ -705,12 +750,14 @@ export class PokedexUI {
           label: `✨ ${opt.itemInfo?.icon || '💎'} Evolve → ${targetName}!`,
         });
       } else {
-        hints.push(`${opt.itemInfo?.icon || '💎'} Evolves with ${opt.itemInfo?.name || opt.item}`);
+        const levelHint = Number.isFinite(minLevel) && mon.level < minLevel
+          ? ` (or Lv.${minLevel})`
+          : '';
+        hints.push(`${opt.itemInfo?.icon || '💎'} Evolves with ${opt.itemInfo?.name || opt.item}${levelHint}`);
       }
     }
 
     if (!levelEvo) {
-      const rules = EVOLUTIONS?.[mon.speciesId] || [];
       for (const rule of rules) {
         if (!rule.item && rule.minLevel && mon.level < rule.minLevel) {
           const targetName = SPECIES[rule.to]?.name || 'Evolution';
@@ -787,6 +834,52 @@ export class PokedexUI {
       levelsGained: Number(res.levelResult?.levelsGained) || 0,
       newLevel: Number(res.levelResult?.newLevel ?? mon.level) || mon.level,
       pendingEvoName,
+      newBadges: Array.isArray(res.newBadges) ? res.newBadges : [],
+    };
+
+    this.onTeamChanged?.();
+    if (res.newBadges?.length) {
+      this.onBadgesUnlocked?.(res.newBadges);
+    }
+    this.render();
+  }
+
+  triggerBuddyCheer(mon) {
+    if (!mon) return;
+    let res = null;
+    if (typeof this.storage.cheerPokemon === 'function') {
+      res = this.storage.cheerPokemon(mon.uid);
+    } else {
+      const prevBond = Number.isFinite(Number(mon.bond)) ? Number(mon.bond) : 20;
+      const nextBond = typeof mon.gainBond === 'function'
+        ? mon.gainBond(10)
+        : Math.min(100, Math.max(0, Math.round(prevBond + 10)));
+      if (typeof mon.gainBond !== 'function') mon.bond = nextBond;
+      const newBadges = this.storage.evaluateBadges?.(false) || [];
+      this.storage.save?.();
+      res = {
+        cheered: true,
+        bond: nextBond,
+        tier: getBondTierSafe(nextBond),
+        newBadges,
+      };
+    }
+    if (!res?.cheered) return;
+
+    if (typeof this.audio?.playBuddyCheer === 'function') {
+      this.audio.playBuddyCheer();
+    } else {
+      this.audio?.playMenuBlip?.(820);
+    }
+
+    const finalBond = Number.isFinite(Number(res.bond)) ? Number(res.bond) : (Number(mon.bond) || 20);
+    const tier = res.tier || getBondTierSafe(finalBond);
+    this.evoBanner = {
+      kind: 'cheer',
+      monName: mon.displayName || mon.name,
+      isShiny: Boolean(mon.isShiny),
+      bond: finalBond,
+      tier,
       newBadges: Array.isArray(res.newBadges) ? res.newBadges : [],
     };
 
@@ -886,8 +979,24 @@ export class PokedexUI {
 
         copy.innerHTML = `
           <div class="evo-celebration-eyebrow">⚡ STARLIGHT POWER UP • ★${b.newTier}${b.newTier >= maxTier ? ' MAX!' : ''}</div>
-          <strong>${b.isShiny ? '✨ ' : ''}${b.monName} reached Star Rank ★${b.newTier}!</strong>
+          <strong>${b.isShiny ? '✨ ' : ''}${escapeHtml(b.monName)} reached Star Rank ★${b.newTier}!</strong>
           <p>${statText} • ${xpText}${extraBits.length ? ` • ${extraBits.join(' • ')}` : ''}</p>
+        `;
+      } else if (this.evoBanner.kind === 'cheer') {
+        const b = this.evoBanner;
+        const tier = b.tier || getBondTierSafe(b.bond);
+        const perks = [];
+        if (tier.xpMult > 1) perks.push(`+${Math.round((tier.xpMult - 1) * 100)}% XP`);
+        if (tier.critBonus > 0) perks.push(`+${Math.round(tier.critBonus * 100)}% Crit`);
+        if (tier.endureChance > 0) perks.push(`${Math.round(tier.endureChance * 100)}% Endure`);
+        const perkText = perks.length ? ` • Perks: ${perks.join(', ')}` : ' • Reach 40+ Bond for bonus XP & Crit!';
+        const badgeText = b.newBadges?.length
+          ? ` • 🏅 Badge Unlocked: ${b.newBadges.map((badge) => escapeHtml(badge.name)).join(', ')}!`
+          : '';
+        copy.innerHTML = `
+          <div class="evo-celebration-eyebrow">💖 BUDDY CHEER • ${tier.icon} ${escapeHtml(tier.label.toUpperCase())}</div>
+          <strong>${b.isShiny ? '✨ ' : ''}${escapeHtml(b.monName)} beamed with joy! (Bond ${b.bond}/100)</strong>
+          <p>${tier.icon} ${escapeHtml(tier.label)}${perkText}${badgeText}</p>
         `;
       } else {
         const moveNames = (this.evoBanner.unlockedMoves || [])
@@ -895,7 +1004,7 @@ export class PokedexUI {
           .filter(Boolean);
         copy.innerHTML = `
           <div class="evo-celebration-eyebrow">🌟 STARLIGHT EVOLUTION COMPLETE!</div>
-          <strong>${this.evoBanner.isShiny ? '✨ ' : ''}${this.evoBanner.oldName} evolved into ${this.evoBanner.newName}!</strong>
+          <strong>${this.evoBanner.isShiny ? '✨ ' : ''}${escapeHtml(this.evoBanner.oldName)} evolved into ${escapeHtml(this.evoBanner.newName)}!</strong>
           ${moveNames.length ? `<p>Unlocked moves: ${moveNames.join(' • ')}</p>` : '<p>Stats surged higher for new island adventures!</p>'}
         `;
       }
@@ -951,8 +1060,8 @@ export class PokedexUI {
       const xpPct = Math.min(100, Math.round((mon.xp / Math.max(1, mon.xpToNext)) * 100));
       const displayName = mon.displayName || mon.name;
       const isNicknamed = Boolean(mon.nickname && mon.nickname !== mon.name);
-      const bond = Number.isFinite(Number(mon.bond)) ? Number(mon.bond) : 20;
-      const isBestBuddy = bond >= 60;
+      const bond = Number.isFinite(Number(mon.bond)) ? Math.max(0, Math.min(100, Math.round(Number(mon.bond)))) : 20;
+      const bondTier = getBondTierSafe(bond);
 
       const card = document.createElement('div');
       card.className = `team-card ${idx === 0 ? 'is-lead' : ''} ${mon.isShiny ? 'is-shiny-card' : ''}`;
@@ -994,7 +1103,7 @@ export class PokedexUI {
         <span class="type-pill" style="background:${typeInfo.bg};border-color:${typeInfo.color}">${typeInfo.icon} ${typeInfo.label}</span>
         <span class="rank-pill${tier >= maxTier ? ' is-max-rank' : tier > 0 ? ' is-upgraded' : ''}">★${tier}</span>
         ${mon.isShiny ? '<span class="shiny-badge">✨ Shimmer</span>' : ''}
-        <span class="bond-badge ${isBestBuddy ? 'is-best-buddy' : ''}">${isBestBuddy ? '💖 Best Buddy • +Crit' : `♥ Bond ${bond}`}</span>
+        <span class="bond-badge is-tier-${bondTier.tier}${bondTier.tier >= 2 ? ' is-best-buddy' : ''}" title="${escapeHtml(bondTier.label)}">${bondTier.icon} ${escapeHtml(bondTier.label)} • Bond ${bond}/100</span>
       `;
       meta.appendChild(pillRow);
 
@@ -1137,6 +1246,14 @@ export class PokedexUI {
         const actionBtnsRight = document.createElement('div');
         actionBtnsRight.className = 'team-card-actions-right';
 
+        const cheerBtn = document.createElement('button');
+        cheerBtn.type = 'button';
+        cheerBtn.className = 'mini-btn cheer-btn';
+        cheerBtn.textContent = '💖 Cheer Buddy';
+        cheerBtn.title = `Cheer ${displayName} to raise Bond (+10)`;
+        cheerBtn.addEventListener('click', () => this.triggerBuddyCheer(mon));
+        actionBtnsRight.appendChild(cheerBtn);
+
         if (this.editingNicknameUid !== mon.uid) {
           const nickBtn = document.createElement('button');
           nickBtn.type = 'button';
@@ -1216,12 +1333,15 @@ export class PokedexUI {
         const lvLine = document.createElement('small');
         lvLine.textContent = `Lv.${mon.level}`;
         const tier = Math.max(0, Number(mon.upgradeTier) || 0);
+        const boxBond = Number.isFinite(Number(mon.bond)) ? Math.max(0, Math.min(100, Math.round(Number(mon.bond)))) : 20;
+        const boxBondTier = getBondTierSafe(boxBond);
         const pillLine = document.createElement('div');
         pillLine.className = 'box-card-pills';
         pillLine.innerHTML = `
           <span class="type-pill" style="background:${typeInfo.bg};border-color:${typeInfo.color}">${typeInfo.icon} ${typeInfo.label}</span>
           <span class="rank-pill${tier >= maxTier ? ' is-max-rank' : tier > 0 ? ' is-upgraded' : ''}">★${tier}</span>
           ${mon.isShiny ? '<span class="shiny-badge">✨ Shimmer</span>' : ''}
+          <span class="bond-badge is-compact is-tier-${boxBondTier.tier}${boxBondTier.tier >= 2 ? ' is-best-buddy' : ''}" title="${escapeHtml(boxBondTier.label)}">${boxBondTier.icon} ${escapeHtml(boxBondTier.label)} • Bond ${boxBond}/100</span>
         `;
         info.appendChild(nameLine);
         info.appendChild(lvLine);
@@ -1255,9 +1375,18 @@ export class PokedexUI {
 
         const actionsRow = document.createElement('div');
         actionsRow.className = 'box-card-actions';
+        if (this.swapBoxIndex === null) {
+          const cheerBtn = document.createElement('button');
+          cheerBtn.type = 'button';
+          cheerBtn.className = 'mini-btn cheer-btn is-compact';
+          cheerBtn.textContent = '💖 Cheer Buddy';
+          cheerBtn.title = `Cheer ${displayName} to raise Bond (+10)`;
+          cheerBtn.addEventListener('click', () => this.triggerBuddyCheer(mon));
+          actionsRow.appendChild(cheerBtn);
+        }
         const swapBtn = document.createElement('button');
         swapBtn.type = 'button';
-        swapBtn.className = 'mini-btn';
+        swapBtn.className = 'mini-btn box-swap-btn';
         swapBtn.textContent = this.swapBoxIndex === boxIdx ? 'Selected' : 'Swap';
         swapBtn.addEventListener('click', () => {
           this.audio.playMenuBlip(680);
@@ -1307,7 +1436,7 @@ export class PokedexUI {
         <span class="guide-compass-badge">${guidance?.icon || '🧭'} STARLIGHT COMPASS OBJECTIVE</span>
         <span class="guide-compass-dir">${dirText}${Number.isFinite(guidance?.distance) && guidance.distance > 0 ? ` • ${guidance.distance} tiles` : ''}</span>
       </div>
-      <h3 class="guide-compass-title">${guidance?.title || 'Explore Starlight Island & Discover All 6 Biomes!'}</h3>
+      <h3 class="guide-compass-title">${guidance?.title || 'Explore Starlight Island & Discover All 7 Biomes!'}</h3>
       <div class="guide-compass-stats">
         ${targetBiome ? `<span>📍 Destination: <strong>${targetBiome.icon} ${targetBiome.name}</strong></span>` : ''}
         <span>⚡ Trainer Power: <strong>Lv.${powerLevel}</strong></span>
@@ -1534,12 +1663,21 @@ export class PokedexUI {
     const accessories = Object.values(accMap);
     const auras = Object.values(aurasMap);
 
-    const rawAura = appearance.aura ?? this._fallbackAura ?? 'none';
+    const rawStyle = this._fallbackStyle ?? appearance.styleId ?? 'default';
+    const currentStyleId = stylesMap[rawStyle] ? rawStyle : (styles[0]?.id || 'default');
+    const rawAcc = this._fallbackAcc ?? appearance.accessory ?? 'cap';
+    const currentAccId = accMap[rawAcc] ? rawAcc : (accessories[0]?.id || 'cap');
+    const rawAura = this._fallbackAura ?? appearance.aura ?? 'none';
     const currentAura = aurasMap[rawAura] ? rawAura : 'none';
-    const currentStyle = stylesMap[appearance.styleId] || styles[0];
-    const currentAcc = accMap[appearance.accessory] || accessories[0];
+    const currentStyle = stylesMap[currentStyleId] || styles[0];
+    const currentAcc = accMap[currentAccId] || accessories[0];
     const currentAuraInfo = aurasMap[currentAura] || auras[0];
-    const previewAppearance = appearance.aura ? appearance : { ...appearance, aura: currentAura };
+    const previewAppearance = {
+      ...appearance,
+      styleId: currentStyleId,
+      accessory: currentAccId,
+      aura: currentAura,
+    };
 
     const hero = document.createElement('div');
     hero.className = 'trainer-studio-hero';
@@ -1572,9 +1710,10 @@ export class PokedexUI {
     capeBtn.textContent = `🦸 Starlight Cape: ${appearance.cape ? 'ON' : 'OFF'}`;
     capeBtn.addEventListener('click', () => {
       const updated = this.storage.updateAppearance?.({ cape: !appearance.cape }) || { ...previewAppearance, cape: !appearance.cape };
+      const resolvedForDraw = { ...previewAppearance, ...updated, styleId: currentStyleId, accessory: currentAccId, aura: currentAura, cape: Boolean(updated?.cape) };
       this.audio?.playMenuBlip?.(760);
-      drawTrainerPortrait(previewCanvas, profile.trainerId, updated);
-      this.onAppearanceChanged?.();
+      drawTrainerPortrait(previewCanvas, profile.trainerId, resolvedForDraw);
+      this.onAppearanceChanged?.(resolvedForDraw);
       this.render();
     });
     heroInfo.appendChild(capeBtn);
@@ -1591,7 +1730,7 @@ export class PokedexUI {
     const styleGrid = document.createElement('div');
     styleGrid.className = 'style-chip-grid';
     for (const style of styles) {
-      const look = typeof resolveTrainerLook === 'function'
+      const look = (typeof resolveTrainerLook === 'function' && (style.id === 'default' || Config.TRAINER_STYLES?.[style.id]))
         ? resolveTrainerLook(profile.trainerId, { ...previewAppearance, styleId: style.id })
         : style;
       const primary = look?.outfitPrimary || style.outfitPrimary || '#a855f7';
@@ -1600,7 +1739,7 @@ export class PokedexUI {
       const chip = document.createElement('button');
       chip.type = 'button';
       chip.dataset.styleId = style.id;
-      chip.className = `style-chip ${appearance.styleId === style.id ? 'is-active' : ''}`;
+      chip.className = `style-chip ${currentStyleId === style.id ? 'is-active' : ''}`;
       chip.innerHTML = `
         <span class="style-swatch-pair" aria-hidden="true">
           <span class="style-swatch" style="background:${primary}"></span>
@@ -1610,9 +1749,11 @@ export class PokedexUI {
       `;
       chip.addEventListener('click', () => {
         const updated = this.storage.updateAppearance?.({ styleId: style.id }) || { ...previewAppearance, styleId: style.id };
+        this._fallbackStyle = updated?.styleId !== style.id ? style.id : null;
+        const resolvedForDraw = { ...previewAppearance, ...updated, styleId: style.id };
         this.audio?.playMenuBlip?.(720);
-        drawTrainerPortrait(previewCanvas, profile.trainerId, updated);
-        this.onAppearanceChanged?.();
+        drawTrainerPortrait(previewCanvas, profile.trainerId, resolvedForDraw);
+        this.onAppearanceChanged?.(resolvedForDraw);
         this.render();
       });
       styleGrid.appendChild(chip);
@@ -1630,13 +1771,15 @@ export class PokedexUI {
       const chip = document.createElement('button');
       chip.type = 'button';
       chip.dataset.accessoryId = acc.id;
-      chip.className = `accessory-chip ${appearance.accessory === acc.id ? 'is-active' : ''}`;
+      chip.className = `accessory-chip ${currentAccId === acc.id ? 'is-active' : ''}`;
       chip.innerHTML = `<span class="accessory-chip-icon">${acc.icon || '🧢'}</span><span>${acc.name}</span>`;
       chip.addEventListener('click', () => {
         const updated = this.storage.updateAppearance?.({ accessory: acc.id }) || { ...previewAppearance, accessory: acc.id };
+        this._fallbackAcc = updated?.accessory !== acc.id ? acc.id : null;
+        const resolvedForDraw = { ...previewAppearance, ...updated, accessory: acc.id };
         this.audio?.playMenuBlip?.(740);
-        drawTrainerPortrait(previewCanvas, profile.trainerId, updated);
-        this.onAppearanceChanged?.();
+        drawTrainerPortrait(previewCanvas, profile.trainerId, resolvedForDraw);
+        this.onAppearanceChanged?.(resolvedForDraw);
         this.render();
       });
       accGrid.appendChild(chip);
@@ -1658,11 +1801,11 @@ export class PokedexUI {
       chip.innerHTML = `<span class="aura-chip-icon">${aura.icon || '✨'}</span><span>${aura.name}</span>`;
       chip.addEventListener('click', () => {
         const updated = this.storage.updateAppearance?.({ aura: aura.id }) || { ...previewAppearance, aura: aura.id };
-        this._fallbackAura = updated?.aura === undefined ? aura.id : null;
-        const resolvedForDraw = updated?.aura !== undefined ? updated : { ...updated, aura: aura.id };
+        this._fallbackAura = updated?.aura !== aura.id ? aura.id : null;
+        const resolvedForDraw = { ...previewAppearance, ...updated, aura: aura.id };
         this.audio?.playMenuBlip?.(760);
         drawTrainerPortrait(previewCanvas, profile.trainerId, resolvedForDraw);
-        this.onAppearanceChanged?.();
+        this.onAppearanceChanged?.(resolvedForDraw);
         this.render();
       });
       auraGrid.appendChild(chip);
