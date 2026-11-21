@@ -31,6 +31,10 @@ const DIGIT_SLOTS = {
   Digit2: 1,
   Digit3: 2,
   Digit4: 3,
+  Numpad1: 0,
+  Numpad2: 1,
+  Numpad3: 2,
+  Numpad4: 3,
   1: 0,
   2: 1,
   3: 2,
@@ -164,7 +168,7 @@ export class InputController {
         return;
       }
 
-      if (e.code === 'Space' || e.code === 'KeyZ' || (e.code === 'Enter' && tag !== 'BUTTON')) {
+      if (e.code === 'Space' || e.code === 'KeyZ' || ((e.code === 'Enter' || e.code === 'NumpadEnter') && tag !== 'BUTTON')) {
         if (e.code === 'Space') e.preventDefault();
         this.emit('action');
       } else if (e.code === 'Escape' || e.code === 'Backspace' || e.code === 'KeyX') {
@@ -187,6 +191,7 @@ export class InputController {
     });
 
     window.addEventListener('blur', () => this.clearAll());
+    window.addEventListener('pagehide', () => this.clearAll());
     if (typeof document !== 'undefined') {
       document.addEventListener('visibilitychange', () => {
         if (document.hidden) this.clearAll();
