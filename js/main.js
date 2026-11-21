@@ -4,6 +4,7 @@ import {
   EVOLUTION_ITEMS,
   FIELD_QUESTS,
   GAME_META,
+  RIVAL_TRAINERS,
   SHRINES,
   SPECIES,
   STARTER_IDS,
@@ -12,6 +13,7 @@ import {
   getBiomeAt,
   getBiomeDiscoveryStats,
   getCompassGuidance,
+  resolveTrainerLook,
 } from './config.js';
 import { attachPokemonSprite, createPokemon, rollWildPokemon } from './pokemon.js';
 import { storage } from './storage.js';
@@ -153,6 +155,14 @@ class GameApp {
       audio,
       onTeamChanged: () => this.refreshHud(),
       onBadgesUnlocked: (badges) => this.showBadgeToast(badges),
+      onAppearanceChanged: () => {
+        const p = storage.getActiveProfile();
+        if (p) {
+          this.applyTrainerTheme(p.trainerId, p.appearance);
+          drawTrainerPortrait(this.hudPortraitEl, p.trainerId, p.appearance);
+        }
+        this.overworld.syncFollower?.();
+      },
       onClose: () => {
         this.syncControlVisibility();
         this.syncOverworldPause();
@@ -278,8 +288,12 @@ class GameApp {
     }
   }
 
-  applyTrainerTheme(trainerId) {
-    const trainer = TRAINERS[trainerId] || TRAINERS.violet;
+  applyTrainerTheme(trainerId, appearance = null) {
+    const profile = appearance === null ? storage.getProfile?.(trainerId) : null;
+    const effectiveAppearance = appearance ?? profile?.appearance ?? null;
+    const trainer = typeof resolveTrainerLook === 'function'
+      ? resolveTrainerLook(trainerId, effectiveAppearance)
+      : (TRAINERS[trainerId] || TRAINERS.violet);
     const root = document.documentElement.style;
     root.setProperty('--trainer-accent', trainer.accent);
     root.setProperty('--trainer-accent-dark', trainer.accentDark);
@@ -301,6 +315,19 @@ class GameApp {
   }
 
   bindHudAndModalEvents() {
+    this.hudPortraitEl?.addEventListener('click', () => {
+      audio.playMenuBlip(680);
+      this.openPokedex('trainer');
+    });
+
+    this.hudPortraitEl?.addEventListener('keydown', (e) => {
+      if (e.code === 'Enter' || e.code === 'Space') {
+        e.preventDefault();
+        audio.playMenuBlip(680);
+        this.openPokedex('trainer');
+      }
+    });
+
     this.hudDexBtn?.addEventListener('click', () => {
       audio.playMenuBlip(680);
       this.openPokedex('dex');
@@ -531,6 +558,18 @@ class GameApp {
         this.openPokedex('dex');
       }
     });
+
+    this.input.on('navigate', (dir) => {
+      if (this.battle.active) {
+        this.battle.moveSelectionCursor?.(dir);
+      }
+    });
+
+    this.input.on('moveSlot', (slot) => {
+      if (this.battle.active) {
+        this.battle.selectMoveBySlot?.(slot);
+      }
+    });
   }
 
   toggleMute() {
@@ -572,8 +611,8 @@ class GameApp {
     this.syncControlVisibility();
     this.updateCompassHud();
 
-    drawTrainerPortrait(document.getElementById('portrait-violet'), 'violet');
-    drawTrainerPortrait(document.getElementById('portrait-ozias'), 'ozias');
+    drawTrainerPortrait(document.getElementById('portrait-violet'), 'violet', storage.getProfile('violet')?.appearance);
+    drawTrainerPortrait(document.getElementById('portrait-ozias'), 'ozias', storage.getProfile('ozias')?.appearance);
 
     const vSum = storage.getProfileSummary('violet');
     const oSum = storage.getProfileSummary('ozias');
@@ -585,8 +624,8 @@ class GameApp {
 
   selectTrainer(trainerId) {
     storage.selectTrainer(trainerId);
-    this.applyTrainerTheme(trainerId);
     const profile = storage.getActiveProfile();
+    this.applyTrainerTheme(trainerId, profile?.appearance);
     if (!profile.starterId) {
       this.showStarterScreen(trainerId);
     } else {
@@ -661,7 +700,8 @@ class GameApp {
     this.starterScreenEl.hidden = true;
     this.gameShellEl.hidden = false;
 
-    drawTrainerPortrait(this.hudPortraitEl, profile.trainerId);
+    this.applyTrainerTheme(profile.trainerId, profile.appearance);
+    drawTrainerPortrait(this.hudPortraitEl, profile.trainerId, profile.appearance);
     this.hudTrainerNameEl.textContent = TRAINERS[profile.trainerId]?.name || 'Trainer';
     this.refreshHud();
 
@@ -678,7 +718,7 @@ class GameApp {
       const lead = profile.team[0];
       const trainerName = TRAINERS[profile.trainerId]?.name || 'Trainer';
       this.openDialogue(
-        `${trainerName} & ${lead?.name || 'Partner'} set out on Starlight Island! Follow the Starlight Compass to Whispering Forest, Crystal Cavern, Sapphire Lagoon, Ember Caldera, and Starfall Peak!`
+        `${trainerName} & ${lead?.displayName || lead?.name || 'Partner'} set out on Starlight Island! Follow the Starlight Compass to Whispering Forest, Crystal Cavern, Sapphire Lagoon, Ember Caldera, and Starfall Peak!`
       );
     }
   }
@@ -689,9 +729,15 @@ class GameApp {
 
     storage.syncPokedex?.(profile, false);
 
+    this.applyTrainerTheme(profile.trainerId, profile.appearance);
+    drawTrainerPortrait(this.hudPortraitEl, profile.trainerId, profile.appearance);
+    if (this.hudTrainerNameEl) {
+      this.hudTrainerNameEl.textContent = TRAINERS[profile.trainerId]?.name || 'Trainer';
+    }
+
     const lead = profile.team[0];
     if (lead) {
-      this.hudLeadLabelEl.textContent = `Lv.${lead.level} ${lead.isShiny ? '✨ ' : ''}${lead.name}`;
+      this.hudLeadLabelEl.textContent = `Lv.${lead.level} ${lead.isShiny ? '✨ ' : ''}${lead.displayName || lead.name}`;
       const pct = Math.max(0, Math.min(100, Math.round((lead.hp / Math.max(1, lead.maxHp)) * 100)));
       this.hudLeadHpEl.style.width = `${pct}%`;
       this.hudLeadHpEl.style.backgroundColor = pct <= 20 ? '#ef4444' : pct <= 50 ? '#f59e0b' : '#10b981';
@@ -864,6 +910,7 @@ class GameApp {
     const parts = [];
     if (rewards.potions) parts.push(`+${rewards.potions} Berry Potion${rewards.potions > 1 ? 's' : ''}`);
     if (rewards.greatBalls) parts.push(`+${rewards.greatBalls} Great Ball${rewards.greatBalls > 1 ? 's' : ''}`);
+    if (rewards.starBalls) parts.push(`+${rewards.starBalls} Star Ball${rewards.starBalls > 1 ? 's' : ''}`);
     if (rewards.gems && typeof rewards.gems === 'object') {
       for (const [gemId, count] of Object.entries(rewards.gems)) {
         if (count > 0) {
@@ -938,6 +985,8 @@ class GameApp {
       } else {
         this.startShrineEncounter(shrine);
       }
+    } else if (target.type === 'rival') {
+      this.startRivalEncounter(target.data);
     } else if (target.type === 'npc') {
       this.handleNpcInteract(target.data);
     } else if (target.type === 'landmark') {
@@ -953,13 +1002,20 @@ class GameApp {
   handleHealSpot(explicitInteract = false) {
     const profile = storage.getActiveProfile();
     if (!profile) return;
-    const anyInjured = profile.team.some((m) => m.hp < m.maxHp) || profile.bag.potions < 5;
+    const anyLowPp = profile.team.some((m) => {
+      const moves = typeof m.getMoveObjects === 'function' ? m.getMoveObjects() : [];
+      return moves.some((mv) => {
+        const pp = m.getMovePp?.(mv.id);
+        return pp && pp.current < pp.max;
+      });
+    });
+    const anyInjured = profile.team.some((m) => m.hp < m.maxHp) || anyLowPp || profile.bag.potions < 5;
     if (!anyInjured && !explicitInteract) return;
 
     storage.healTeam(true);
     this.refreshHud();
     audio.playHealChime();
-    this.openDialogue('✨ Starlight Fountain restored your whole team to full HP and refilled Berry Potions!');
+    this.openDialogue('✨ Starlight Fountain restored your whole team to full HP & PP and refilled Berry Potions!');
   }
 
   getAverageTeamLevel() {
@@ -969,7 +1025,7 @@ class GameApp {
     return sum / profile.team.length;
   }
 
-  async triggerEncounterTransition() {
+  async triggerEncounterTransition(bgmTheme = 'battle') {
     const token = ++this.encounterToken;
     this.encounterTransitioning = true;
     this.manualBattlePad = false;
@@ -995,7 +1051,7 @@ class GameApp {
       }
 
       if (token !== this.encounterToken) return false;
-      audio.playBGM('battle');
+      audio.playBGM(THEMES[bgmTheme] ? bgmTheme : 'battle');
       return true;
     } finally {
       if (token === this.encounterToken) {
@@ -1012,7 +1068,7 @@ class GameApp {
     const wild = rollWildPokemon(biomeId, this.getAverageTeamLevel(), encounterMeta);
     if (!wild) return;
 
-    const ready = await this.triggerEncounterTransition();
+    const ready = await this.triggerEncounterTransition('battle');
     if (!ready || this.battle.active) return;
     this.manualBattlePad = false;
     this.battle.start({
@@ -1030,7 +1086,7 @@ class GameApp {
     if (this.battle.active || this.encounterTransitioning) return;
     if (!storage.ensureHealthyParty()) return;
     const guardian = createPokemon(shrine.guardianId, shrine.level, shrine.biome);
-    const ready = await this.triggerEncounterTransition();
+    const ready = await this.triggerEncounterTransition('shrine');
     if (!ready || this.battle.active) return;
     this.manualBattlePad = false;
     this.battle.start({
@@ -1044,17 +1100,71 @@ class GameApp {
     this.updateCompassHud();
   }
 
+  async startRivalEncounter(rivalInput) {
+    const rival = typeof rivalInput === 'string'
+      ? Object.values(RIVAL_TRAINERS || {}).find((r) => r?.id === rivalInput) || null
+      : rivalInput;
+    if (!rival || this.battle.active || this.encounterTransitioning) return;
+    if (!storage.ensureHealthyParty()) return;
+
+    const profile = storage.getActiveProfile();
+    const isRematch = Boolean(profile?.rivalsDefeated?.includes(rival.id));
+    const levelBoost = isRematch ? 2 : 0;
+    const rawParty = Array.isArray(rival.party) && rival.party.length > 0 ? rival.party : [{ speciesId: 25, level: 6 }];
+    const enemyParty = rawParty
+      .map((entry) => {
+        const spId = entry.speciesId ?? entry.id;
+        const lv = Math.min(50, Math.max(1, (Number(entry.level) || 6) + levelBoost));
+        return SPECIES[spId] ? createPokemon(spId, lv, rival.biome || 'forest') : null;
+      })
+      .filter(Boolean);
+    if (enemyParty.length === 0) return;
+
+    const ready = await this.triggerEncounterTransition(THEMES.rival ? 'rival' : 'battle');
+    if (!ready || this.battle.active) return;
+    this.manualBattlePad = false;
+    this.battle.start({
+      enemy: enemyParty[0],
+      enemyParty,
+      biomeId: rival.biome || 'forest',
+      isShrine: false,
+      shrineData: null,
+      isTrainer: true,
+      trainerData: { ...rival, isRematch },
+    });
+    this.syncControlVisibility();
+    this.syncOverworldPause();
+    this.updateCompassHud();
+  }
+
   handleBattleEnd(result) {
     this.manualBattlePad = false;
+    let pendingDialogue = null;
 
-    if (result.faintedAll) {
+    if (result?.faintedAll) {
       storage.updatePosition(GAME_META.spawn.x, GAME_META.spawn.y, 'down', false);
       storage.healTeam(true);
       this.overworld.syncFromProfile();
       audio.playHealChime();
-      this.openDialogue('Professor Willow gently healed your team back at Starlight Village! You are ready to explore again.');
+      pendingDialogue = 'Professor Willow gently healed your team back at Starlight Village! You are ready to explore again.';
     } else {
       this.overworld.syncFromProfile();
+      if (result?.outcome === 'won' && result?.isTrainer && result?.trainerData) {
+        const rival = result.trainerData;
+        const profileBefore = storage.getActiveProfile();
+        const isRematch = Boolean(rival.isRematch || profileBefore?.rivalsDefeated?.includes(rival.id));
+        const rewards = (isRematch ? rival.rematchRewards : rival.rewards) || {};
+        const winRes = storage.markRivalDefeated?.(rival.id, rewards);
+        this.overworld.refreshInteractHint?.();
+        if (winRes?.newBadges?.length) {
+          this.showBadgeToast(winRes.newBadges);
+        }
+        const rewardText = this.formatRewardSummary(rewards);
+        const winText = rival.winText || rival.defeatText || `${rival.name}: "What an awesome battle!"`;
+        pendingDialogue = rewardText
+          ? `${winText} [Earned ${rewardText}!]`
+          : winText;
+      }
     }
 
     const profile = storage.getActiveProfile();
@@ -1065,6 +1175,10 @@ class GameApp {
     this.blurFocusedControl();
     this.syncControlVisibility();
     this.syncOverworldPause();
+
+    if (pendingDialogue) {
+      this.openDialogue(pendingDialogue);
+    }
   }
 
   showBadgeToast(badges) {
