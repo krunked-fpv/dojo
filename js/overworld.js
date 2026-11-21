@@ -1,4 +1,5 @@
-import { GAME_META, TRAINERS } from './config.js';
+import { GAME_META, SPECIES, TRAINERS, TYPES, getSpriteUrls } from './config.js';
+import { generateSilhouetteDataUri } from './pokemon.js';
 import {
   CHESTS,
   FIELD_QUESTS,
@@ -141,6 +142,21 @@ export class OverworldEngine {
     this.currentBiomeId = null;
     this.lastHintKey = null;
 
+    this.followerTrainerId = null;
+    this.followerUid = null;
+    this.followerSpeciesId = null;
+    this.followerShiny = false;
+    this.followerInitialized = false;
+    this.followerX = GAME_META.spawn?.x ?? 8;
+    this.followerY = GAME_META.spawn?.y ?? 15;
+    this.followerStartX = this.followerX;
+    this.followerStartY = this.followerY;
+    this.followerTargetX = this.followerX;
+    this.followerTargetY = this.followerY;
+    this.followerDir = GAME_META.spawn?.dir || 'down';
+    this.followerMoving = false;
+    this._followerSpriteCache = new Map();
+
     this.particles = [];
     this.rustleTile = null;
     this.rarePatches = [];
@@ -182,6 +198,140 @@ export class OverworldEngine {
     }
   }
 
+  _placeFollowerBehind(px, py, dir = 'down') {
+    const safeDir = DIR_VEC[dir] ? dir : 'down';
+    const vec = DIR_VEC[safeDir];
+    let fx = px;
+    let fy = py;
+
+    const bx = px - vec.dx;
+    const by = py - vec.dy;
+    if (this.isTileWalkable(bx, by)) {
+      fx = bx;
+      fy = by;
+    } else {
+      const cardinals = [
+        [0, 1],
+        [0, -1],
+        [-1, 0],
+        [1, 0],
+      ];
+      for (const [dx, dy] of cardinals) {
+        const cx = px + dx;
+        const cy = py + dy;
+        if (cx === bx && cy === by) continue;
+        if (this.isTileWalkable(cx, cy)) {
+          fx = cx;
+          fy = cy;
+          break;
+        }
+      }
+    }
+
+    this.followerX = fx;
+    this.followerY = fy;
+    this.followerStartX = fx;
+    this.followerStartY = fy;
+    this.followerTargetX = fx;
+    this.followerTargetY = fy;
+    this.followerDir = safeDir;
+    this.followerMoving = false;
+    this.followerInitialized = true;
+  }
+
+  _spawnFollowerChangePuff(profile) {
+    const accent = TRAINERS[profile?.trainerId]?.accent || '#c084fc';
+    this.spawnParticles(this.followerX, this.followerY, '#fde047', 4, true);
+    this.spawnParticles(this.followerX, this.followerY, accent, 2, true);
+  }
+
+  _readLeadMeta(lead) {
+    if (!lead) {
+      return { uid: null, speciesId: null, isShiny: false };
+    }
+    const rawId = Number(lead.speciesId);
+    return {
+      uid: lead.uid ?? null,
+      speciesId: Number.isFinite(rawId) ? rawId : null,
+      isShiny: Boolean(lead.isShiny),
+    };
+  }
+
+  syncFollower() {
+    const profile = this.getProfile();
+    if (!profile) {
+      this.followerUid = null;
+      this.followerSpeciesId = null;
+      this.followerShiny = false;
+      this.followerMoving = false;
+      return this.getFollowerState();
+    }
+
+    if (!this.currentBiomeId && profile.pos) {
+      this.currentBiomeId = getBiomeAt(profile.pos.x, profile.pos.y).id;
+    }
+
+    const lead = profile.team?.[0] || null;
+    const next = this._readLeadMeta(lead);
+
+    if (!this.followerInitialized || this.followerTrainerId !== profile.trainerId) {
+      this._placeFollowerBehind(profile.pos.x, profile.pos.y, profile.pos.dir);
+      this.followerTrainerId = profile.trainerId;
+      this.followerUid = next.uid;
+      this.followerSpeciesId = next.speciesId;
+      this.followerShiny = next.isShiny;
+      return this.getFollowerState();
+    }
+
+    const changed = (
+      next.uid !== this.followerUid ||
+      next.speciesId !== this.followerSpeciesId ||
+      next.isShiny !== this.followerShiny
+    );
+
+    if (changed) {
+      this.followerUid = next.uid;
+      this.followerSpeciesId = next.speciesId;
+      this.followerShiny = next.isShiny;
+      if (lead) {
+        this._spawnFollowerChangePuff(profile);
+      } else {
+        this.followerMoving = false;
+      }
+    }
+
+    return this.getFollowerState();
+  }
+
+  getFollowerState() {
+    const profile = this.getProfile();
+    const lead = profile?.team?.[0] || null;
+    const isMoving = Boolean(this.moving && this.followerMoving);
+    const renderX = isMoving
+      ? this.followerStartX + (this.followerTargetX - this.followerStartX) * this.moveProgress
+      : this.followerX;
+    const renderY = isMoving
+      ? this.followerStartY + (this.followerTargetY - this.followerStartY) * this.moveProgress
+      : this.followerY;
+    const { speciesId } = this._readLeadMeta(lead);
+    const name = lead ? (lead.name ?? SPECIES[speciesId]?.name ?? null) : null;
+
+    return {
+      active: Boolean(lead),
+      uid: lead?.uid ?? null,
+      speciesId,
+      name,
+      isShiny: Boolean(lead?.isShiny),
+      x: this.followerX,
+      y: this.followerY,
+      renderX,
+      renderY,
+      dir: this.followerDir,
+      moving: isMoving,
+      biomeId: this.currentBiomeId,
+    };
+  }
+
   syncFromProfile() {
     this.syncViewportSize();
     const profile = this.getProfile();
@@ -209,6 +359,30 @@ export class OverworldEngine {
 
     const biome = getBiomeAt(profile.pos.x, profile.pos.y);
     this.currentBiomeId = biome.id;
+
+    const canPreserveFollower = (
+      this.followerInitialized &&
+      this.followerTrainerId === profile.trainerId &&
+      Math.abs(this.followerX - profile.pos.x) + Math.abs(this.followerY - profile.pos.y) === 1 &&
+      this.isTileWalkable(this.followerX, this.followerY)
+    );
+
+    if (canPreserveFollower) {
+      this.followerStartX = this.followerX;
+      this.followerStartY = this.followerY;
+      this.followerTargetX = this.followerX;
+      this.followerTargetY = this.followerY;
+      this.followerMoving = false;
+    } else {
+      this._placeFollowerBehind(profile.pos.x, profile.pos.y, profile.pos.dir);
+      this.followerTrainerId = profile.trainerId;
+      const leadMeta = this._readLeadMeta(profile.team?.[0] || null);
+      this.followerUid = leadMeta.uid;
+      this.followerSpeciesId = leadMeta.speciesId;
+      this.followerShiny = leadMeta.isShiny;
+    }
+    this.syncFollower();
+
     this.onBiomeChange?.(biome, false);
     this.refreshInteractHint();
   }
@@ -217,6 +391,10 @@ export class OverworldEngine {
     this.active = active;
     if (active) {
       this.syncFromProfile();
+    } else {
+      this.moving = false;
+      this.followerMoving = false;
+      this.followerInitialized = false;
     }
   }
 
@@ -392,6 +570,10 @@ export class OverworldEngine {
       if (this.rustleTile.timer <= 0) this.rustleTile = null;
     }
 
+    if (this.active || this.followerInitialized) {
+      this.syncFollower();
+    }
+
     if (!this.active || this.paused) return;
     const profile = this.getProfile();
     if (!profile) return;
@@ -405,12 +587,17 @@ export class OverworldEngine {
         this.moveProgress = 0;
         profile.pos.x = this.moveTargetX;
         profile.pos.y = this.moveTargetY;
+        this.followerX = this.followerTargetX;
+        this.followerY = this.followerTargetY;
+        this.followerStartX = this.followerX;
+        this.followerStartY = this.followerY;
+        this.followerMoving = false;
         this.onStepSaved?.(profile.pos.x, profile.pos.y, profile.pos.dir, true);
         this.handleTileArrival(profile.pos.x, profile.pos.y);
       }
     }
 
-    if (!this.moving && heldDir) {
+    if (!this.moving && !this.paused && this.active && heldDir) {
       this.tryStartMove(heldDir);
     }
   }
@@ -421,27 +608,52 @@ export class OverworldEngine {
     const vec = DIR_VEC[dir];
     if (!vec) return;
 
+    if (!this.followerInitialized || this.followerTrainerId !== profile.trainerId) {
+      this.syncFollower();
+    }
+
     const changedDir = profile.pos.dir !== dir;
     profile.pos.dir = dir;
 
-    const nx = profile.pos.x + vec.dx;
-    const ny = profile.pos.y + vec.dy;
+    const prevX = profile.pos.x;
+    const prevY = profile.pos.y;
+    const nx = prevX + vec.dx;
+    const ny = prevY + vec.dy;
 
     if (!this.isTileWalkable(nx, ny)) {
       if (changedDir) {
-        this.onStepSaved?.(profile.pos.x, profile.pos.y, dir, false);
+        this.onStepSaved?.(prevX, prevY, dir, false);
       }
       this.refreshInteractHint();
       return;
     }
 
     this.moving = true;
-    this.moveStartX = profile.pos.x;
-    this.moveStartY = profile.pos.y;
+    this.moveStartX = prevX;
+    this.moveStartY = prevY;
     this.moveTargetX = nx;
     this.moveTargetY = ny;
     this.moveProgress = 0;
     this.walkFrame = (this.walkFrame + 1) % 2;
+
+    this.followerStartX = this.followerX;
+    this.followerStartY = this.followerY;
+    this.followerTargetX = prevX;
+    this.followerTargetY = prevY;
+    const fdx = prevX - this.followerStartX;
+    const fdy = prevY - this.followerStartY;
+    if (fdx !== 0 || fdy !== 0) {
+      if (Math.abs(fdx) >= Math.abs(fdy)) {
+        this.followerDir = fdx > 0 ? 'right' : 'left';
+      } else {
+        this.followerDir = fdy > 0 ? 'down' : 'up';
+      }
+      this.followerMoving = true;
+    } else {
+      this.followerDir = dir;
+      this.followerMoving = false;
+    }
+
     this.refreshInteractHint();
   }
 
@@ -510,6 +722,10 @@ export class OverworldEngine {
       ctx.fillStyle = '#0f172a';
       ctx.fillRect(0, 0, this.viewW, this.viewH);
       return;
+    }
+
+    if (this.active || this.followerInitialized) {
+      this.syncFollower();
     }
 
     const px = this.moving
@@ -590,11 +806,32 @@ export class OverworldEngine {
       sx: Math.round(px * this.tileSize - camX),
       sy: Math.round(py * this.tileSize - camY),
     });
+
+    const lead = profile.team?.[0] || null;
+    if (lead) {
+      const followerActiveMove = Boolean(this.moving && this.followerMoving);
+      const fx = followerActiveMove
+        ? this.followerStartX + (this.followerTargetX - this.followerStartX) * this.moveProgress
+        : this.followerX;
+      const fy = followerActiveMove
+        ? this.followerStartY + (this.followerTargetY - this.followerStartY) * this.moveProgress
+        : this.followerY;
+      actors.push({
+        kind: 'follower',
+        sortY: fy - 0.001,
+        sx: Math.round(fx * this.tileSize - camX),
+        sy: Math.round(fy * this.tileSize - camY),
+        lead,
+      });
+    }
+
     actors.sort((a, b) => a.sortY - b.sortY);
 
     for (const actor of actors) {
       if (actor.kind === 'player') {
         this.drawPlayer(ctx, actor.sx, actor.sy, profile.trainerId, profile.pos.dir, nowMs);
+      } else if (actor.kind === 'follower') {
+        this.drawFollower(ctx, actor.sx, actor.sy, actor.lead, this.followerDir, nowMs);
       } else {
         this.drawNpc(ctx, actor.sx, actor.sy, actor.npc, nowMs, profile);
       }
@@ -1282,6 +1519,178 @@ export class OverworldEngine {
     if (dir === 'down') {
       ctx.fillStyle = '#fef08a';
       ctx.fillRect(sx + 14, y + 3, 4, 2);
+    }
+  }
+
+  _getFollowerSpriteEntry(species, useBack, shiny) {
+    if (!species?.id) return null;
+    const key = `${species.id}:${useBack ? 'back' : 'front'}:${shiny ? 'shiny' : 'std'}`;
+    if (this._followerSpriteCache.has(key)) {
+      return this._followerSpriteCache.get(key);
+    }
+
+    const entry = { img: null, status: 'loading', tier: 0, src: null };
+    this._followerSpriteCache.set(key, entry);
+
+    if (typeof Image === 'undefined') {
+      entry.status = 'fallback';
+      return entry;
+    }
+
+    const urls = getSpriteUrls(species.id, useBack, shiny);
+    const candidates = [
+      urls.animated,
+      urls.static,
+      `./assets/fallback/${species.type}.svg`,
+      generateSilhouetteDataUri(species, useBack),
+    ];
+
+    const tryLoad = (idx) => {
+      if (idx >= candidates.length) {
+        entry.status = 'failed';
+        return;
+      }
+      const url = candidates[idx];
+      const img = new Image();
+      let settled = false;
+      let timer = null;
+
+      const cleanup = () => {
+        if (timer !== null) {
+          clearTimeout(timer);
+          timer = null;
+        }
+        img.onload = null;
+        img.onerror = null;
+      };
+
+      const advance = () => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        tryLoad(idx + 1);
+      };
+
+      // Prevent slow remote GIF/PNG requests from stalling local fallback rendering
+      if (idx < 2 && typeof setTimeout === 'function') {
+        timer = setTimeout(advance, idx === 0 ? 1500 : 1200);
+      }
+
+      img.onload = () => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        if (img.naturalWidth > 0) {
+          entry.img = img;
+          entry.status = 'loaded';
+          entry.tier = idx;
+          entry.src = url;
+        } else {
+          tryLoad(idx + 1);
+        }
+      };
+
+      img.onerror = advance;
+      img.src = url;
+    };
+
+    tryLoad(0);
+    return entry;
+  }
+
+  _drawMiniCompanionFallback(ctx, sx, y, species, dir) {
+    const bodyColor = species?.color || '#38bdf8';
+    const accentColor = TYPES[species?.type]?.color || '#fef08a';
+    const bx = sx + 9;
+    const by = y + 12;
+
+    // 14x14 mini-companion outline + ears
+    ctx.fillStyle = '#0f172a';
+    ctx.fillRect(bx + 1, by, 4, 4);
+    ctx.fillRect(bx + 9, by, 4, 4);
+    ctx.fillRect(bx + 1, by + 3, 12, 10);
+
+    // Inner ears
+    ctx.fillStyle = accentColor;
+    ctx.fillRect(bx + 2, by + 1, 2, 3);
+    ctx.fillRect(bx + 10, by + 1, 2, 3);
+
+    // Body fill
+    ctx.fillStyle = bodyColor;
+    ctx.fillRect(bx + 2, by + 4, 10, 8);
+    ctx.fillRect(bx + 3, by + 3, 8, 10);
+
+    // Belly / collar accent
+    ctx.fillStyle = accentColor;
+    ctx.fillRect(bx + 5, by + 10, 4, 2);
+
+    if (dir === 'up') {
+      ctx.fillStyle = '#ffffff';
+      ctx.globalAlpha = 0.75;
+      ctx.fillRect(bx + 6, by + 5, 2, 4);
+      ctx.fillRect(bx + 5, by + 6, 4, 2);
+      ctx.globalAlpha = 1;
+    } else {
+      const eyeShift = dir === 'left' ? -1 : dir === 'right' ? 1 : 0;
+      ctx.fillStyle = '#0f172a';
+      ctx.fillRect(bx + 4 + eyeShift, by + 6, 2, 2);
+      ctx.fillRect(bx + 8 + eyeShift, by + 6, 2, 2);
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(bx + 4 + eyeShift, by + 6, 1, 1);
+      ctx.fillRect(bx + 8 + eyeShift, by + 6, 1, 1);
+      ctx.fillStyle = '#fda4af';
+      ctx.fillRect(bx + 3 + eyeShift, by + 8, 1, 1);
+      ctx.fillRect(bx + 10 + eyeShift, by + 8, 1, 1);
+    }
+  }
+
+  drawFollower(ctx, sx, sy, lead, dir, nowMs = 0) {
+    if (!lead) return;
+    const species = SPECIES[Number(lead.speciesId)] || null;
+    const safeDir = DIR_VEC[dir] ? dir : 'down';
+    const useBack = safeDir === 'up';
+    const shiny = Boolean(lead.isShiny);
+
+    // Soft ground shadow ellipse
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.26)';
+    ctx.beginPath();
+    ctx.ellipse(sx + 16, sy + 28, 8, 3.5, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    const hop = this.moving && this.followerMoving
+      ? Math.abs(Math.sin(this.moveProgress * Math.PI)) * 2.8
+      : Math.sin(nowMs * 0.0055) * 0.8;
+    const y = Math.round(sy - hop);
+
+    const entry = species ? this._getFollowerSpriteEntry(species, useBack, shiny) : null;
+    if (entry?.img?.complete && entry.img.naturalWidth > 0) {
+      ctx.save();
+      ctx.imageSmoothingEnabled = false;
+      const size = 26;
+      const drawX = sx + 3;
+      const drawY = y + 3;
+      if (!useBack && safeDir === 'right') {
+        ctx.translate(drawX + size, drawY);
+        ctx.scale(-1, 1);
+        ctx.drawImage(entry.img, 0, 0, size, size);
+      } else {
+        ctx.drawImage(entry.img, drawX, drawY, size, size);
+      }
+      ctx.restore();
+    } else {
+      ctx.save();
+      this._drawMiniCompanionFallback(ctx, sx, y, species, safeDir);
+      ctx.restore();
+    }
+
+    if (shiny) {
+      for (let i = 0; i < 2; i++) {
+        const angle = nowMs * 0.005 + i * Math.PI;
+        const ox = Math.round(sx + 16 + Math.cos(angle) * 11);
+        const oy = Math.round(y + 15 + Math.sin(angle) * 8);
+        ctx.fillStyle = i === 0 ? '#fde047' : '#ffffff';
+        ctx.fillRect(ox, oy, 2, 2);
+      }
     }
   }
 }
