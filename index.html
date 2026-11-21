@@ -3,8 +3,14 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, minimum-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="theme-color" content="#090d1a">
+  <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <title>Pokémon: Starlight Island — Violet &amp; Ozias</title>
+  <link rel="manifest" href="./manifest.json">
+  <link rel="apple-touch-icon" sizes="180x180" href="./assets/icons/apple-touch-icon.png">
+  <link rel="icon" type="image/png" sizes="192x192" href="./assets/icons/icon-192.png">
   <link rel="icon" href="./assets/fallback/pokeball.svg" type="image/svg+xml">
   <link rel="stylesheet" href="./css/main.css">
   <link rel="stylesheet" href="./css/battle.css">
@@ -52,6 +58,10 @@
         </div>
 
         <p class="boot-hint">Desktop: WASD / Arrow Keys + Space • Tablet: Touch D-Pad + A/B</p>
+        <div id="pwa-install-banner" class="pwa-install-banner" hidden>
+          <button id="pwa-install-btn" type="button" class="pwa-install-btn">📲 Install App</button>
+          <button id="pwa-install-dismiss" type="button" class="pwa-install-dismiss" aria-label="Dismiss install prompt">✕</button>
+        </div>
       </div>
     </section>
 
@@ -86,8 +96,9 @@
         </div>
 
         <div class="hud-actions">
-          <button id="hud-btn-dex" type="button" class="hud-pill" title="Open Pokédex &amp; Team (P)">📖 Dex 1/74</button>
-          <button id="hud-btn-badges" type="button" class="hud-pill" title="View Elemental Badges">🏅 0/10</button>
+          <button id="hud-btn-dex" type="button" class="hud-pill" title="Open Pokédex &amp; Team (P)">📖 Dex 1/110</button>
+          <button id="hud-btn-badges" type="button" class="hud-pill" title="View Elemental Badges">🏅 0/14</button>
+          <span id="hud-install-group" class="hud-install-group" hidden><button id="hud-btn-install" type="button" class="hud-pill hud-install-pill" title="Install Starlight Island App">📲 Install</button><button id="hud-btn-install-dismiss" type="button" class="hud-install-dismiss" aria-label="Dismiss install">✕</button></span>
           <button id="hud-btn-mute" type="button" class="hud-icon-btn" title="Toggle Sound">🔊</button>
           <button id="hud-btn-pad" type="button" class="hud-icon-btn" title="Toggle On-Screen Gamepad">🎮</button>
           <button id="hud-btn-settings" type="button" class="hud-icon-btn" title="Settings &amp; Trainer Switch">⚙️</button>
@@ -102,7 +113,7 @@
           <span id="compass-arrow" class="compass-arrow">🧭</span>
           <div class="compass-copy">
             <span id="compass-goal" class="compass-goal">Explore Starlight Island</span>
-            <span id="compass-biome-progress" class="compass-sub">Dex 0/74 • Shrines 0/7</span>
+            <span id="compass-biome-progress" class="compass-sub">Dex 0/110 • Shrines 0/9</span>
           </div>
         </button>
 
@@ -309,6 +320,14 @@
             <button id="setting-switch-trainer-btn" type="button" class="setting-toggle-btn is-primary">👥 Switch Trainer</button>
           </div>
 
+          <div id="setting-install-row" class="setting-row" hidden>
+            <div>
+              <strong>Install Starlight App</strong>
+              <p>Play full-screen offline on tablet or mobile</p>
+            </div>
+            <button id="setting-install-btn" type="button" class="setting-toggle-btn is-primary">📲 Install</button>
+          </div>
+
           <details class="parent-zone">
             <summary>🔒 Parent Zone — Progress Reset</summary>
             <p class="parent-note">
@@ -331,6 +350,13 @@
     </div>
   </div>
 
+  <script>
+    if ('serviceWorker' in navigator && (location.protocol === 'http:' || location.protocol === 'https:')) {
+      window.__starlightSwRegistration = navigator.serviceWorker
+        .register('./sw.js', { scope: './' })
+        .catch(() => null);
+    }
+  </script>
   <script type="module" src="./js/main.js"></script>
   <script type="module" src="./tests/test-runner.js"></script>
 </body>
