@@ -18,7 +18,23 @@ const BIOME_SCALING_OFFSETS = {
   water: 0,
   volcano: 1,
   peak: 2,
+  grove: 2,
 };
+
+export function getBondTier(bond) {
+  const raw = bond === null || bond === undefined || bond === '' ? 0 : Number(bond);
+  const safeBond = Number.isFinite(raw) ? Math.max(0, Math.min(100, raw)) : 0;
+  if (safeBond >= 85) {
+    return { tier: 3, id: 'soulmate', label: 'Best Buddy', icon: '🌟', xpMult: 1.20, critBonus: 0.04, endureChance: 0.25 };
+  }
+  if (safeBond >= 60) {
+    return { tier: 2, id: 'trusted', label: 'Trusted Buddy', icon: '💖', xpMult: 1.12, critBonus: 0.04, endureChance: 0.15 };
+  }
+  if (safeBond >= 40) {
+    return { tier: 1, id: 'friend', label: 'Good Friend', icon: '💛', xpMult: 1.08, critBonus: 0.02, endureChance: 0 };
+  }
+  return { tier: 0, id: 'partner', label: 'New Partner', icon: '🌱', xpMult: 1.0, critBonus: 0, endureChance: 0 };
+}
 
 function makeUid() {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -491,6 +507,29 @@ export function rollWildPokemon(biomeId, avgTeamLevelOrProfile = 5, options = {}
     weight: isRarePatch ? Math.max(1, Math.round(1000 / Math.max(4, entry.weight))) : entry.weight,
   }));
 
+  if (isProfile && profile?.shrinesCleared) {
+    const clearedList = Array.isArray(profile.shrinesCleared)
+      ? profile.shrinesCleared
+      : (profile.shrinesCleared instanceof Set ? [...profile.shrinesCleared] : []);
+    const cleared = new Set(clearedList);
+    const appendRoamer = (speciesId, baseWeight) => {
+      if (!SPECIES[speciesId]) return;
+      weightedPool.push({
+        id: speciesId,
+        weight: isRarePatch ? Math.max(1, Math.round(1000 / Math.max(4, baseWeight))) : baseWeight,
+      });
+    };
+    if (biomeId === 'volcano') {
+      if (cleared.has('volcano_shrine')) appendRoamer(146, 5);
+      if (cleared.has('thunder_shrine')) appendRoamer(145, 5);
+    } else if (biomeId === 'peak') {
+      if (cleared.has('peak_shrine')) appendRoamer(144, 5);
+      if (cleared.has('starlight_shrine')) appendRoamer(151, 4);
+    } else if (biomeId === 'grove') {
+      if (cleared.has('grove_shrine')) appendRoamer(385, 4);
+    }
+  }
+
   const totalWeight = weightedPool.reduce((sum, entry) => sum + entry.weight, 0);
   let roll = Math.random() * totalWeight;
   let pickedId = weightedPool[0].id;
@@ -724,7 +763,7 @@ export function calculateDamage(attacker, defender, move, options = {}) {
 
   const stab = attacker?.type && move?.type && attacker.type === move.type ? 1.25 : 1;
   const effectiveness = getTypeEffectiveness(move?.type, defender?.type);
-  const critChance = (Number(attacker?.bond) || 0) >= 60 ? 0.12 : 0.08;
+  const critChance = 0.08 + getBondTier(attacker?.bond).critBonus;
   const isCrit = options.forceCrit !== undefined ? Boolean(options.forceCrit) : Math.random() < critChance;
   const critMult = isCrit ? 1.5 : 1;
   const variance = Number.isFinite(Number(options.fixedVariance))
