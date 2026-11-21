@@ -151,6 +151,9 @@ const ENCOUNTER_TILE_BIOME = {
   [TILE.VOLCANO_FLOOR]: 'volcano',
   [TILE.SNOW_GRASS]: 'peak',
   [TILE.GROVE_GRASS]: 'grove',
+  [TILE.DUNE_SAND]: 'desert',
+  [TILE.MARSH_GRASS]: 'marsh',
+  [TILE.SANCTUM_FLOOR]: 'sanctum',
 };
 
 const QUEST_BY_ID = new Map(FIELD_QUESTS.map((q) => [q.id, q]));
@@ -894,6 +897,8 @@ export class OverworldEngine {
       this.ripples.push({ x: tx, y: ty, kind: 'water', life: 0, maxLife: 0.62 });
     } else if (tile === TILE.SNOW_GRASS || tile === TILE.SNOW_PATH) {
       this.ripples.push({ x: tx, y: ty, kind: 'snow', life: 0, maxLife: 0.68 });
+    } else if (tile === TILE.DUNE_SAND) {
+      this.ripples.push({ x: tx, y: ty, kind: 'sand', life: 0, maxLife: 0.65 });
     }
     if (this.ripples.length > 14) {
       this.ripples.splice(0, this.ripples.length - 14);
@@ -1057,6 +1062,9 @@ export class OverworldEngine {
       else if (tile === TILE.VOLCANO_FLOOR) this.spawnParticles(x, y, '#fb923c', 7, true);
       else if (tile === TILE.SNOW_GRASS) this.spawnParticles(x, y, '#a5f3fc', 7, true);
       else if (tile === TILE.GROVE_GRASS) this.spawnParticles(x, y, '#f9a8d4', 7, true);
+      else if (tile === TILE.DUNE_SAND) this.spawnParticles(x, y, '#fbbf24', 7);
+      else if (tile === TILE.MARSH_GRASS) this.spawnParticles(x, y, '#2dd4bf', 7, true);
+      else if (tile === TILE.SANCTUM_FLOOR) this.spawnParticles(x, y, '#a78bfa', 7, true);
 
       this.stepsSinceBattle += 1;
       this.encounterTileStreak += 1;
@@ -1142,7 +1150,13 @@ export class OverworldEngine {
           ? 'rgba(103, 232, 249, 0.065)'
           : biomeId === 'grove'
             ? 'rgba(244, 114, 182, 0.05)'
-            : 'rgba(15, 23, 42, 0.085)';
+            : biomeId === 'desert'
+              ? 'rgba(251, 191, 36, 0.06)'
+              : biomeId === 'marsh'
+                ? 'rgba(45, 212, 191, 0.055)'
+                : biomeId === 'sanctum'
+                  ? 'rgba(167, 139, 250, 0.06)'
+                  : 'rgba(15, 23, 42, 0.085)';
       for (let c = 0; c < 3; c++) {
         const span = this.viewW + 180;
         const cx = ((nowMs * (0.011 + c * 0.004) + c * 190 - camX * 0.35) % span + span) % span - 90;
@@ -1252,6 +1266,15 @@ export class OverworldEngine {
           ctx.ellipse(cx, cy, 2 + progress * 5, 1 + progress * 2.2, 0, 0, Math.PI * 2);
           ctx.stroke();
         }
+      } else if (r.kind === 'sand') {
+        ctx.fillStyle = `rgba(146, 64, 14, ${(alpha * 0.36).toFixed(3)})`;
+        ctx.fillRect(Math.round(cx - 5), Math.round(cy - 1), 3, 2);
+        ctx.fillRect(Math.round(cx + 2), Math.round(cy + 1), 3, 2);
+        ctx.strokeStyle = `rgba(254, 240, 138, ${(alpha * 0.55).toFixed(3)})`;
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.ellipse(cx, cy + 1, 4 + progress * 5, 2 + progress * 2, 0, 0, Math.PI * 2);
+        ctx.stroke();
       } else {
         ctx.fillStyle = `rgba(100, 116, 139, ${(alpha * 0.4).toFixed(3)})`;
         ctx.fillRect(Math.round(cx - 5), Math.round(cy - 1), 3, 2);
@@ -1268,9 +1291,11 @@ export class OverworldEngine {
 
   drawBiomeWeather(ctx, biomeId, nowMs) {
     ctx.save();
-    if (biomeId === 'peak') {
-      // Soft dancing northern aurora ribbons near the top of the viewport
-      const bandColors = ['rgba(56, 189, 248, 0.085)', 'rgba(52, 211, 153, 0.09)', 'rgba(192, 132, 252, 0.08)'];
+    if (biomeId === 'peak' || biomeId === 'sanctum') {
+      // Soft dancing northern aurora ribbons (or cosmic astral nebula ribbons in Sanctum)
+      const bandColors = biomeId === 'sanctum'
+        ? ['rgba(167, 139, 250, 0.095)', 'rgba(103, 232, 249, 0.085)', 'rgba(250, 204, 21, 0.065)']
+        : ['rgba(56, 189, 248, 0.085)', 'rgba(52, 211, 153, 0.09)', 'rgba(192, 132, 252, 0.08)'];
       for (let b = 0; b < bandColors.length; b++) {
         const waveY = 14 + b * 14 + Math.sin(nowMs * 0.0014 + b * 1.7) * 8;
         const shiftX = Math.sin(nowMs * 0.0009 + b * 2.1) * 28;
@@ -1363,6 +1388,39 @@ export class OverworldEngine {
           ctx.fillStyle = i % 4 === 1 ? '#67e8f9' : '#5eead4';
           ctx.fillRect(mx, my, 2, 2);
         }
+      } else if (biomeId === 'desert') {
+        // Drifting golden sand motes & sunlit dust
+        const mx = Math.round(((mote.xFrac * this.viewW + nowMs * 0.019 * mote.speed) % this.viewW + this.viewW) % this.viewW);
+        const my = Math.round(((mote.yFrac * this.viewH + Math.sin(nowMs * 0.0025 * mote.speed + mote.seed) * 8 + nowMs * 0.003) % this.viewH + this.viewH) % this.viewH);
+        ctx.globalAlpha = 0.45 + 0.4 * twinkle;
+        ctx.fillStyle = i % 3 === 0 ? '#fef08a' : i % 3 === 1 ? '#fbbf24' : '#fdba74';
+        ctx.fillRect(mx, my, mote.variant === 0 ? 3 : 2, 1.5);
+        if (i % 5 === 0 && twinkle > 0.6) {
+          ctx.fillStyle = '#ffffff';
+          ctx.fillRect(mx, my, 1, 1);
+        }
+      } else if (biomeId === 'marsh') {
+        // Glowing bioluminescent bayou spores
+        const mx = Math.round(((mote.xFrac * this.viewW + Math.sin(nowMs * 0.0014 * mote.speed + mote.seed) * 18) % this.viewW + this.viewW) % this.viewW);
+        const my = Math.round(((mote.yFrac * this.viewH - nowMs * 0.0065 * mote.speed + Math.cos(nowMs * 0.0017 + mote.seed) * 8) % this.viewH + this.viewH) % this.viewH);
+        ctx.globalAlpha = twinkle * 0.36;
+        ctx.fillStyle = i % 3 === 0 ? '#c084fc' : '#2dd4bf';
+        ctx.fillRect(mx - 1, my - 1, 5, 5);
+        ctx.globalAlpha = Math.min(1, twinkle + 0.2);
+        ctx.fillStyle = i % 3 === 0 ? '#e879f9' : i % 3 === 1 ? '#5eead4' : '#bef264';
+        ctx.fillRect(mx, my, 2, 2);
+      } else if (biomeId === 'sanctum') {
+        // Twinkling starlight motes in the Astral Sky Citadel
+        const mx = Math.round(((mote.xFrac * this.viewW + Math.sin(nowMs * 0.0011 * mote.speed + mote.seed) * 12) % this.viewW + this.viewW) % this.viewW);
+        const my = Math.round(((mote.yFrac * this.viewH - nowMs * 0.004 * mote.speed + Math.cos(nowMs * 0.0012 + mote.seed) * 10) % this.viewH + this.viewH) % this.viewH);
+        ctx.globalAlpha = Math.min(1, twinkle + 0.15);
+        ctx.fillStyle = i % 3 === 0 ? '#fde68a' : i % 3 === 1 ? '#67e8f9' : '#c4b5fd';
+        ctx.fillRect(mx, my, 2, 2);
+        if (twinkle > 0.62) {
+          ctx.fillStyle = '#ffffff';
+          ctx.fillRect(mx - 1, my, 4, 1);
+          ctx.fillRect(mx, my - 1, 1, 4);
+        }
       } else {
         // Peak snowflakes
         const mx = Math.round(((mote.xFrac * this.viewW + Math.sin(nowMs * 0.0015 * mote.speed + mote.seed) * 16) % this.viewW + this.viewW) % this.viewW);
@@ -1396,6 +1454,30 @@ export class OverworldEngine {
         ctx.fillRect(sx + 6, sy + 10, 3, 2);
         ctx.fillRect(sx + 20, sy + 22, 3, 2);
       }
+    } else if (tileBiomeId === 'desert') {
+      ctx.fillStyle = h > 0.5 ? '#eab660' : '#e0a64b';
+      ctx.fillRect(sx, sy, ts, ts);
+      if (h > 0.68) {
+        ctx.fillStyle = '#c88a32';
+        ctx.fillRect(sx + 7, sy + 11, 3, 2);
+        ctx.fillRect(sx + 21, sy + 22, 3, 2);
+      }
+    } else if (tileBiomeId === 'marsh') {
+      ctx.fillStyle = h > 0.5 ? '#195449' : '#14473e';
+      ctx.fillRect(sx, sy, ts, ts);
+      if (h > 0.7) {
+        ctx.fillStyle = '#2dd4bf';
+        ctx.fillRect(sx + 8, sy + 12, 2, 2);
+        ctx.fillRect(sx + 21, sy + 23, 2, 2);
+      }
+    } else if (tileBiomeId === 'sanctum') {
+      ctx.fillStyle = h > 0.5 ? '#252158' : '#1e1b4b';
+      ctx.fillRect(sx, sy, ts, ts);
+      if (h > 0.7) {
+        ctx.fillStyle = '#6366f1';
+        ctx.fillRect(sx + 6, sy + 9, 2, 2);
+        ctx.fillRect(sx + 22, sy + 21, 2, 2);
+      }
     } else {
       ctx.fillStyle = h > 0.5 ? '#5ec269' : '#57ba62';
       ctx.fillRect(sx, sy, ts, ts);
@@ -1418,13 +1500,28 @@ export class OverworldEngine {
       ctx.fillStyle = '#2b2640';
       ctx.fillRect(sx, sy, ts, ts);
     } else if (tile === TILE.SAND || tile === TILE.SHALLOW_WATER || tile === TILE.WATER || tile === TILE.BRIDGE) {
-      ctx.fillStyle = tileBiomeId === 'volcano' ? '#3b1f1e' : '#f3d999';
+      ctx.fillStyle = tileBiomeId === 'volcano'
+        ? '#3b1f1e'
+        : tileBiomeId === 'marsh'
+          ? '#0d4a44'
+          : tileBiomeId === 'sanctum'
+            ? '#1e1b4b'
+            : '#f3d999';
       ctx.fillRect(sx, sy, ts, ts);
     } else if (tile === TILE.LAVA || tile === TILE.VOLCANO_FLOOR || tile === TILE.VOLCANO_PATH) {
       ctx.fillStyle = '#3b1f1e';
       ctx.fillRect(sx, sy, ts, ts);
     } else if (tile === TILE.ICE_WALL || tile === TILE.SNOW_GRASS || tile === TILE.SNOW_PATH) {
       ctx.fillStyle = '#dbeafe';
+      ctx.fillRect(sx, sy, ts, ts);
+    } else if (tile === TILE.DUNE_SAND || tile === TILE.DUNE_PATH || tile === TILE.SANDSTONE_WALL) {
+      ctx.fillStyle = '#d99b42';
+      ctx.fillRect(sx, sy, ts, ts);
+    } else if (tile === TILE.MARSH_GRASS || tile === TILE.MARSH_PATH || tile === TILE.MARSH_WALL) {
+      ctx.fillStyle = '#114239';
+      ctx.fillRect(sx, sy, ts, ts);
+    } else if (tile === TILE.SANCTUM_FLOOR || tile === TILE.SANCTUM_PATH || tile === TILE.SANCTUM_WALL) {
+      ctx.fillStyle = '#1a1642';
       ctx.fillRect(sx, sy, ts, ts);
     } else {
       this.drawBaseGround(ctx, sx, sy, ts, h, tileBiomeId);
@@ -1528,15 +1625,41 @@ export class OverworldEngine {
 
       case TILE.BRIDGE: {
         const overLava = tileBiomeId === 'volcano';
-        ctx.fillStyle = overLava ? '#dc2626' : '#0284c7';
+        const overMarsh = tileBiomeId === 'marsh';
+        const overSanctum = tileBiomeId === 'sanctum';
+        ctx.fillStyle = overLava
+          ? '#dc2626'
+          : overMarsh
+            ? '#0d5c56'
+            : overSanctum
+              ? '#1e1b4b'
+              : '#0284c7';
         ctx.fillRect(sx, sy, ts, ts);
-        ctx.fillStyle = overLava ? '#44403c' : '#92400e';
+        ctx.fillStyle = overLava
+          ? '#44403c'
+          : overSanctum
+            ? '#4338ca'
+            : overMarsh
+              ? '#78350f'
+              : '#92400e';
         ctx.fillRect(sx, sy + 2, ts, ts - 4);
-        ctx.fillStyle = overLava ? '#57534e' : '#b45309';
+        ctx.fillStyle = overLava
+          ? '#57534e'
+          : overSanctum
+            ? '#6366f1'
+            : overMarsh
+              ? '#9a4d18'
+              : '#b45309';
         for (let px = 2; px < ts; px += 8) {
           ctx.fillRect(sx + px, sy + 4, 6, ts - 8);
         }
-        ctx.fillStyle = overLava ? '#fb923c' : '#fde68a';
+        ctx.fillStyle = overLava
+          ? '#fb923c'
+          : overMarsh
+            ? '#2dd4bf'
+            : overSanctum
+              ? '#fde047'
+              : '#fde68a';
         ctx.fillRect(sx, sy + 2, ts, 2);
         ctx.fillRect(sx, sy + ts - 4, ts, 2);
         break;
@@ -1677,7 +1800,13 @@ export class OverworldEngine {
           ? '#fb923c'
           : tileBiomeId === 'grove'
             ? '#f472b6'
-            : '#38bdf8';
+            : tileBiomeId === 'desert'
+              ? '#fbbf24'
+              : tileBiomeId === 'marsh'
+                ? '#2dd4bf'
+                : tileBiomeId === 'sanctum'
+                  ? '#a78bfa'
+                  : '#38bdf8';
         ctx.fillRect(sx + 11, sy + 14, 10, 4);
         ctx.fillRect(sx + 14, sy + 11, 4, 10);
         ctx.fillStyle = '#fef08a';
@@ -1807,23 +1936,35 @@ export class OverworldEngine {
                 ? '#e879f9'
                 : shrine?.id === 'grove_shrine' || shrine?.biome === 'grove'
                   ? '#f472b6'
-                  : shrine?.biome === 'forest'
-                    ? '#4ade80'
-                    : shrine?.biome === 'cave'
-                      ? '#c084fc'
-                      : shrine?.biome === 'volcano'
-                        ? '#fb7185'
-                        : shrine?.biome === 'peak'
-                          ? '#67e8f9'
-                          : '#38bdf8';
-        if (cleared || shrine?.id === 'eclipse_shrine' || shrine?.id === 'grove_shrine') {
+                  : shrine?.id === 'desert_shrine' || shrine?.biome === 'desert'
+                    ? '#f59e0b'
+                    : shrine?.id === 'marsh_shrine' || shrine?.biome === 'marsh'
+                      ? '#2dd4bf'
+                      : shrine?.id === 'sanctum_shrine' || shrine?.biome === 'sanctum'
+                        ? '#a78bfa'
+                        : shrine?.biome === 'forest'
+                          ? '#4ade80'
+                          : shrine?.biome === 'cave'
+                            ? '#c084fc'
+                            : shrine?.biome === 'volcano'
+                              ? '#fb7185'
+                              : shrine?.biome === 'peak'
+                                ? '#67e8f9'
+                                : '#38bdf8';
+        if (cleared || shrine?.id === 'eclipse_shrine' || shrine?.id === 'grove_shrine' || shrine?.id === 'desert_shrine' || shrine?.id === 'marsh_shrine' || shrine?.id === 'sanctum_shrine') {
           ctx.save();
           ctx.globalAlpha = 0.35 + 0.25 * Math.sin(nowMs * 0.007);
           ctx.strokeStyle = shrine?.id === 'eclipse_shrine' && !cleared
             ? '#c084fc'
             : shrine?.id === 'grove_shrine' && !cleared
               ? '#2dd4bf'
-              : '#fef08a';
+              : shrine?.id === 'desert_shrine' && !cleared
+                ? '#fde047'
+                : shrine?.id === 'marsh_shrine' && !cleared
+                  ? '#a78bfa'
+                  : shrine?.id === 'sanctum_shrine' && !cleared
+                    ? '#38bdf8'
+                    : '#fef08a';
           ctx.lineWidth = 1.5;
           ctx.beginPath();
           ctx.arc(sx + 16, sy + 9 + bob, 9, 0, Math.PI * 2);
@@ -1898,6 +2039,195 @@ export class OverworldEngine {
           ctx.fillStyle = '#bae6fd';
           ctx.fillRect(sx + 22, sy + 23, 3, 2);
         }
+        break;
+      }
+
+      case TILE.DUNE_SAND: {
+        // Sunlit golden dune ripples (desert wild encounter tile)
+        ctx.fillStyle = h > 0.5 ? '#e5a93b' : '#dc9b2e';
+        ctx.fillRect(sx, sy, ts, ts);
+        const shift = Math.sin(nowMs * 0.0035 + tx * 0.7 + ty * 0.4) * 1.4;
+        const rustle = this.rustleTile && this.rustleTile.x === tx && this.rustleTile.y === ty ? 2.8 : 0;
+        ctx.fillStyle = '#c27820';
+        ctx.fillRect(sx + 2, sy + 9, 13, 3);
+        ctx.fillRect(sx + 16, sy + 21, 13, 3);
+        ctx.fillStyle = '#fde68a';
+        ctx.fillRect(sx + 4 + shift + rustle, sy + 7, 12, 3);
+        ctx.fillRect(sx + 15 - shift - rustle, sy + 19, 12, 3);
+        ctx.fillStyle = '#fffbeb';
+        ctx.fillRect(sx + 7 + shift, sy + 7, 5, 1);
+        ctx.fillRect(sx + 18 - shift, sy + 19, 5, 1);
+        const glint = 0.45 + 0.45 * Math.sin(nowMs * 0.006 + tx * 1.3 + ty);
+        ctx.globalAlpha = glint;
+        ctx.fillStyle = '#fef08a';
+        ctx.fillRect(sx + 24, sy + 7, 2, 2);
+        ctx.fillRect(sx + 6, sy + 24, 2, 2);
+        ctx.globalAlpha = 1;
+        break;
+      }
+
+      case TILE.DUNE_PATH: {
+        // Sun-baked sandstone flagstones
+        ctx.fillStyle = '#b45309';
+        ctx.fillRect(sx, sy, ts, ts);
+        ctx.fillStyle = h > 0.5 ? '#f5d08a' : '#f1c273';
+        ctx.fillRect(sx + 1, sy + 1, 14, 14);
+        ctx.fillRect(sx + 17, sy + 17, 14, 14);
+        ctx.fillStyle = h > 0.5 ? '#f1c273' : '#f5d08a';
+        ctx.fillRect(sx + 17, sy + 1, 14, 14);
+        ctx.fillRect(sx + 1, sy + 17, 14, 14);
+        ctx.fillStyle = '#d97706';
+        if (h > 0.4) ctx.fillRect(sx + 6, sy + 6, 3, 2);
+        if (h < 0.65) ctx.fillRect(sx + 21, sy + 22, 3, 2);
+        break;
+      }
+
+      case TILE.SANDSTONE_WALL: {
+        // Stratified sandstone mesa cliff wall (solid)
+        ctx.fillStyle = '#92400e';
+        ctx.fillRect(sx, sy, ts, ts);
+        ctx.fillStyle = '#fbbf24';
+        ctx.fillRect(sx + 2, sy + 2, ts - 4, 8);
+        ctx.fillStyle = '#f59e0b';
+        ctx.fillRect(sx + 4, sy + 3, 10, 4);
+        ctx.fillStyle = '#d97706';
+        ctx.fillRect(sx + 2, sy + 10, ts - 4, 8);
+        ctx.fillStyle = '#b45309';
+        ctx.fillRect(sx + 2, sy + 18, ts - 4, 9);
+        ctx.fillStyle = '#451a03';
+        ctx.fillRect(sx, sy + ts - 5, ts, 5);
+        if (h > 0.7) {
+          ctx.fillStyle = '#fef08a';
+          ctx.fillRect(sx + 20, sy + 13, 3, 3);
+        }
+        break;
+      }
+
+      case TILE.MARSH_GRASS: {
+        // Glowing bioluminescent bayou turf (marsh wild encounter tile)
+        ctx.fillStyle = '#0f5247';
+        ctx.fillRect(sx + 1, sy + 1, ts - 2, ts - 2);
+        const sway = Math.sin(nowMs * 0.0044 + tx * 0.7 + ty * 0.6) * 1.6;
+        const rustle = this.rustleTile && this.rustleTile.x === tx && this.rustleTile.y === ty ? 3.2 : 0;
+        ctx.fillStyle = '#2dd4bf';
+        for (let i = 0; i < 4; i++) {
+          const bx = sx + 4 + i * 7;
+          ctx.fillRect(bx + sway + (i % 2 ? rustle : -rustle), sy + 6, 4, 9);
+          ctx.fillRect(bx - sway * 0.7, sy + 18, 4, 9);
+        }
+        ctx.fillStyle = '#064e3b';
+        ctx.fillRect(sx + 3, sy + 15, ts - 6, 2);
+        const sporePulse = 0.55 + 0.45 * Math.sin(nowMs * 0.005 + tx * 1.1 + ty * 0.9);
+        ctx.globalAlpha = sporePulse;
+        ctx.fillStyle = h > 0.5 ? '#c084fc' : '#5eead4';
+        ctx.fillRect(sx + 6, sy + 8, 4, 3);
+        ctx.fillRect(sx + 21, sy + 20, 4, 3);
+        ctx.fillStyle = '#fef08a';
+        ctx.fillRect(sx + 7, sy + 9, 2, 1);
+        ctx.fillRect(sx + 22, sy + 21, 2, 1);
+        ctx.globalAlpha = 1;
+        break;
+      }
+
+      case TILE.MARSH_PATH: {
+        // Mossy bayou stepping-stone & peat trail
+        ctx.fillStyle = '#285249';
+        ctx.fillRect(sx, sy, ts, ts);
+        ctx.fillStyle = '#52796f';
+        ctx.fillRect(sx + 3, sy + 4, 12, 10);
+        ctx.fillRect(sx + 16, sy + 16, 12, 11);
+        ctx.fillStyle = '#94a3b8';
+        ctx.fillRect(sx + 5, sy + 6, 8, 6);
+        ctx.fillRect(sx + 18, sy + 18, 8, 7);
+        ctx.fillStyle = '#2dd4bf';
+        if (h > 0.45) ctx.fillRect(sx + 4, sy + 22, 3, 2);
+        if (h < 0.65) ctx.fillRect(sx + 22, sy + 7, 3, 2);
+        break;
+      }
+
+      case TILE.MARSH_WALL: {
+        // Ancient cypress tree & bioluminescent spore wall (solid)
+        ctx.fillStyle = '#062c25';
+        ctx.fillRect(sx + 2, sy + 3, ts - 4, ts - 5);
+        ctx.fillStyle = '#5c3a28';
+        ctx.fillRect(sx + 11, sy + 19, 10, 12);
+        ctx.fillStyle = '#0f766e';
+        ctx.beginPath();
+        ctx.arc(sx + 16, sy + 14, 12, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = '#14b8a6';
+        ctx.beginPath();
+        ctx.arc(sx + 13, sy + 11, 7, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = '#34d399';
+        ctx.fillRect(sx + 6, sy + 17, 2, 7);
+        ctx.fillRect(sx + 24, sy + 16, 2, 8);
+        const capGlow = 0.65 + 0.35 * Math.sin(nowMs * 0.0045 + tx + ty);
+        ctx.globalAlpha = capGlow;
+        ctx.fillStyle = h > 0.5 ? '#c084fc' : '#5eead4';
+        ctx.fillRect(sx + 9, sy + 10, 4, 3);
+        ctx.fillRect(sx + 18, sy + 13, 4, 3);
+        ctx.globalAlpha = 1;
+        break;
+      }
+
+      case TILE.SANCTUM_FLOOR: {
+        // Cosmic rune marble encounter pad (sanctum wild encounter tile)
+        ctx.fillStyle = h > 0.5 ? '#26205a' : '#1f1a4d';
+        ctx.fillRect(sx, sy, ts, ts);
+        ctx.strokeStyle = '#4338ca';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(sx + 2, sy + 2, ts - 4, ts - 4);
+        const rustle = this.rustleTile && this.rustleTile.x === tx && this.rustleTile.y === ty ? 0.35 : 0;
+        const pulse = Math.min(1, 0.45 + 0.4 * Math.sin(nowMs * 0.005 + tx * 0.8 + ty * 0.7) + rustle);
+        ctx.globalAlpha = pulse;
+        ctx.fillStyle = h > 0.5 ? '#a78bfa' : '#67e8f9';
+        ctx.fillRect(sx + 10, sy + 15, 12, 2);
+        ctx.fillRect(sx + 15, sy + 10, 2, 12);
+        ctx.fillRect(sx + 12, sy + 12, 8, 8);
+        ctx.fillStyle = '#fef08a';
+        ctx.fillRect(sx + 15, sy + 15, 2, 2);
+        ctx.globalAlpha = 1;
+        break;
+      }
+
+      case TILE.SANCTUM_PATH: {
+        // Polished astral sky marble & gold-inlay walkway
+        ctx.fillStyle = '#4338ca';
+        ctx.fillRect(sx, sy, ts, ts);
+        ctx.fillStyle = h > 0.5 ? '#e2e8f0' : '#ddd6fe';
+        ctx.fillRect(sx + 1, sy + 1, 14, 14);
+        ctx.fillRect(sx + 17, sy + 17, 14, 14);
+        ctx.fillStyle = h > 0.5 ? '#ddd6fe' : '#e2e8f0';
+        ctx.fillRect(sx + 17, sy + 1, 14, 14);
+        ctx.fillRect(sx + 1, sy + 17, 14, 14);
+        const glint = 0.45 + 0.35 * Math.sin(nowMs * 0.0045 + tx + ty);
+        ctx.fillStyle = `rgba(250, 204, 21, ${glint.toFixed(2)})`;
+        ctx.fillRect(sx + 15, sy + 2, 2, 28);
+        ctx.fillRect(sx + 2, sy + 15, 28, 2);
+        break;
+      }
+
+      case TILE.SANCTUM_WALL: {
+        // Ornate indigo & gold Astral Citadel pillar parapet (solid)
+        ctx.fillStyle = '#1e1b4b';
+        ctx.fillRect(sx, sy, ts, ts);
+        ctx.fillStyle = '#312e81';
+        ctx.fillRect(sx + 2, sy + 2, ts - 4, ts - 6);
+        ctx.fillStyle = '#4f46e5';
+        ctx.fillRect(sx + 4, sy + 4, ts - 8, 12);
+        ctx.fillStyle = '#f59e0b';
+        ctx.fillRect(sx + 2, sy + 2, ts - 4, 2);
+        ctx.fillRect(sx + 2, sy + 16, ts - 4, 2);
+        ctx.fillStyle = '#fde047';
+        ctx.fillRect(sx + 14, sy + 8, 4, 4);
+        const coreGlow = 0.55 + 0.45 * Math.sin(nowMs * 0.0055 + tx + ty);
+        ctx.globalAlpha = coreGlow;
+        ctx.fillStyle = '#38bdf8';
+        ctx.fillRect(sx + 15, sy + 9, 2, 2);
+        ctx.globalAlpha = 1;
+        ctx.fillStyle = '#0f172a';
+        ctx.fillRect(sx, sy + ts - 4, ts, 4);
         break;
       }
 
@@ -2068,6 +2398,61 @@ export class OverworldEngine {
       ctx.fillRect(sx + 14, sy + 6, 4, 7);
       ctx.fillStyle = '#ffffff';
       ctx.fillRect(sx + 15, sy + 7, 2, 3);
+    } else if (landmark.id === 'landmark_sunstone_obelisk') {
+      ctx.fillStyle = 'rgba(69, 26, 3, 0.3)';
+      ctx.beginPath();
+      ctx.ellipse(sx + 16, sy + 27, 10, 4, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#92400e';
+      ctx.fillRect(sx + 8, sy + 21, 16, 6);
+      ctx.fillStyle = '#d97706';
+      ctx.fillRect(sx + 11, sy + 11, 10, 11);
+      ctx.fillStyle = '#fbbf24';
+      ctx.fillRect(sx + 13, sy + 6, 6, 6);
+      ctx.globalAlpha = glow;
+      ctx.fillStyle = '#fef08a';
+      ctx.fillRect(sx + 14, sy + 3, 4, 7);
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(sx + 15, sy + 4, 2, 3);
+    } else if (landmark.id === 'landmark_glowspore_lantern') {
+      ctx.fillStyle = 'rgba(6, 44, 37, 0.32)';
+      ctx.beginPath();
+      ctx.ellipse(sx + 16, sy + 27, 10, 4, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#cbd5e1';
+      ctx.fillRect(sx + 13, sy + 15, 6, 12);
+      ctx.fillStyle = '#0f766e';
+      ctx.fillRect(sx + 6, sy + 8, 20, 8);
+      ctx.fillStyle = '#2dd4bf';
+      ctx.fillRect(sx + 8, sy + 5, 16, 5);
+      ctx.globalAlpha = glow;
+      ctx.fillStyle = '#c084fc';
+      ctx.fillRect(sx + 10, sy + 9, 4, 3);
+      ctx.fillRect(sx + 19, sy + 10, 4, 3);
+      ctx.fillStyle = '#fef08a';
+      ctx.fillRect(sx + 15, sy + 7, 3, 3);
+    } else if (landmark.id === 'landmark_astral_orrery') {
+      ctx.fillStyle = 'rgba(15, 23, 42, 0.32)';
+      ctx.beginPath();
+      ctx.ellipse(sx + 16, sy + 27, 10, 4, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#312e81';
+      ctx.fillRect(sx + 8, sy + 20, 16, 6);
+      ctx.fillStyle = '#f59e0b';
+      ctx.fillRect(sx + 14, sy + 14, 4, 7);
+      ctx.strokeStyle = '#fde047';
+      ctx.lineWidth = 1.4;
+      ctx.beginPath();
+      ctx.ellipse(sx + 16, sy + 11, 10, 4, -0.35, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.ellipse(sx + 16, sy + 11, 10, 4, 0.35, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.globalAlpha = glow;
+      ctx.fillStyle = '#67e8f9';
+      ctx.beginPath();
+      ctx.arc(sx + 16, sy + 11, 3.5, 0, Math.PI * 2);
+      ctx.fill();
     } else {
       ctx.fillStyle = 'rgba(15, 23, 42, 0.25)';
       ctx.beginPath();

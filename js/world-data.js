@@ -27,6 +27,15 @@ export const TILE = {
   LANTERN: 25,
   GROVE_GRASS: 26,
   GROVE_PATH: 27,
+  DUNE_SAND: 28,
+  DUNE_PATH: 29,
+  SANDSTONE_WALL: 30,
+  MARSH_GRASS: 31,
+  MARSH_PATH: 32,
+  MARSH_WALL: 33,
+  SANCTUM_FLOOR: 34,
+  SANCTUM_PATH: 35,
+  SANCTUM_WALL: 36,
 };
 
 export const SOLID_TILES = new Set([
@@ -41,6 +50,9 @@ export const SOLID_TILES = new Set([
   TILE.LAVA,
   TILE.ICE_WALL,
   TILE.LANTERN,
+  TILE.SANDSTONE_WALL,
+  TILE.MARSH_WALL,
+  TILE.SANCTUM_WALL,
 ]);
 
 export const BIOMES = {
@@ -68,6 +80,12 @@ export const BIOMES = {
       { id: 143, weight: 6 },
       { id: 280, weight: 12 },
       { id: 403, weight: 14 },
+      { id: 152, weight: 14 },
+      { id: 387, weight: 14 },
+      { id: 495, weight: 14 },
+      { id: 123, weight: 10 },
+      { id: 214, weight: 8 },
+      { id: 396, weight: 16 },
     ],
   },
   cave: {
@@ -85,6 +103,11 @@ export const BIOMES = {
       { id: 180, weight: 12 },
       { id: 93, weight: 8 },
       { id: 281, weight: 12 },
+      { id: 41, weight: 18 },
+      { id: 304, weight: 14 },
+      { id: 524, weight: 14 },
+      { id: 200, weight: 12 },
+      { id: 302, weight: 10 },
     ],
   },
   water: {
@@ -103,6 +126,12 @@ export const BIOMES = {
       { id: 117, weight: 8 },
       { id: 363, weight: 16 },
       { id: 349, weight: 14 },
+      { id: 158, weight: 14 },
+      { id: 393, weight: 14 },
+      { id: 501, weight: 14 },
+      { id: 170, weight: 14 },
+      { id: 90, weight: 14 },
+      { id: 183, weight: 16 },
     ],
   },
   volcano: {
@@ -121,6 +150,12 @@ export const BIOMES = {
       { id: 155, weight: 18 },
       { id: 156, weight: 10 },
       { id: 371, weight: 14 },
+      { id: 255, weight: 14 },
+      { id: 390, weight: 14 },
+      { id: 228, weight: 14 },
+      { id: 218, weight: 14 },
+      { id: 125, weight: 10 },
+      { id: 636, weight: 10 },
     ],
   },
   peak: {
@@ -138,6 +173,12 @@ export const BIOMES = {
       { id: 364, weight: 14 },
       { id: 361, weight: 18 },
       { id: 372, weight: 10 },
+      { id: 220, weight: 16 },
+      { id: 215, weight: 14 },
+      { id: 459, weight: 14 },
+      { id: 582, weight: 14 },
+      { id: 613, weight: 14 },
+      { id: 359, weight: 10 },
     ],
   },
   grove: {
@@ -157,6 +198,68 @@ export const BIOMES = {
       { id: 1, weight: 8 },
       { id: 4, weight: 8 },
       { id: 7, weight: 8 },
+      { id: 546, weight: 14 },
+      { id: 548, weight: 14 },
+      { id: 570, weight: 12 },
+      { id: 572, weight: 14 },
+      { id: 427, weight: 14 },
+    ],
+  },
+  desert: {
+    id: 'desert',
+    name: 'Sunstone Dunes',
+    icon: '🏜️',
+    levelRange: [11, 19],
+    encounters: [
+      { id: 27, weight: 18 },
+      { id: 111, weight: 16 },
+      { id: 231, weight: 18 },
+      { id: 246, weight: 14 },
+      { id: 328, weight: 16 },
+      { id: 443, weight: 14 },
+      { id: 551, weight: 16 },
+      { id: 343, weight: 15 },
+      { id: 112, weight: 10 },
+      { id: 329, weight: 10 },
+      { id: 444, weight: 10 },
+    ],
+  },
+  marsh: {
+    id: 'marsh',
+    name: 'Glowspore Bayou',
+    icon: '🍄',
+    levelRange: [14, 22],
+    encounters: [
+      { id: 258, weight: 16 },
+      { id: 270, weight: 18 },
+      { id: 285, weight: 16 },
+      { id: 406, weight: 16 },
+      { id: 194, weight: 18 },
+      { id: 355, weight: 14 },
+      { id: 607, weight: 14 },
+      { id: 577, weight: 14 },
+      { id: 271, weight: 10 },
+      { id: 315, weight: 10 },
+      { id: 608, weight: 10 },
+    ],
+  },
+  sanctum: {
+    id: 'sanctum',
+    name: 'Astral Sky Citadel',
+    icon: '🌌',
+    levelRange: [16, 26],
+    encounters: [
+      { id: 81, weight: 18 },
+      { id: 137, weight: 14 },
+      { id: 374, weight: 16 },
+      { id: 610, weight: 16 },
+      { id: 633, weight: 14 },
+      { id: 574, weight: 16 },
+      { id: 624, weight: 15 },
+      { id: 249, weight: 5 },
+      { id: 82, weight: 10 },
+      { id: 375, weight: 10 },
+      { id: 611, weight: 10 },
     ],
   },
 };
@@ -190,58 +293,79 @@ const CHAR_TO_TILE = {
   i: TILE.LANTERN,
   g: TILE.GROVE_GRASS,
   m: TILE.GROVE_PATH,
+  d: TILE.DUNE_SAND,
+  u: TILE.DUNE_PATH,
+  D: TILE.SANDSTONE_WALL,
+  y: TILE.MARSH_GRASS,
+  b: TILE.MARSH_PATH,
+  M: TILE.MARSH_WALL,
+  z: TILE.SANCTUM_FLOOR,
+  k: TILE.SANCTUM_PATH,
+  Z: TILE.SANCTUM_WALL,
 };
 
-// 52 columns x 48 rows cohesive island linking Village, Forest, Cavern, Lagoon, Ember Caldera, Starfall Peak & Celestial Grove
+// 68 columns x 60 rows cohesive island linking Village, Forest, Cavern, Lagoon, Ember Caldera, Starfall Peak, Celestial Grove, Sunstone Dunes, Glowspore Bayou & Astral Sky Citadel
 const RAW_MAP = [
-  'TTTTTTTTTTTTTTTTTTTT################################',
-  'T..,,,,..T..,,,,.CT##ppcccCc#cccccc##vvvvaaaLLLLvvv#',
-  'T.,,,,,,....,,,,..T#pccccccp#cppppp##vCvaaaLLvvLLvv#',
-  'T..C,,,..T..,,,S..T#cp###ccp#cp##Sp##vvvvaaLviSivLv#',
-  'T..,,,,..T..,,,r..T#cp#Cpccp#cp##rpi#aaaaavLvvrvvLv#',
-  'T....====...=rrr..T#cpppccccpppccrprraaaaavLLBBLLLL#',
-  'T.,,====,,,,====,.T##ccc######cccppi#vvvvvaaaaraavv#',
-  'T.,,==,,,T..==,,,,T#ccccccppccccccp##vvvvvLLaaaarav#',
-  'T..===..==!===..,.T#pccccc#pcccccpp####vvLLaLaaaarS#',
-  'TTTi====iTTTTTTTTTT#ppcccc#pp####pp##vvvaaaaaaavvvv#',
-  'T..*====*.........T##pccccccp#pp#pp##vvaaaLLLLaaavv#',
-  'T.RRRR..*..RRRR..*T#pp#r#ccpp#ppCpp##vvaaLLBBLLaaav#',
-  'T.HHHH.*...HHHH..*T#cp#r#ccpppppppp##vvaaavvvaaaavv#',
-  'T..==..+====..==..T#cp#S#ccccccc#pp##aaa+a!aaaaaCv##',
-  'T..==..===!==.==..Tipp#!###pppp##ppi#aaaaiaaaaaavvv#',
-  'T..==...==..=======pppppppppppppppprraaaaaaaaaaavvv#',
-  'T..**...==........TippppppppppppppprraaaaaiaaaaaLLv#',
-  'T.......==........T########pp######i#vvvvaaarrrvvLv#',
-  'TTTTi..===..iTTTTTTTssssssspp##ssssT#######irr#i####',
-  'Tssss..===..ssssssTsssssssspp##ssssTIfffffnnrrnnfffI',
-  'Tss..ssss!==ssss..sssswwwssssppwwssTInSnffnnffnnfffI',
-  'TsswwwwsssssssswwwwsswwwwwwsssswwssTInnnnnffffffnnfI',
-  'Tsswwww~~BBBB~~wwwwss~~BBBB~~wwwwssiIfffnffff+ffnCII',
-  'Tssw~~~~~ssss~~wwww~~~~srSsss~BBBBrrrffff!fffffffffI',
-  'TsswCsssssww~~~wwww~~~~ssrsss~~wwssiIfffnnfffffnnffI',
-  'Tsswssssssww~~~~~~~~~~~ssssss~~~~~~TInnnnnfffffnnnnI',
-  'T~~~~~~wwww~~~~~~~~~~~~~BB~~~~~~~~~TInnnIIfffffIIInI',
-  'TTTTTTTTBBTTTTTTTTTTTTTirriTTTTTTTTTIfnnIIffrrfIIffI',
-  'T~~wwwwwBBww~~~wwww~~CssssffffnnfffIInffffrrffnnfffI',
-  'T~wwwwsssssss~~wwww~~sssssffnnnnfffIIfffffrrfffnnnnI',
-  'T~wwwsssssssswwww~~~~sssssffffnnffffffffffffIffnnnnI',
-  'T~wwssssss*ssssswwBBBBBBBBrffffffffffnffffffIffnnffI',
-  'T~wwwsssss*sssswww~~~wwwwwIfffnnnnffffffrfffIfffrrrI',
-  'T~~wwwwsssssswwww~~~~wwwwwInnnIInnnfffffrrriSiIfrffI',
-  'T~~~wwwwwswwwww~~~~~~wwwwwInnCIInnnfffnnffrrrrrffCfI',
-  'T~~~~~~wwwww~~~~~~~~~~~~~~InnnffnnnnnnnnfffffffffnnI',
-  'T~~~~~~~BB~~~~~~~~~~~~~~~~IfffffffffffffnffffffffnnI',
-  'TTTTTTTTBBTTTTTTTTTTTTTTTTIIIIIIIIrrIIIIIIIIIIIIIIII',
-  'TTgggggimm!mmgigT~~Tg*ggggggg*gggirriggggggTTgg*gggT',
-  'TgT*ggmmmmmmmmggg~~gggmmmmmmmgggg*rr*ggggTgggggggTgT',
-  'Tg*gggmmmg*mmmmmmBBmmmmimmmimmmmmmrrmmmmmmmrirrriggT',
-  'Tggg*mmm*mmmmmggg~~gmmmmm+mmmmmmmmrrrrmrrrrrrrSrrmgT',
-  'Tggggmmgggggggg*g~~gmmmm*m*mmmmmmmmmmmmmmmmmmrrrgggT',
-  'Tgg*g*mgggggggggg~~ggmmmmmmmmggggggggggggggggmgggggT',
-  'TgggCmmmmmmmmmmmmBBmgmmmmmmmmgg*ggg*gggg*gggggmmg*gT',
-  'Tgg*gg*ggggggg*gg~~gg*gggg*ggTgggggggg*gggggggg*CgTT',
-  'TTgggggggggTTgggT~~TggggggggggTggggggggTgggggggggTTT',
-  'TTTTTTTTTTTTTTTTT~~TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT',
+  'TTTTTTTTTTTTTTTTTTTT################################DDDDDDDDDDDDDDDD',
+  'T..,,,,..T..,,,,.CT##ppcccCc#cccccc##vvvvaaaLLLLvvv#DddddDuuuuuudddD',
+  'T.,,,,,,....,,,,..T#pccccccp#cppppp##vCvaaaLLvvLLvv#DddddduuddddddCD',
+  'T..C,,,..T..,,,S..T#cp###ccp#cp##Sp##vvvvaaLviSivLv#DddddduurddddDDD',
+  'T..,,,,..T..,,,r..T#cp#Cpccp#cp##rpi#aaaaavLvvrvvLv#DduuudirSriddddD',
+  'T....====...=rrr..T#cpppccccpppccrprraaaaavLLBBLLLL#DduuudddrruddddD',
+  'T.,,====,,,,====,.T##ccc######cccppi#vvvvvaaaaraavv#DduuudddduuddddD',
+  'T.,,==,,,T..==,,,,T#ccccccppccccccp##vvvvvLLaaaarav#DdddddddduuddddD',
+  'T..===..==!===..,.T#pccccc#pcccccpp####vvLLaLaaaarS#DddduuuuuuuddddD',
+  'TTTi====iTTTTTTTTTT#ppcccc#pp####pp##vvvaaaaaaavvvv#DDdduudddddddddD',
+  'T..*====*.........T##pccccccp#pp#pp##vvaaaLLLLaaavv#DduudduuuDDddddD',
+  'T.RRRR..*..RRRR..*T#pp#r#ccpp#ppCpp##vvaaLLBBLLaaav#DCuuuudddddddddD',
+  'T.HHHH.*...HHHH..*T#cp#r#ccpppppppp##vvaaavvvaaaavv#DddduuuuuuuddddD',
+  'T..==..+====..==..T#cp#S#ccccccc#pp##aaa+a!aaaaaCv##DddddduuuudddddD',
+  'T..==..===!==.==..Tipp#!###pppp##ppi#aaaaiaaaaaavvvauu!uuuuuuudddddD',
+  'T..==...==..=======pppppppppppppppprraaaaaaaaaaavvvauuuu+uuuuuuddddD',
+  'T..**...==........TippppppppppppppprraaaaaiaaaaaLLv#DddduuuuuuuddddD',
+  'T.......==........T########pp######i#vvvvaaarrrvvLv#DddddddduuuddddD',
+  'TTTTi..===..iTTTTTTTssssssspp##ssssT#######irr#i####DddddddduuuddddD',
+  'Tssss..===..ssssssTsssssssspp##ssssTIfffffnnrrnnfffIDddDDddduuuddddD',
+  'Tss..ssss!==ssss..sssswwwssssppwwssTInSnffnnffnnfffIDddddddduuuddddD',
+  'TsswwwwsssssssswwwwsswwwwwwsssswwssTInnnnnffffffnnfIDddddddduuuddddD',
+  'Tsswwww~~BBBB~~wwwwss~~BBBB~~wwwwssiIfffnffff+ffnCIIDddddduuuuuddddD',
+  'Tssw~~~~~ssss~~wwww~~~~srSsss~BBBBrrrffff!ffffffffffuuuuuuuuuuuddddD',
+  'TsswCsssssww~~~wwww~~~~ssrsss~~wwssiIfffnnfffffnnfffuuuuudddduuddddD',
+  'Tsswssssssww~~~~~~~~~~~ssssss~~~~~~TInnnnnfffffnnnnIDdddddddduuddddD',
+  'T~~~~~~wwww~~~~~~~~~~~~~BB~~~~~~~~~TInnnIIfffffIIInIDdddddddruuddddD',
+  'TTTTTTTTBBTTTTTTTTTTTTTirriTTTTTTTTTIfnnIIffrrfIIffIDddddddirriddddD',
+  'T~~wwwwwBBww~~~wwww~~CssssffffnnfffIInffffrrffnnfffIDddddddrrddddddD',
+  'T~wwwwsssssss~~wwww~~sssssffnnnnfffIIfffffrrfffnnnnIDDDDDDDrrDDDDDDD',
+  'T~wwwsssssssswwww~~~~sssssffffnnffffffffffffIffnnnnIZZZZZZZrrZZZZZZZ',
+  'T~wwssssss*ssssswwBBBBBBBBrffffffffffnffffffIffnnffIZzzzzzzkkzzzzzzZ',
+  'T~wwwsssss*sssswww~~~wwwwwIfffnnnnffffffrfffIfffrrrrrrkkkkkkkzzzzCzZ',
+  'T~~wwwwsssssswwww~~~~wwwwwInnnIInnnfffffrrriSiIfrffIZzzzzzzkkzzzzzzZ',
+  'T~~~wwwwwswwwww~~~~~~wwwwwInnCIInnnfffnnffrrrrrffCfIZzzzzzkkkkzzzzzZ',
+  'T~~~~~~wwwww~~~~~~~~~~~~~~InnnffnnnnnnnnfffffffffnnIZzzZZzkkkkzZZzzZ',
+  'T~~~~~~~BB~~~~~~~~~~~~~~~~IfffffffffffffnffffffffnnIZzzzzkkkkkkzzzzZ',
+  'TTTTTTTTBBTTTTTTTTTTTTTTTTIIIIIIIIrrIIIIIIIIIIIIIIIIZzzzzkkkkkkzzzzZ',
+  'TTgggggimm!mmgigT~~Tg*ggggggg*gggirriggggggTTgg*gggTZzzzzzkkkkzzzzzZ',
+  'TgT*ggmmmmmmmmggg~~gggmmmmmmmgggg*rr*ggggTgggggggTgTZzzzzzzkkzzzzzzZ',
+  'Tg*gggmmmg*mmmmmmBBmmmmimmmimmmmmmrrmmmmmmmrirrriggTZzzZZzzkkzzZZzzZ',
+  'Tggg*mmm*mmmmmggg~~gmmmmm+mmmmmmmmrrrrmrrrrrrrSrrmgrrrkkkkkkkzzzzzzZ',
+  'Tggggmmgggggggg*g~~gmmmm*m*mmmmmmmmmmmmmmmmmmrrrgggrrrkkkkkkkzzzzzzZ',
+  'Tgg*g*mgggggggggg~~ggmmmmmmmmggggggggggggggggmgggggTZzzzzzzkkzzzzzzZ',
+  'TgggCmmmmmmmmmmmmBBmgmmmmmmmmgg*ggg*gggg*gggggmmg*gTZzzzzzzkkzzzzzzZ',
+  'Tgg*gg*ggggggg*gg~~gg*gggg*ggTgggggggg*gggggggg*CgTTZzzzzzzkkzzzzzzZ',
+  'TTgggggggggTTgggT~~TggggggggggTggggggggTgggggggggTTTZzzzzzkkkkzzzzzZ',
+  'TTTTTTTmmTTTTTTTT~~TTTTTTmmTTTTTTTTTTTTTTTrrTTTTTTTTZzzzzzkkkkzzzzzZ',
+  'MMMMMMMbbMMMMMMMM~~MMMMMMbbMMMMMMMMMZZZZZZrrZZZZZZZZZzzZZzzkkzzzzzzZ',
+  'Myyyyyybb!yyyyyyM~~MyyyyybbbyyyyyyyMZzzzzzkkzzzzzzzZZzzzzzzkkzzzzzzZ',
+  'MyyyyyybbbbbbbbMM~~MyyyyybbbbMMMyyyMZzzzzzkkzzzzzzzZZzzzzzkkkrrzzzzZ',
+  'MyyMyyybbbbbbbbyy~~yybbbbbbbbyrSryyMZzzzzzkk!zzzzzzZZzzzzzkkirrizzzZ',
+  'Myyyyyybbbbbbbbb~~~~bbbbbbbbbirriyyMZzzkkkkkzzzzkkkkkkkkkkkkkrrzzzzZ',
+  'MyyyyyyyyyybbbbbBBBBbbbbbbbbbyrryyBBkkkkkkkk+kkkrrrrkkkkkkkkkrSrzzzZ',
+  'Myyyyyyyyyybbb+bBBBBbbbbbbbbbyyyyyBBkkkkkkkkkkkkkkkkkkkkkkkkkrrzzzzZ',
+  'My~~~~yyyyybbbyy~~~~yybbbbyyyyyyyyyMZzzkkkkkzzzzkkkkkkkkkkkkirrizzzZ',
+  'My~CBBbbbbbyyyyyM~~MyybbbbyyyyyyyyyMZzCzzzkkzzzzzzzZZzzzzzzkkrrzzzzZ',
+  'My~~~~yyyyyyyyyyM~~MyyyCyyyyyyyyyyyMZzzzzzkkzzzzzzzZZzzzzzzkkzzzzzzZ',
+  'MyyyyyyyyyyyyyyyM~~MyyyyyyyyyyyyyyyMZzzzzzkkzzzzzzzZZzzzzzzzzzzzzzzZ',
+  'MMMMMMMMMMMMMMMMM~~MMMMMMMMMMMMMMMMMZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ',
 ];
 
 export const WORLD_ROWS = RAW_MAP.length;
@@ -265,6 +389,9 @@ export const SIGNPOSTS = {
   '42,13': 'Ember Caldera: Molten rivers glow beneath basalt bridges! Meet Ponyta, Vulpix, Growlithe, and Magmar—and follow the rune bridge north to Caldera Shrine.',
   '41,23': 'Starfall Peak: Frosty starlit grass sparkles under the aurora! Watch for Seel, Clefairy, Gastly, and rare Dratini as you climb toward Starfall Shrine.',
   '10,38': 'Celestial Grove: Blossom petals drift over moonstone paths! Meet Togepi, Treecko, and Riolu in the emerald meadows, heal at the Starlight Fountain, and seek Celestial Grove Shrine to the East!',
+  '54,14': 'Sunstone Dunes: Golden mirage sands shimmer with Ground, Rock, and Dragon Pokémon! Heal at the oasis fountain nearby, watch out for Nomad Zara & Mirage Ace Sahara, and seek Sunstone Mirage Shrine to the North!',
+  '9,49': 'Glowspore Bayou: Bioluminescent reeds and cypress lanterns light the misty boardwalks! Befriend Water, Grass, and Ghost Pokémon, and cross the eastern bridges toward Glowspore Lantern Shrine!',
+  '44,51': 'Astral Sky Citadel: Starlight marble halls bridge the heavens! Heal at the courtyard fountain, speak with Astronomer Atlas, and ascend the eastern promenade to challenge Astral Sky Sanctum!',
 };
 
 export const SHRINES = {
@@ -357,6 +484,36 @@ export const SHRINES = {
     badgeId: 'grove',
     intro: 'The mythical Guardian Jirachi awakens beneath drifting sakura starlight! Triumph to earn the Astral Grove Badge!',
     clearedText: 'Celestial melodies chime across the moonstone dais. Your Astral Grove Badge shines with starlight!',
+  },
+  '60,4': {
+    id: 'desert_shrine',
+    name: 'Sunstone Mirage Shrine',
+    biome: 'desert',
+    guardianId: 248,
+    level: 19,
+    badgeId: 'mirage',
+    intro: 'The mighty Guardian Tyranitar shakes the Sunstone Mirage Shrine with golden sandstorms! Triumph to claim the Sunstone Mirage Badge!',
+    clearedText: 'Golden desert winds hum serenely over the Sunstone Mirage Shrine. Your Sunstone Mirage Badge gleams brightly!',
+  },
+  '31,51': {
+    id: 'marsh_shrine',
+    name: 'Glowspore Lantern Shrine',
+    biome: 'marsh',
+    guardianId: 251,
+    level: 22,
+    badgeId: 'bayou',
+    intro: 'The mythical Guardian Celebi emerges from glowing emerald mist at Glowspore Lantern Shrine! Triumph to earn the Glowspore Lantern Badge!',
+    clearedText: 'Bioluminescent spores drift peacefully around Glowspore Lantern Shrine. You carry Celebi’s timeless blessing!',
+  },
+  '62,53': {
+    id: 'sanctum_shrine',
+    name: 'Astral Sky Sanctum',
+    biome: 'sanctum',
+    guardianId: 384,
+    level: 25,
+    badgeId: 'zenith',
+    intro: 'The Sky Guardian Rayquaza descends from cosmic starlight at Astral Sky Sanctum! Conquer this supreme trial to claim the Astral Zenith Crown!',
+    clearedText: 'Starlight auroras crown the Astral Sky Sanctum in emerald-gold splendor. You wear the Astral Zenith Crown!',
   },
 };
 
@@ -458,6 +615,48 @@ export const CHESTS = {
     label: 'Sakura Star Chest',
     rewards: { potions: 3, greatBalls: 2, starShards: 3, gems: { moon_gem: 1, astral_gem: 1 } },
     message: '{trainer} opened the Sakura Star Chest and found a Starlight Gem 🌙 + an Astral Gem 🌠 + 3 ✨ Star Shards + 2 Great Balls + 3 Berry Potions!',
+  },
+  '66,2': {
+    id: 'desert_chest_prism',
+    biome: 'desert',
+    label: 'Sunstone Prism Vault',
+    rewards: { potions: 2, greatBalls: 2, starShards: 4, gems: { prism_gem: 1 } },
+    message: '{trainer} opened the Sunstone Prism Vault and found a Prism Gem 💠 + 4 ✨ Star Shards + 2 Great Balls + 2 Berry Potions!',
+  },
+  '53,11': {
+    id: 'desert_chest_sun',
+    biome: 'desert',
+    label: 'Golden Mirage Chest',
+    rewards: { potions: 2, starBalls: 2, starShards: 3, gems: { sun_gem: 1 } },
+    message: '{trainer} opened the Golden Mirage Chest and found a Sunburst Gem ☀️ + 3 ✨ Star Shards + 2 🌟 Star Balls + 2 Berry Potions!',
+  },
+  '3,56': {
+    id: 'marsh_chest_dusk',
+    biome: 'marsh',
+    label: 'Glowspore Lantern Chest',
+    rewards: { potions: 2, greatBalls: 2, starShards: 4, gems: { dusk_gem: 1 } },
+    message: '{trainer} opened the Glowspore Lantern Chest and found a Twilight Gem 🔮 + 4 ✨ Star Shards + 2 Great Balls + 2 Berry Potions!',
+  },
+  '23,57': {
+    id: 'marsh_chest_leaf',
+    biome: 'marsh',
+    label: 'Bayou Emerald Chest',
+    rewards: { potions: 3, starBalls: 1, starShards: 3, gems: { leaf_gem: 1 } },
+    message: '{trainer} opened the Bayou Emerald Chest and found a Verdant Gem 🍃 + 3 ✨ Star Shards + 1 🌟 Star Ball + 3 Berry Potions!',
+  },
+  '38,56': {
+    id: 'sanctum_chest_prism',
+    biome: 'sanctum',
+    label: 'Astral Prism Reliquary',
+    rewards: { potions: 2, starBalls: 2, starShards: 5, gems: { prism_gem: 1 } },
+    message: '{trainer} opened the Astral Prism Reliquary and found a Prism Gem 💠 + 5 ✨ Star Shards + 2 🌟 Star Balls + 2 Berry Potions!',
+  },
+  '65,32': {
+    id: 'sanctum_chest_astral',
+    biome: 'sanctum',
+    label: 'Zenith Starlight Coffer',
+    rewards: { potions: 3, greatBalls: 3, starBalls: 2, starShards: 5, gems: { astral_gem: 1 } },
+    message: '{trainer} opened the Zenith Starlight Coffer and found an Astral Gem 🌠 + 5 ✨ Star Shards + 2 🌟 Star Balls + 3 Great Balls + 3 Berry Potions!',
   },
 };
 
@@ -642,22 +841,78 @@ export const NPCS = {
     greeting: 'Your heart resonates with your partners, {trainer}! Reach 60+ Bond (Trusted Buddy 💖) with any Pokémon—or perform 2 evolutions—for an Astral Gem!',
     questId: 'quest_sora_bond',
   },
+  '59,13': {
+    id: 'npc_zara',
+    name: 'Nomad Zara',
+    role: 'Dune Archaeologist',
+    biome: 'desert',
+    palette: {
+      outfitPrimary: '#d97706',
+      outfitSecondary: '#fef08a',
+      hair: '#451a03',
+      skin: '#f6cfa9',
+      hat: '#b45309',
+    },
+    greeting: 'The golden dunes hide ancient crystalline relics, {trainer}! Befriend 2 Sunstone Dunes Pokémon—or clear Sunstone Mirage Shrine—and I will share a Prism Gem!',
+    questId: 'quest_zara_desert',
+  },
+  '13,50': {
+    id: 'npc_milo',
+    name: 'Mycologist Milo',
+    role: 'Bayou Naturalist',
+    biome: 'marsh',
+    palette: {
+      outfitPrimary: '#0d9488',
+      outfitSecondary: '#c084fc',
+      hair: '#334155',
+      skin: '#fde2c8',
+      hat: '#115e59',
+    },
+    greeting: 'Look at those glowing spores drifting across the bayou, {trainer}! Catch 2 Glowspore Bayou species—or clear Glowspore Lantern Shrine—for a Twilight Gem!',
+    questId: 'quest_milo_marsh',
+  },
+  '40,52': {
+    id: 'npc_atlas',
+    name: 'Astronomer Atlas',
+    role: 'Citadel Archivist',
+    biome: 'sanctum',
+    palette: {
+      outfitPrimary: '#312e81',
+      outfitSecondary: '#67e8f9',
+      hair: '#e2e8f0',
+      skin: '#fde2c8',
+      hat: '#4338ca',
+    },
+    greeting: 'You stand within the Astral Sky Citadel, {trainer}! Befriend 2 Citadel species—or triumph at Astral Sky Sanctum—for both a Prism Gem and an Astral Gem!',
+    questId: 'quest_atlas_sanctum',
+  },
 };
 
 function countCaughtFromList(profile, ids) {
   const caught = profile?.pokedex?.caught || {};
-  return ids.filter((id) => Boolean(caught[id])).length;
+  return ids.filter((id) => {
+    const v = caught[id];
+    return v === true || Number(v) > 0;
+  }).length;
 }
 
-const FOREST_QUEST_IDS = [10, 11, 16, 25, 39, 43, 133, 143, 179, 280, 403];
-const CAVE_QUEST_IDS = [35, 37, 63, 74, 92, 93, 95, 180, 281];
-const WATER_QUEST_IDS = [54, 58, 60, 116, 117, 120, 129, 131, 363];
+function countTotalCaught(profile) {
+  const caught = profile?.pokedex?.caught || {};
+  return Object.values(caught).filter((v) => v === true || Number(v) > 0).length;
+}
+
+const FOREST_QUEST_IDS = [10, 11, 16, 25, 39, 43, 133, 143, 179, 280, 403, 152, 153, 154, 387, 388, 389, 495, 496, 497, 123, 212, 214, 396, 397, 398];
+const CAVE_QUEST_IDS = [35, 37, 63, 74, 92, 93, 95, 180, 281, 41, 42, 169, 304, 305, 306, 524, 525, 526, 200, 429, 302];
+const WATER_QUEST_IDS = [54, 58, 60, 116, 117, 120, 129, 131, 363, 158, 159, 160, 393, 394, 395, 501, 502, 503, 170, 171, 90, 91, 183, 184];
 const VOLCANO_CORE_IDS = [77, 126];
-const VOLCANO_ALL_IDS = [77, 37, 58, 126, 74, 181, 404];
+const VOLCANO_ALL_IDS = [77, 37, 58, 126, 74, 181, 404, 255, 256, 257, 390, 391, 392, 228, 229, 218, 219, 125, 466, 636, 637];
 const PEAK_CORE_IDS = [86, 147, 148];
-const YUKI_PEAK_IDS = [86, 87, 144, 147, 148, 149, 151, 230, 333, 334, 363, 364, 365, 471];
-const TWILIGHT_QUEST_IDS = [35, 36, 63, 64, 65, 92, 93, 94, 196, 197, 280, 281, 282];
-const GROVE_QUEST_IDS = [175, 176, 468, 252, 253, 254, 350, 385, 447, 448, 475, 478];
+const YUKI_PEAK_IDS = [86, 87, 144, 147, 148, 149, 151, 230, 333, 334, 363, 364, 365, 471, 220, 221, 473, 215, 461, 459, 460, 362, 582, 583, 584, 613, 614, 359];
+const TWILIGHT_QUEST_IDS = [35, 36, 63, 64, 65, 92, 93, 94, 196, 197, 280, 281, 282, 41, 42, 169, 200, 429, 302, 355, 356, 477, 607, 608, 609, 577, 578, 579, 574, 575, 576];
+const GROVE_QUEST_IDS = [175, 176, 468, 252, 253, 254, 350, 385, 447, 448, 475, 478, 546, 547, 548, 549, 570, 571, 572, 573, 427, 428];
+const DESERT_QUEST_IDS = [27, 28, 111, 112, 464, 231, 232, 246, 247, 248, 328, 329, 330, 443, 444, 445, 551, 552, 553, 343, 344];
+const MARSH_QUEST_IDS = [258, 259, 260, 270, 271, 272, 285, 286, 406, 315, 407, 194, 195, 355, 356, 477, 607, 608, 609, 577, 578, 579, 251];
+const SANCTUM_QUEST_IDS = [81, 82, 462, 137, 233, 474, 374, 375, 376, 610, 611, 612, 633, 634, 635, 574, 575, 576, 624, 625, 249, 384];
 
 export const FIELD_QUESTS = [
   {
@@ -748,10 +1003,10 @@ export const FIELD_QUESTS = [
     description: 'Register 10 unique Pokémon species in your Starlight Pokédex.',
     rewards: { greatBalls: 3, potions: 2, gems: { moon_gem: 1 } },
     check(profile) {
-      return Object.keys(profile?.pokedex?.caught || {}).length >= 10;
+      return countTotalCaught(profile) >= 10;
     },
     progressText(profile) {
-      const n = Math.min(10, Object.keys(profile?.pokedex?.caught || {}).length);
+      const n = Math.min(10, countTotalCaught(profile));
       return `${n}/10 unique species caught`;
     },
     completeDialogue: 'Marvelous Pokédex research, {trainer}! Professor Willow rewarded you with a Starlight Gem 🌙, 3 Great Balls, and 2 Berry Potions!',
@@ -764,13 +1019,13 @@ export const FIELD_QUESTS = [
     rewards: { starBalls: 2, gems: { leaf_gem: 1 } },
     check(profile) {
       const visited = (profile?.biomesVisited || []).length;
-      const caught = Object.keys(profile?.pokedex?.caught || {}).length;
+      const caught = countTotalCaught(profile);
       const evos = profile?.stats?.evolutions || 0;
       return visited >= 4 || evos >= 1 || caught >= 6;
     },
     progressText(profile) {
       const visited = Math.min(4, (profile?.biomesVisited || []).length);
-      const caught = Math.min(6, Object.keys(profile?.pokedex?.caught || {}).length);
+      const caught = Math.min(6, countTotalCaught(profile));
       return `${visited}/4 regions visited or ${caught}/6 species caught (or evolve 1 Pokémon)`;
     },
     completeDialogue: 'Fabulous adventuring, {trainer}! Stylist Celeste presented you with 2 🌟 Star Balls and a Verdant Gem 🍃!',
@@ -859,6 +1114,57 @@ export const FIELD_QUESTS = [
       return `Highest Bond ${Math.min(60, topBond)}/60 or ${evos}/2 evolutions`;
     },
     completeDialogue: 'True harmony shines between trainer and partner, {trainer}! Aura Master Sora rewarded you with an Astral Gem 🌠, 4 ✨ Star Shards, and 1 🌟 Star Ball!',
+  },
+  {
+    id: 'quest_zara_desert',
+    npcId: 'npc_zara',
+    title: 'Sunstone Dunes Explorer',
+    description: 'Catch 2 Sunstone Dunes Pokémon or clear the Sunstone Mirage Shrine.',
+    rewards: { gems: { prism_gem: 1 }, starShards: 4, starBalls: 1 },
+    check(profile) {
+      if (profile?.shrinesCleared?.includes('desert_shrine')) return true;
+      return countCaughtFromList(profile, DESERT_QUEST_IDS) >= 2;
+    },
+    progressText(profile) {
+      if (profile?.shrinesCleared?.includes('desert_shrine')) return 'Sunstone Mirage Shrine cleared!';
+      const n = Math.min(2, countCaughtFromList(profile, DESERT_QUEST_IDS));
+      return `${n}/2 Sunstone Dunes species caught`;
+    },
+    completeDialogue: 'Golden wisdom, {trainer}! Nomad Zara gifted you a Prism Gem 💠, 4 ✨ Star Shards, and 1 🌟 Star Ball!',
+  },
+  {
+    id: 'quest_milo_marsh',
+    npcId: 'npc_milo',
+    title: 'Glowspore Bayou Chronicler',
+    description: 'Catch 2 Glowspore Bayou Pokémon or clear the Glowspore Lantern Shrine.',
+    rewards: { gems: { dusk_gem: 1 }, starShards: 4, starBalls: 1 },
+    check(profile) {
+      if (profile?.shrinesCleared?.includes('marsh_shrine')) return true;
+      return countCaughtFromList(profile, MARSH_QUEST_IDS) >= 2;
+    },
+    progressText(profile) {
+      if (profile?.shrinesCleared?.includes('marsh_shrine')) return 'Glowspore Lantern Shrine cleared!';
+      const n = Math.min(2, countCaughtFromList(profile, MARSH_QUEST_IDS));
+      return `${n}/2 Glowspore Bayou species caught`;
+    },
+    completeDialogue: 'Radiant field notes, {trainer}! Mycologist Milo gifted you a Twilight Gem 🔮, 4 ✨ Star Shards, and 1 🌟 Star Ball!',
+  },
+  {
+    id: 'quest_atlas_sanctum',
+    npcId: 'npc_atlas',
+    title: 'Astral Sky Pathfinder',
+    description: 'Catch 2 Astral Sky Citadel Pokémon or clear the Astral Sky Sanctum.',
+    rewards: { gems: { prism_gem: 1, astral_gem: 1 }, starShards: 5, starBalls: 2 },
+    check(profile) {
+      if (profile?.shrinesCleared?.includes('sanctum_shrine')) return true;
+      return countCaughtFromList(profile, SANCTUM_QUEST_IDS) >= 2;
+    },
+    progressText(profile) {
+      if (profile?.shrinesCleared?.includes('sanctum_shrine')) return 'Astral Sky Sanctum cleared!';
+      const n = Math.min(2, countCaughtFromList(profile, SANCTUM_QUEST_IDS));
+      return `${n}/2 Astral Sky Citadel species caught`;
+    },
+    completeDialogue: 'The constellations applaud you, {trainer}! Astronomer Atlas gifted you a Prism Gem 💠, an Astral Gem 🌠, 5 ✨ Star Shards, and 2 🌟 Star Balls!',
   },
 ];
 
@@ -1010,6 +1316,81 @@ export const RIVAL_TRAINERS = {
     winText: 'Luminous strategy, {trainer}! Astral Envoy Kieran gifted you 2 🌟 Star Balls, 5 ✨ Star Shards, and an Astral Gem 🌠!',
     rematchWinText: 'Your bond glows like a comet, {trainer}! Kieran shared 1 🌟 Star Ball and 4 ✨ Star Shards after a thrilling rematch!',
   },
+  '60,18': {
+    id: 'rival_sahara',
+    name: 'Mirage Ace Sahara',
+    role: 'Sunstone Dunes Challenger',
+    biome: 'desert',
+    palette: {
+      outfitPrimary: '#b45309',
+      outfitSecondary: '#fde047',
+      hair: '#451a03',
+      skin: '#f6cfa9',
+      hat: '#92400e',
+      accent: '#fbbf24',
+    },
+    party: [
+      { speciesId: 330, level: 19 },
+      { speciesId: 553, level: 20 },
+      { speciesId: 445, level: 22 },
+    ],
+    rewards: { starBalls: 2, starShards: 5, gems: { prism_gem: 1 } },
+    rematchRewards: { starBalls: 1, starShards: 4 },
+    intro: 'The desert mirage sharpens every battle instinct, {trainer}! Ready to challenge Sunstone Dunes’ finest?',
+    rematchIntro: 'Back across the golden sands, {trainer}? Let’s raise another desert storm!',
+    winText: 'Blistering brilliance, {trainer}! Mirage Ace Sahara gifted you 2 🌟 Star Balls, 5 ✨ Star Shards, and a Prism Gem 💠!',
+    rematchWinText: 'True sandstorm mastery, {trainer}! Sahara shared 1 🌟 Star Ball and 4 ✨ Star Shards after a thrilling rematch!',
+  },
+  '24,53': {
+    id: 'rival_nyx',
+    name: 'Bayou Mystic Nyx',
+    role: 'Glowspore Bayou Challenger',
+    biome: 'marsh',
+    palette: {
+      outfitPrimary: '#581c87',
+      outfitSecondary: '#2dd4bf',
+      hair: '#1e1b4b',
+      skin: '#fde2c8',
+      hat: '#0f766e',
+      accent: '#c084fc',
+    },
+    party: [
+      { speciesId: 272, level: 21 },
+      { speciesId: 407, level: 22 },
+      { speciesId: 609, level: 23 },
+    ],
+    rewards: { starBalls: 2, starShards: 5, gems: { leaf_gem: 1 } },
+    rematchRewards: { starBalls: 1, starShards: 4 },
+    intro: 'The lantern spores dance to our rhythm, {trainer}! Step onto the bayou boardwalk and battle me!',
+    rematchIntro: 'Ready for another glowing duel in Glowspore Bayou, {trainer}?',
+    winText: 'Enchanting tactics, {trainer}! Bayou Mystic Nyx gifted you 2 🌟 Star Balls, 5 ✨ Star Shards, and a Verdant Gem 🍃!',
+    rematchWinText: 'Your team gleams brighter than bayou spores, {trainer}! Nyx shared 1 🌟 Star Ball and 4 ✨ Star Shards!',
+  },
+  '59,46': {
+    id: 'rival_zephyr',
+    name: 'Zenith Champion Zephyr',
+    role: 'Astral Sky Citadel Challenger',
+    biome: 'sanctum',
+    palette: {
+      outfitPrimary: '#312e81',
+      outfitSecondary: '#fde047',
+      hair: '#e2e8f0',
+      skin: '#fde2c8',
+      hat: '#1e1b4b',
+      accent: '#67e8f9',
+    },
+    party: [
+      { speciesId: 462, level: 24 },
+      { speciesId: 635, level: 25 },
+      { speciesId: 376, level: 26 },
+    ],
+    rewards: { starBalls: 3, starShards: 6, gems: { astral_gem: 1 } },
+    rematchRewards: { starBalls: 2, starShards: 5 },
+    intro: 'Only trainers with sky-high resolve ascend Astral Sky Citadel, {trainer}! Show me your ultimate synergy!',
+    rematchIntro: 'Once more beneath the zenith stars, {trainer}? Let’s clash at full cosmic strength!',
+    winText: 'Transcendent victory, {trainer}! Zenith Champion Zephyr awarded you 3 🌟 Star Balls, 6 ✨ Star Shards, and an Astral Gem 🌠!',
+    rematchWinText: 'Champion-grade brilliance, {trainer}! Zephyr gifted you 2 🌟 Star Balls and 5 ✨ Star Shards!',
+  },
 };
 
 export const LANDMARKS = {
@@ -1076,9 +1457,36 @@ export const LANDMARKS = {
     icon: '🌠',
     description: 'A moonstone dial aligned with Jirachi’s Celestial Grove Shrine to the east. Partners with 60+ Bond (Trusted Buddy 💖) gain battle perks and may even tough out a knockout blow at 1 HP!',
   },
+  '56,4': {
+    id: 'landmark_sunstone_obelisk',
+    name: 'Sunstone Obelisk',
+    biome: 'desert',
+    icon: '🏜️',
+    description: 'A radiant sandstone pillar humming with solar resonance. Trainers say Prism Gems 💠 awaken Rhydon, Boldore, Magneton, Porygon2, and Dusclops into unstoppable titans!',
+  },
+  '10,52': {
+    id: 'landmark_glowspore_lantern',
+    name: 'Giant Glowspore Lantern',
+    biome: 'marsh',
+    icon: '🍄',
+    description: 'A towering bioluminescent mushroom spire guiding travelers over the misty boardwalks toward Celebi’s Glowspore Lantern Shrine in the east!',
+  },
+  '59,36': {
+    id: 'landmark_astral_orrery',
+    name: 'Astral Sky Orrery',
+    biome: 'sanctum',
+    icon: '🌌',
+    description: 'Spinning golden rings chart every constellation above Starlight Island, aligning the path south toward Rayquaza’s Astral Sky Sanctum!',
+  },
 };
 
 export function getBiomeAt(x, y) {
+  if (x >= 52) {
+    return y <= 29 ? BIOMES.desert : BIOMES.sanctum;
+  }
+  if (y >= 48) {
+    return x <= 35 ? BIOMES.marsh : BIOMES.sanctum;
+  }
   if (y >= 38) return BIOMES.grove;
   if (y <= 9 && x <= 19) return BIOMES.forest;
   if (x >= 20 && x <= 35 && y <= 17) return BIOMES.cave;
@@ -1154,7 +1562,8 @@ export function getBiomeDiscoveryStats(profile, biomeId, _speciesMap = null) {
   let seen = 0;
   let caught = 0;
   for (const id of nativeIds) {
-    const isCaught = Boolean(caughtObj[id]);
+    const rawVal = caughtObj[id];
+    const isCaught = rawVal === true || Number(rawVal) > 0;
     if (isCaught) caught += 1;
     if (isCaught || seenSet.has(id)) seen += 1;
   }
@@ -1210,8 +1619,8 @@ export function getCompassGuidance(profile, speciesMap = null) {
 
   const npcsTalked = new Set(profile?.npcsTalked || []);
   const shrinesCleared = new Set(profile?.shrinesCleared || []);
-  const caughtCount = Object.keys(profile?.pokedex?.caught || {}).length;
-  const totalSpecies = speciesMap ? Object.keys(speciesMap).length : 110;
+  const caughtCount = countTotalCaught(profile);
+  const totalSpecies = speciesMap ? Object.keys(speciesMap).length : 256;
 
   let goal = null;
 
@@ -1302,6 +1711,33 @@ export function getCompassGuidance(profile, speciesMap = null) {
       icon: '🌸',
       title: 'Celestial Grove Shrine (South)',
       targetBiomeId: 'grove',
+      targetX: pos.x,
+      targetY: pos.y,
+    };
+  } else if (!shrinesCleared.has('desert_shrine')) {
+    const pos = findEntryCoords(SHRINES, (s) => s.id === 'desert_shrine');
+    goal = {
+      icon: '🏜️',
+      title: 'Sunstone Mirage Shrine (East)',
+      targetBiomeId: 'desert',
+      targetX: pos.x,
+      targetY: pos.y,
+    };
+  } else if (!shrinesCleared.has('marsh_shrine')) {
+    const pos = findEntryCoords(SHRINES, (s) => s.id === 'marsh_shrine');
+    goal = {
+      icon: '🍄',
+      title: 'Glowspore Lantern Shrine (SW)',
+      targetBiomeId: 'marsh',
+      targetX: pos.x,
+      targetY: pos.y,
+    };
+  } else if (!shrinesCleared.has('sanctum_shrine')) {
+    const pos = findEntryCoords(SHRINES, (s) => s.id === 'sanctum_shrine');
+    goal = {
+      icon: '🌌',
+      title: 'Astral Sky Sanctum (SE)',
+      targetBiomeId: 'sanctum',
       targetX: pos.x,
       targetY: pos.y,
     };
