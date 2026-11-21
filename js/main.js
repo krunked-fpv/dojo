@@ -994,7 +994,7 @@ class GameApp {
       const lead = profile.team[0];
       const trainerName = TRAINERS[profile.trainerId]?.name || 'Trainer';
       this.openDialogue(
-        `${trainerName} & ${lead?.displayName || lead?.name || 'Partner'} set out on Starlight Island! Follow the Starlight Compass to Whispering Forest, Crystal Cavern, Sapphire Lagoon, Ember Caldera, Starfall Peak, and Celestial Grove!`
+        `${trainerName} & ${lead?.displayName || lead?.name || 'Partner'} set out on Starlight Island! Follow the Starlight Compass across Whispering Forest, Crystal Cavern, Sapphire Lagoon, Ember Caldera, Starfall Peak, Celestial Grove, Sunstone Dunes, Glowspore Bayou, and Astral Sky Citadel!`
       );
     }
   }
