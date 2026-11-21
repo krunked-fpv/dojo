@@ -110,6 +110,9 @@ const PHYSICAL_MOVE_IDS = new Set([
   'wild_volt',
   'iron_crush',
   'glacier_crash',
+  'leaf_blade',
+  'psycho_cut',
+  'aqua_tail',
 ]);
 
 const MOVE_FX_CLASS = {
@@ -121,6 +124,14 @@ const MOVE_FX_CLASS = {
   iron_crush: 'fx-metal-flash',
   glacier_crash: 'fx-ice-charge',
   magma_cannon: 'fx-magma-charge',
+  leaf_blade: 'fx-grove-slash',
+  eruption_flare: 'fx-lava-plume',
+  aura_sphere: 'fx-aura-charge',
+  psycho_cut: 'fx-psycho-cut',
+  aqua_tail: 'fx-prism-tail',
+  draco_meteor: 'fx-comet-storm',
+  omen_wind: 'fx-omen-frost',
+  doom_desire: 'fx-starlight-wish',
 };
 
 const ALL_MOVE_FX_CLASSES = Object.values(MOVE_FX_CLASS);
@@ -134,11 +145,15 @@ function normalizeBallStyle(ballType) {
 function resolveMoveParticleShape(move) {
   if (!move) return 'circle';
   if (move.id === 'star_melody') return 'note';
-  if (move.id === 'moonblast') return 'crescent';
+  if (move.id === 'moonblast' || move.id === 'psycho_cut') return 'crescent';
   if (move.id === 'thunder_fang' || move.id === 'wild_volt') return 'lightning';
   if (move.id === 'iron_crush') return 'stone';
-  if (move.fx === 'wind' || move.id === 'sky_wing' || move.id === 'gust') return 'wind';
-  if (move.id === 'phantom_claw' || move.id === 'starlight_claw') return 'slash';
+  if (move.fx === 'wind' || move.id === 'sky_wing' || move.id === 'gust' || move.id === 'omen_wind') return 'wind';
+  if (move.id === 'phantom_claw' || move.id === 'starlight_claw' || move.id === 'leaf_blade') return 'slash';
+  if (move.id === 'doom_desire' || move.id === 'aura_sphere') return 'star';
+  if (move.id === 'draco_meteor') return 'dragonflame';
+  if (move.id === 'eruption_flare') return 'ember';
+  if (move.id === 'aqua_tail') return 'bubble';
   const shapeByType = {
     fire: 'ember',
     water: 'bubble',
@@ -248,6 +263,7 @@ export class BattleEngine {
     this.displayedEnemyHp = 0;
     this.displayedPlayerHp = 0;
     this.mustSwitchForced = false;
+    this.playerBuddyEndured = false;
     this.resizeObserver = null;
     this._uiAbort = new AbortController();
 
@@ -544,6 +560,7 @@ export class BattleEngine {
     this.busy = true;
     this.state = BATTLE_STATES.INTRO;
     this.mustSwitchForced = false;
+    this.playerBuddyEndured = false;
     this.particles = [];
     this.popups = [];
     this.pokeballAnim = null;
@@ -635,6 +652,7 @@ export class BattleEngine {
     this.busy = false;
     this.state = BATTLE_STATES.INACTIVE;
     this.mustSwitchForced = false;
+    this.playerBuddyEndured = false;
     this.isTrainer = false;
     this.trainerData = null;
     this.enemyParty = [];
@@ -1508,6 +1526,63 @@ export class BattleEngine {
       return;
     }
 
+    const sprint5Charges = {
+      leaf_blade: { cols: ['#22c55e', '#4ade80', '#bbf7d0', '#ffffff'], shape: 'leaf', ring: '#22c55e', orbit: false },
+      eruption_flare: { cols: ['#fde047', '#fb923c', '#ef4444'], shape: 'ember', ring: '#f97316', orbit: false },
+      aura_sphere: { cols: ['#38bdf8', '#6366f1', '#a5f3fc', '#ffffff'], shape: 'orb', ring: '#38bdf8', orbit: true, angVel: 7.5 },
+      psycho_cut: { cols: ['#f472b6', '#e879f9', '#c084fc', '#ffffff'], shape: 'crescent', ring: '#f472b6', orbit: false },
+      aqua_tail: { cols: ['#38bdf8', '#67e8f9', '#34d399', '#f472b6'], shape: 'bubble', ring: '#38bdf8', orbit: true, angVel: 6.2 },
+      draco_meteor: { cols: ['#818cf8', '#fde047', '#c084fc', '#ffffff'], shape: 'star', ring: '#818cf8', orbit: false },
+      omen_wind: { cols: ['#a855f7', '#67e8f9', '#c084fc', '#e0f2fe'], shape: 'crystal', ring: '#a855f7', orbit: true, angVel: -7.0 },
+      doom_desire: { cols: ['#fde047', '#fef08a', '#38bdf8', '#ffffff'], shape: 'star', ring: '#fde047', orbit: true, angVel: 5.4 },
+    };
+    const s5 = sprint5Charges[moveId];
+    if (s5) {
+      this.particles.push({
+        x: center.x,
+        y: center.y,
+        vx: 0,
+        vy: 0,
+        gravity: 0,
+        life: 0,
+        maxLife: 0.26 * Math.min(1.3, lifeScale),
+        color: s5.ring,
+        size: 10,
+        maxRadius: 52,
+        lineWidth: 3.2,
+        shape: 'ring',
+      });
+      for (let i = 0; i < 10; i++) {
+        const angle = (Math.PI * 2 * i) / 10 + Math.random() * 0.2;
+        const dist = 44 + Math.random() * 14;
+        const particle = {
+          x: center.x + Math.cos(angle) * dist,
+          y: center.y + Math.sin(angle) * dist,
+          vx: 0,
+          vy: 0,
+          gravity: 0,
+          life: 0,
+          maxLife: 0.26 * Math.min(1.3, lifeScale),
+          color: s5.cols[i % s5.cols.length],
+          size: s5.shape === 'crescent' ? 7 : 4.5 + Math.random() * 2.5,
+          rotation: angle,
+          spin: 7,
+          shape: s5.shape,
+        };
+        if (s5.orbit) {
+          particle.orbitCenter = center;
+          particle.orbitAngle = angle;
+          particle.orbitRadius = 48;
+          particle.orbitRadialVel = -92;
+          particle.orbitAngVel = s5.angVel;
+        } else {
+          particle.pullTo = center;
+        }
+        this.particles.push(particle);
+      }
+      return;
+    }
+
     for (let i = 0; i < 8; i++) {
       const angle = (Math.PI * 2 * i) / 8 + Math.random() * 0.3;
       const dist = 42 + Math.random() * 18;
@@ -1617,18 +1692,22 @@ export class BattleEngine {
     if (options.slash) {
       const slashAngles = moveId === 'thunder_fang'
         ? [-0.85, 0.85, -0.45, 0.45, 0.05]
-        : [-0.65, 0.65, -0.35, 0.45];
+        : moveId === 'leaf_blade'
+          ? [-0.785, 0.785, -0.785, 0.785]
+          : moveId === 'psycho_cut'
+            ? [-0.65, 0.65, -0.25, 0.25]
+            : [-0.65, 0.65, -0.35, 0.45];
       slashAngles.forEach((ang, idx) => {
         this.particles.push({
-          x: center.x + (Math.random() - 0.5) * 18,
-          y: center.y + (Math.random() - 0.5) * 18,
-          vx: Math.cos(ang) * 42,
-          vy: Math.sin(ang) * 42,
+          x: center.x + (Math.random() - 0.5) * (moveId === 'leaf_blade' ? 12 : 18),
+          y: center.y + (Math.random() - 0.5) * (moveId === 'leaf_blade' ? 12 : 18),
+          vx: Math.cos(ang) * (moveId === 'leaf_blade' ? 58 : 42),
+          vy: Math.sin(ang) * (moveId === 'leaf_blade' ? 58 : 42),
           gravity: 0,
-          life: -(idx * 0.02),
-          maxLife: 0.24 * Math.min(1.4, lifeScale),
+          life: -(idx * 0.022),
+          maxLife: (moveId === 'leaf_blade' ? 0.28 : 0.24) * Math.min(1.4, lifeScale),
           color: idx % 2 === 0 ? (options.slashColor || typeColor) : '#ffffff',
-          size: 14 + Math.random() * 5,
+          size: (moveId === 'leaf_blade' ? 18 : 14) + Math.random() * 5,
           rotation: ang,
           spin: 0,
           shape: 'slash',
@@ -1819,6 +1898,200 @@ export class BattleEngine {
           shape: 'ember',
         });
       }
+    } else if (moveId === 'leaf_blade') {
+      const leafCols = ['#22c55e', '#4ade80', '#10b981', '#bbf7d0'];
+      for (let i = 0; i < 14; i++) {
+        const ang = (Math.PI * 2 * i) / 14 + Math.random() * 0.25;
+        const spd = 95 + Math.random() * 130;
+        this.particles.push({
+          x: center.x,
+          y: center.y,
+          vx: Math.cos(ang) * spd,
+          vy: Math.sin(ang) * spd - 20,
+          gravity: 50,
+          life: -(i * 0.01),
+          maxLife: (0.48 + Math.random() * 0.22) * lifeScale,
+          color: leafCols[i % leafCols.length],
+          size: 7.5 + Math.random() * 3.5,
+          rotation: ang,
+          spin: (Math.random() - 0.5) * 14,
+          shape: 'leaf',
+        });
+      }
+    } else if (moveId === 'eruption_flare') {
+      const lavaCols = ['#fef08a', '#fb923c', '#ef4444', '#b91c1c'];
+      for (let i = 0; i < 20; i++) {
+        this.particles.push({
+          x: pedestal.x + (Math.random() - 0.5) * 44,
+          y: pedestal.y - 4,
+          vx: (Math.random() - 0.5) * 200,
+          vy: -(165 + Math.random() * 155),
+          gravity: 310,
+          life: -(i * 0.014),
+          maxLife: (0.56 + Math.random() * 0.28) * lifeScale,
+          color: lavaCols[i % lavaCols.length],
+          size: 6 + Math.random() * 4.5,
+          shape: 'ember',
+        });
+      }
+    } else if (moveId === 'aura_sphere') {
+      ['#38bdf8', '#6366f1', '#ffffff'].forEach((col, idx) => {
+        this.particles.push({
+          x: center.x,
+          y: center.y,
+          vx: 0,
+          vy: 0,
+          gravity: 0,
+          life: -(idx * 0.05),
+          maxLife: 0.44 * Math.min(1.4, lifeScale),
+          color: col,
+          size: 16,
+          maxRadius: 72 + idx * 24,
+          lineWidth: 3.8,
+          shape: 'ring',
+        });
+      });
+      for (let i = 0; i < 14; i++) {
+        const ang = (Math.PI * 2 * i) / 14;
+        const spd = 110 + Math.random() * 110;
+        this.particles.push({
+          x: center.x,
+          y: center.y,
+          vx: Math.cos(ang) * spd,
+          vy: Math.sin(ang) * spd,
+          gravity: 0,
+          life: 0,
+          maxLife: 0.45 * lifeScale,
+          color: i % 3 === 0 ? '#ffffff' : i % 2 === 0 ? '#38bdf8' : '#818cf8',
+          size: i % 3 === 0 ? 7 : 5,
+          rotation: ang,
+          spin: 8,
+          shape: i % 3 === 0 ? 'orb' : 'star',
+        });
+      }
+    } else if (moveId === 'psycho_cut') {
+      const cutCols = ['#f472b6', '#e879f9', '#c084fc', '#ffffff'];
+      [-0.7, 0.7].forEach((ang, idx) => {
+        this.particles.push({
+          x: center.x + (idx === 0 ? -10 : 10),
+          y: center.y,
+          vx: Math.cos(ang) * 70,
+          vy: Math.sin(ang) * 70,
+          gravity: 0,
+          life: -(idx * 0.03),
+          maxLife: 0.34 * Math.min(1.4, lifeScale),
+          color: cutCols[idx],
+          size: 16,
+          rotation: ang,
+          spin: idx === 0 ? 6 : -6,
+          shape: 'crescent',
+        });
+      });
+    } else if (moveId === 'aqua_tail') {
+      const prismCols = ['#38bdf8', '#67e8f9', '#34d399', '#c084fc', '#f472b6'];
+      for (let i = 0; i < 14; i++) {
+        const ang = (Math.PI * 2 * i) / 14;
+        const spd = 90 + Math.random() * 125;
+        this.particles.push({
+          x: center.x,
+          y: center.y,
+          vx: Math.cos(ang) * spd,
+          vy: Math.sin(ang) * spd - 36,
+          gravity: -40,
+          life: -(i * 0.01),
+          maxLife: (0.48 + Math.random() * 0.2) * lifeScale,
+          color: prismCols[i % prismCols.length],
+          size: 5 + Math.random() * 4,
+          rotation: ang,
+          spin: 7,
+          shape: i % 3 === 0 ? 'star' : 'bubble',
+        });
+      }
+    } else if (moveId === 'draco_meteor') {
+      this.particles.push({
+        x: pedestal.x,
+        y: pedestal.y,
+        vx: 0,
+        vy: 0,
+        gravity: 0,
+        life: -0.02,
+        maxLife: 0.42 * Math.min(1.4, lifeScale),
+        color: '#818cf8',
+        size: 18,
+        maxRadius: 118,
+        lineWidth: 4.5,
+        shape: 'ring',
+      });
+      for (let i = 0; i < 12; i++) {
+        const ang = (Math.PI * 2 * i) / 12 + (Math.random() - 0.5) * 0.25;
+        const spd = 90 + Math.random() * 145;
+        this.particles.push({
+          x: center.x + (Math.random() - 0.5) * 24,
+          y: center.y + 6,
+          vx: Math.cos(ang) * spd,
+          vy: Math.sin(ang) * spd - 75,
+          gravity: 310,
+          life: 0,
+          maxLife: (0.5 + Math.random() * 0.25) * lifeScale,
+          color: i % 2 === 0 ? '#94a3b8' : '#6366f1',
+          size: 5 + Math.random() * 4,
+          rotation: ang,
+          spin: (Math.random() - 0.5) * 12,
+          shape: 'stone',
+        });
+      }
+    } else if (moveId === 'omen_wind') {
+      const omenCols = ['#a855f7', '#67e8f9', '#c084fc', '#e0f2fe'];
+      for (let i = 0; i < 14; i++) {
+        const ang = (Math.PI * 2 * i) / 14;
+        this.particles.push({
+          x: center.x + Math.cos(ang) * 42,
+          y: center.y + Math.sin(ang) * 32,
+          orbitCenter: center,
+          orbitAngle: ang,
+          orbitRadius: 40 + (i % 3) * 12,
+          orbitRadialVel: 28,
+          orbitAngVel: i % 2 === 0 ? 8.5 : -7.5,
+          life: -(i * 0.014),
+          maxLife: 0.62 * Math.min(1.3, lifeScale),
+          color: omenCols[i % omenCols.length],
+          size: i % 3 === 0 ? 7.5 : 5.5,
+          rotation: ang,
+          spin: 8,
+          shape: i % 3 === 0 ? 'wind' : i % 2 === 0 ? 'crystal' : 'wisp',
+        });
+      }
+    } else if (moveId === 'doom_desire') {
+      this.particles.push({
+        x: center.x,
+        y: center.y,
+        vx: 0,
+        vy: 0,
+        gravity: 0,
+        life: 0,
+        maxLife: 0.36 * Math.min(1.4, lifeScale),
+        color: '#fde047',
+        size: 36,
+        shape: 'beam',
+      });
+      for (let i = 0; i < 14; i++) {
+        const ang = (Math.PI * 2 * i) / 14;
+        const spd = 105 + Math.random() * 145;
+        this.particles.push({
+          x: center.x,
+          y: center.y,
+          vx: Math.cos(ang) * spd,
+          vy: Math.sin(ang) * spd - 32,
+          gravity: 80,
+          life: 0,
+          maxLife: (0.55 + Math.random() * 0.25) * lifeScale,
+          color: i % 3 === 0 ? '#ffffff' : i % 2 === 0 ? '#fde047' : '#38bdf8',
+          size: 5.5 + Math.random() * 4,
+          rotation: ang,
+          spin: 9,
+          shape: 'star',
+        });
+      }
     }
 
     for (let i = 0; i < count; i++) {
@@ -1850,6 +2123,34 @@ export class BattleEngine {
         const ghostCols = ['#a855f7', '#7e22ce', '#c084fc', '#e9d5ff'];
         pColor = ghostCols[i % ghostCols.length];
         pShape = 'wisp';
+      } else if (moveId === 'leaf_blade') {
+        const leafCols = ['#22c55e', '#4ade80', '#bbf7d0', '#ffffff'];
+        pColor = leafCols[i % leafCols.length];
+        pShape = i % 2 === 0 ? 'leaf' : 'star';
+      } else if (moveId === 'aura_sphere') {
+        const auraCols = ['#38bdf8', '#6366f1', '#a5f3fc', '#ffffff'];
+        pColor = auraCols[i % auraCols.length];
+        pShape = i % 3 === 0 ? 'wisp' : 'star';
+      } else if (moveId === 'psycho_cut') {
+        const cutCols = ['#f472b6', '#e879f9', '#c084fc', '#ffffff'];
+        pColor = cutCols[i % cutCols.length];
+        pShape = i % 3 === 0 ? 'crescent' : 'star';
+      } else if (moveId === 'aqua_tail') {
+        const prismCols = ['#38bdf8', '#67e8f9', '#34d399', '#f472b6'];
+        pColor = prismCols[i % prismCols.length];
+        pShape = i % 2 === 0 ? 'bubble' : 'star';
+      } else if (moveId === 'draco_meteor') {
+        const cometCols = ['#fde047', '#818cf8', '#c084fc', '#f472b6'];
+        pColor = cometCols[i % cometCols.length];
+        pShape = i % 2 === 0 ? 'dragonflame' : 'star';
+      } else if (moveId === 'omen_wind') {
+        const omenCols = ['#a855f7', '#67e8f9', '#c084fc', '#e0f2fe'];
+        pColor = omenCols[i % omenCols.length];
+        pShape = i % 3 === 0 ? 'crystal' : 'wisp';
+      } else if (moveId === 'doom_desire') {
+        const starCols = ['#fde047', '#fef08a', '#38bdf8', '#ffffff'];
+        pColor = starCols[i % starCols.length];
+        pShape = 'star';
       }
       this.particles.push({
         x: center.x + (Math.random() - 0.5) * 18,
@@ -1895,7 +2196,13 @@ export class BattleEngine {
     const dx = target.x - start.x;
     const dy = target.y - start.y;
     const angle = Math.atan2(dy, dx);
-    const steps = move.id === 'wild_volt' ? 9 : 7;
+    const steps = move.id === 'wild_volt' || move.id === 'leaf_blade'
+      ? 9
+      : move.id === 'aqua_tail'
+        ? 10
+        : move.id === 'psycho_cut'
+          ? 8
+          : 7;
 
     for (let s = 0; s < steps; s++) {
       const t = s / Math.max(1, steps - 1);
@@ -1904,7 +2211,54 @@ export class BattleEngine {
       const isPetal = move.id === 'petal_blizzard';
       let color = isPetal && s % 2 === 1 ? '#f9a8d4' : (s % 2 === 0 ? typeMeta.color : '#ffffff');
       let pShape = shape;
-      if (move.id === 'thunder_fang') {
+      if (move.id === 'leaf_blade') {
+        color = s % 3 === 0 ? '#bbf7d0' : s % 2 === 0 ? '#22c55e' : '#4ade80';
+        pShape = s % 2 === 0 ? 'slash' : 'leaf';
+      } else if (move.id === 'psycho_cut') {
+        const dist = Math.max(1, Math.hypot(dx, dy));
+        const perpX = -dy / dist;
+        const perpY = dx / dist;
+        [-11, 11].forEach((off, laneIdx) => {
+          this.particles.push({
+            x: px + perpX * off,
+            y: py + perpY * off,
+            vx: Math.cos(angle) * 68,
+            vy: Math.sin(angle) * 68,
+            gravity: 0,
+            life: -(s * 0.014),
+            maxLife: 0.24 * Math.min(1.4, lifeScale),
+            color: (s + laneIdx) % 2 === 0 ? '#f472b6' : '#c084fc',
+            size: 9 + (s % 2) * 2,
+            rotation: angle + (laneIdx === 0 ? -0.35 : 0.35),
+            spin: laneIdx === 0 ? 7 : -7,
+            shape: 'crescent',
+          });
+        });
+        continue;
+      } else if (move.id === 'aqua_tail') {
+        const dist = Math.max(1, Math.hypot(dx, dy));
+        const perpX = -dy / dist;
+        const perpY = dx / dist;
+        const wave = Math.sin(t * Math.PI * 3) * 18;
+        const prismCols = ['#38bdf8', '#67e8f9', '#34d399', '#c084fc', '#f472b6'];
+        color = prismCols[s % prismCols.length];
+        pShape = s % 3 === 0 ? 'slash' : s % 2 === 0 ? 'bubble' : 'star';
+        this.particles.push({
+          x: px + perpX * wave,
+          y: py + perpY * wave,
+          vx: Math.cos(angle) * 58,
+          vy: Math.sin(angle) * 58,
+          gravity: -15,
+          life: -(s * 0.012),
+          maxLife: 0.28 * Math.min(1.4, lifeScale),
+          color,
+          size: pShape === 'slash' ? 12 : 6.5,
+          rotation: angle + wave * 0.04,
+          spin: 6,
+          shape: pShape,
+        });
+        continue;
+      } else if (move.id === 'thunder_fang') {
         color = s % 2 === 0 ? '#fde047' : '#38bdf8';
         pShape = s % 3 === 0 ? 'slash' : 'lightning';
       } else if (move.id === 'wild_volt') {
@@ -2017,6 +2371,225 @@ export class BattleEngine {
         continue;
       }
 
+      if (move.id === 'eruption_flare') {
+        const angle = Math.atan2(dy, dx);
+        const plumeCols = ['#fef08a', '#fb923c', '#ef4444'];
+        for (let k = 0; k < 3; k++) {
+          this.particles.push({
+            x: px + (Math.random() - 0.5) * 18,
+            y: py + (Math.random() - 0.5) * 14,
+            vx: Math.cos(angle) * 55 + (Math.random() - 0.5) * 35,
+            vy: -35 - Math.random() * 55,
+            gravity: -55,
+            life: 0,
+            maxLife: 0.36 * Math.min(1.4, lifeScale),
+            color: plumeCols[(s + k) % plumeCols.length],
+            size: 6.5 + Math.random() * 3.5,
+            shape: 'ember',
+          });
+        }
+        if (s % 2 === 0) {
+          this.particles.push({
+            x: px + (Math.random() - 0.5) * 16,
+            y: py - 6,
+            vx: (Math.random() - 0.5) * 30,
+            vy: -45 - Math.random() * 30,
+            gravity: -40,
+            life: 0,
+            maxLife: 0.4 * Math.min(1.4, lifeScale),
+            color: '#78716c',
+            size: 7 + Math.random() * 3,
+            shape: 'dust',
+          });
+        }
+        if (s < steps - 1) await this.wait(stepWaitMs, sessionId);
+        continue;
+      }
+
+      if (move.id === 'aura_sphere') {
+        const helix = Math.sin(t * Math.PI * 4.5) * 16;
+        const angle = Math.atan2(dy, dx);
+        this.particles.push({
+          x: px,
+          y: py,
+          vx: Math.cos(angle) * 40,
+          vy: Math.sin(angle) * 40,
+          gravity: 0,
+          life: 0,
+          maxLife: 0.22 * Math.min(1.4, lifeScale),
+          color: '#38bdf8',
+          size: 11 + t * 3,
+          shape: 'orb',
+        });
+        [1, -1].forEach((dir, idx) => {
+          this.particles.push({
+            x: px + perpX * helix * dir,
+            y: py + perpY * helix * dir,
+            vx: (Math.random() - 0.5) * 26,
+            vy: (Math.random() - 0.5) * 26,
+            gravity: 0,
+            life: 0,
+            maxLife: 0.32 * Math.min(1.4, lifeScale),
+            color: idx === 0 ? '#6366f1' : '#a5f3fc',
+            size: 5 + Math.random() * 2,
+            rotation: angle + t * 4,
+            spin: 6,
+            shape: idx === 0 ? 'wisp' : 'star',
+          });
+        });
+        if (s < steps - 1) await this.wait(stepWaitMs, sessionId);
+        continue;
+      }
+
+      if (move.id === 'draco_meteor') {
+        const skyX = target.x - 95 + (s % 4) * 42 + (Math.random() - 0.5) * 24;
+        const skyY = Math.max(-16, target.y - 165);
+        const flightTime = 0.24;
+        const vx = (target.x + (Math.random() - 0.5) * 22 - skyX) / flightTime;
+        const vy = (target.y + (Math.random() - 0.5) * 18 - skyY) / flightTime;
+        const cometAng = Math.atan2(vy, vx);
+        this.particles.push({
+          x: skyX,
+          y: skyY,
+          vx,
+          vy,
+          gravity: 0,
+          life: 0,
+          maxLife: flightTime * 1.08,
+          color: s % 2 === 0 ? '#fde047' : '#818cf8',
+          size: 9.5,
+          rotation: cometAng,
+          spin: 0,
+          shape: 'dragonflame',
+        });
+        this.particles.push({
+          x: skyX,
+          y: skyY,
+          vx: vx * 0.92,
+          vy: vy * 0.92,
+          gravity: 0,
+          life: 0,
+          maxLife: flightTime * 1.12,
+          color: s % 2 === 0 ? '#c084fc' : '#ffffff',
+          size: 11,
+          rotation: cometAng,
+          spin: 0,
+          shape: 'slash',
+        });
+        this.particles.push({
+          x: skyX + (Math.random() - 0.5) * 14,
+          y: skyY + (Math.random() - 0.5) * 14,
+          vx: vx * 0.78,
+          vy: vy * 0.78,
+          gravity: 0,
+          life: 0,
+          maxLife: flightTime * 1.15,
+          color: '#fde047',
+          size: 5.5,
+          rotation: cometAng,
+          spin: 8,
+          shape: 'star',
+        });
+        if (s < steps - 1) await this.wait(stepWaitMs, sessionId);
+        continue;
+      }
+
+      if (move.id === 'omen_wind') {
+        const vortexR = 8 + t * 24;
+        const ang = t * Math.PI * 5;
+        const vxX = px + perpX * Math.cos(ang) * vortexR;
+        const vxY = py + perpY * Math.sin(ang) * vortexR;
+        const omenCols = ['#a855f7', '#67e8f9', '#c084fc', '#e0f2fe'];
+        for (let k = 0; k < 3; k++) {
+          const pShape = k === 0 ? 'wind' : k === 1 ? 'crystal' : 'wisp';
+          this.particles.push({
+            x: vxX + (Math.random() - 0.5) * 12,
+            y: vxY + (Math.random() - 0.5) * 12,
+            vx: (dx / dist) * 70 + (Math.random() - 0.5) * 35,
+            vy: (dy / dist) * 70 + (Math.random() - 0.5) * 35,
+            gravity: -20,
+            life: 0,
+            maxLife: 0.36 * Math.min(1.4, lifeScale),
+            color: omenCols[(s + k) % omenCols.length],
+            size: pShape === 'wind' ? 8.5 : 5.5,
+            rotation: ang + k * 0.8,
+            spin: 9,
+            shape: pShape,
+          });
+        }
+        if (s < steps - 1) await this.wait(stepWaitMs, sessionId);
+        continue;
+      }
+
+      if (move.id === 'doom_desire') {
+        const sigilY = Math.max(22, target.y - 76);
+        if (t < 0.48) {
+          const sigilR = 30;
+          const vAng = (s % 5) * ((Math.PI * 2) / 5) - Math.PI * 0.5;
+          this.particles.push({
+            x: target.x + Math.cos(vAng) * sigilR,
+            y: sigilY + Math.sin(vAng) * sigilR * 0.62,
+            vx: 0,
+            vy: 0,
+            gravity: 0,
+            life: 0,
+            maxLife: 0.4 * Math.min(1.4, lifeScale),
+            color: s % 2 === 0 ? '#fde047' : '#38bdf8',
+            size: 6.5,
+            rotation: vAng,
+            spin: 6,
+            shape: 'star',
+          });
+          if (s % 3 === 0) {
+            this.particles.push({
+              x: target.x,
+              y: sigilY,
+              vx: 0,
+              vy: 0,
+              gravity: 0,
+              life: 0,
+              maxLife: 0.34 * Math.min(1.4, lifeScale),
+              color: '#fef08a',
+              size: 14,
+              maxRadius: 42,
+              lineWidth: 2.5,
+              shape: 'ring',
+            });
+          }
+        } else {
+          this.particles.push({
+            x: target.x,
+            y: target.y,
+            vx: 0,
+            vy: 0,
+            gravity: 0,
+            life: 0,
+            maxLife: 0.24 * Math.min(1.4, lifeScale),
+            color: '#fde047',
+            size: 28,
+            shape: 'beam',
+          });
+          for (let k = 0; k < 3; k++) {
+            this.particles.push({
+              x: target.x + (Math.random() - 0.5) * 24,
+              y: sigilY + Math.random() * 76,
+              vx: (Math.random() - 0.5) * 45,
+              vy: 145 + Math.random() * 80,
+              gravity: 0,
+              life: 0,
+              maxLife: 0.3 * Math.min(1.4, lifeScale),
+              color: k === 0 ? '#ffffff' : k === 1 ? '#fde047' : '#38bdf8',
+              size: 5 + Math.random() * 2.5,
+              rotation: k,
+              spin: 8,
+              shape: 'star',
+            });
+          }
+        }
+        if (s < steps - 1) await this.wait(stepWaitMs, sessionId);
+        continue;
+      }
+
       if (move.id === 'shadow_pulse' && s % 3 === 0) {
         this.particles.push({
           x: px,
@@ -2121,6 +2694,61 @@ export class BattleEngine {
         shape: 'star',
       });
     }
+  }
+
+  spawnBuddyEndureBurst(side = 'player') {
+    const center = this.getSpriteCenter(side);
+    const colors = ['#f472b6', '#fb7185', '#fde047', '#ffffff'];
+    this.particles.push({
+      x: center.x,
+      y: center.y,
+      vx: 0,
+      vy: 0,
+      gravity: 0,
+      life: 0,
+      maxLife: 0.48,
+      color: '#f472b6',
+      size: 14,
+      maxRadius: 102,
+      lineWidth: 3.6,
+      shape: 'ring',
+    });
+    this.particles.push({
+      x: center.x,
+      y: center.y,
+      vx: 0,
+      vy: 0,
+      gravity: 0,
+      life: -0.06,
+      maxLife: 0.48,
+      color: '#fde047',
+      size: 16,
+      maxRadius: 124,
+      lineWidth: 2.6,
+      shape: 'ring',
+    });
+
+    for (let i = 0; i < 28; i++) {
+      const angle = (Math.PI * 2 * i) / 28 + Math.random() * 0.22;
+      const speed = 72 + Math.random() * 128;
+      const isHeart = i % 2 === 0;
+      this.particles.push({
+        x: center.x + (Math.random() - 0.5) * 16,
+        y: center.y + (Math.random() - 0.5) * 16,
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed - 56,
+        gravity: 48,
+        life: -(i * 0.008),
+        maxLife: 0.78 + Math.random() * 0.32,
+        color: colors[i % colors.length],
+        size: isHeart ? 7 + Math.random() * 3 : 4.5 + Math.random() * 3.5,
+        rotation: isHeart ? 0 : angle,
+        spin: isHeart ? 0 : 7,
+        shape: isHeart ? 'heart' : 'star',
+      });
+    }
+
+    this.spawnFloatingText(center.x, center.y - 34, 'ENDURED! 1 HP', '#f472b6', 22, 0, 1.55);
   }
 
   startFxLoop() {
@@ -2396,6 +3024,40 @@ export class BattleEngine {
         ctx.lineTo(-p.size * 0.55, 0);
         ctx.closePath();
         ctx.fill();
+      } else if (p.shape === 'orb') {
+        const r = p.size * (1 - progress * 0.22);
+        ctx.fillStyle = 'rgba(99, 102, 241, 0.38)';
+        ctx.beginPath();
+        ctx.arc(0, 0, r * 1.45, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = p.color || '#38bdf8';
+        ctx.beginPath();
+        ctx.arc(0, 0, r, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = '#ffffff';
+        ctx.beginPath();
+        ctx.arc(-r * 0.2, -r * 0.2, Math.max(1.5, r * 0.45), 0, Math.PI * 2);
+        ctx.fill();
+      } else if (p.shape === 'beam') {
+        const w = Math.max(4, p.size * (1 - progress * 0.55));
+        ctx.fillStyle = 'rgba(253, 224, 71, 0.34)';
+        ctx.fillRect(-w * 0.9, -180, w * 1.8, 225);
+        ctx.fillStyle = p.color || '#fde047';
+        ctx.fillRect(-w * 0.45, -180, w * 0.9, 225);
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(-w * 0.2, -180, w * 0.4, 225);
+      } else if (p.shape === 'heart') {
+        const s = p.size * (1 - progress * 0.18);
+        ctx.fillStyle = p.color || '#f472b6';
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 1.1;
+        ctx.beginPath();
+        ctx.moveTo(0, s * 0.85);
+        ctx.bezierCurveTo(-s * 1.25, s * 0.1, -s * 1.15, -s * 0.95, 0, -s * 0.32);
+        ctx.bezierCurveTo(s * 1.15, -s * 0.95, s * 1.25, s * 0.1, 0, s * 0.85);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
       } else if (p.shape === 'star' || p.star) {
         ctx.rotate(p.rotation || p.life * 6);
         ctx.fillStyle = p.color;
@@ -2529,7 +3191,9 @@ export class BattleEngine {
       || move.id === 'sky_wing'
       || move.id === 'phantom_claw'
       || move.id === 'thunder_fang'
-      || move.id === 'wild_volt';
+      || move.id === 'wild_volt'
+      || move.id === 'leaf_blade'
+      || move.id === 'psycho_cut';
     const lungeClass = attackerSide === 'player'
       ? (isQuick ? 'quick-lunge-right' : 'lunge-right')
       : (isQuick ? 'quick-lunge-left' : 'lunge-left');
@@ -2653,7 +3317,10 @@ export class BattleEngine {
       defSprite?.classList.remove('hit-stop');
       defSprite?.classList.add('hit-shake');
 
-      const heavyMoves = new Set(['meteor_slam', 'hyper_nova', 'wild_volt', 'iron_crush', 'magma_cannon', 'moonblast', 'glacier_crash']);
+      const heavyMoves = new Set([
+        'meteor_slam', 'hyper_nova', 'wild_volt', 'iron_crush', 'magma_cannon', 'moonblast', 'glacier_crash',
+        'eruption_flare', 'aura_sphere', 'draco_meteor', 'doom_desire',
+      ]);
       const maxHp = Math.max(1, defender?.maxHp || 30);
       const dmgIntensity = (result.damage / maxHp) * 18
         + (result.isCrit ? 4 : 0)
@@ -2664,25 +3331,62 @@ export class BattleEngine {
       const center = this.getSpriteCenter(defenderSide);
       const dmgColor = result.isCrit ? '#fde047' : result.effectiveness > 1 ? '#fb923c' : '#ffffff';
       const impactType = move.fx === 'wind' ? 'wind' : move.fx === 'star' && move.type === 'normal' ? 'star' : move.type;
+      const slashColorByMove = {
+        thunder_fang: '#facc15',
+        leaf_blade: '#4ade80',
+        psycho_cut: '#f472b6',
+        aqua_tail: '#38bdf8',
+      };
+      const ringColorByMove = {
+        moonblast: '#f472b6',
+        iron_crush: '#e2e8f0',
+        wild_volt: '#fde047',
+        magma_cannon: '#f97316',
+        leaf_blade: '#22c55e',
+        eruption_flare: '#f97316',
+        aura_sphere: '#38bdf8',
+        psycho_cut: '#f472b6',
+        aqua_tail: '#38bdf8',
+        draco_meteor: '#818cf8',
+        omen_wind: '#a855f7',
+        doom_desire: '#fde047',
+      };
+      const secondaryRingByMove = {
+        moonblast: '#c084fc',
+        leaf_blade: '#bbf7d0',
+        eruption_flare: '#fde047',
+        aura_sphere: '#6366f1',
+        psycho_cut: '#c084fc',
+        aqua_tail: '#f472b6',
+        draco_meteor: '#fde047',
+        omen_wind: '#67e8f9',
+        doom_desire: '#38bdf8',
+      };
+      const bigBurstMoves = new Set([
+        'hyper_nova', 'thunder_tempest', 'wild_volt', 'magma_cannon',
+        'eruption_flare', 'aura_sphere', 'draco_meteor', 'omen_wind', 'doom_desire',
+      ]);
       this.spawnImpactFX(defenderSide, impactType, `-${result.damage}`, dmgColor, {
         moveId: move.id,
-        dust: isPhysical || move.id === 'magma_cannon',
-        extraDust: move.id === 'meteor_slam' || move.id === 'iron_crush',
+        dust: isPhysical || move.id === 'magma_cannon' || move.id === 'eruption_flare' || move.id === 'draco_meteor',
+        extraDust: move.id === 'meteor_slam' || move.id === 'iron_crush' || move.id === 'draco_meteor',
         slash: hasElementalTrail || move.id === 'phantom_claw' || move.id === 'starlight_claw' || move.id === 'thunder_fang',
-        slashColor: move.id === 'thunder_fang' ? '#facc15' : undefined,
-        shapeOverride: move.id === 'star_melody' ? 'note' : move.fx === 'wind' ? 'wind' : move.id === 'glacier_crash' ? 'crystal' : null,
+        slashColor: slashColorByMove[move.id],
+        shapeOverride: move.id === 'star_melody'
+          ? 'note'
+          : move.fx === 'wind' || move.id === 'omen_wind'
+            ? 'wind'
+            : move.id === 'glacier_crash'
+              ? 'crystal'
+              : null,
         extraNotes: move.id === 'star_melody',
         aurora: move.id === 'aurora_flare',
         petalColors: move.id === 'petal_blizzard',
         ring: true,
-        ringColor: move.id === 'moonblast' ? '#f472b6'
-          : move.id === 'iron_crush' ? '#e2e8f0'
-            : move.id === 'wild_volt' ? '#fde047'
-              : move.id === 'magma_cannon' ? '#f97316'
-                : undefined,
-        secondaryRingColor: move.id === 'moonblast' ? '#c084fc' : '#ffffff',
+        ringColor: ringColorByMove[move.id],
+        secondaryRingColor: secondaryRingByMove[move.id] || '#ffffff',
         ringRadius: result.isCrit ? 96 : heavyMoves.has(move.id) ? 106 : 74,
-        count: move.id === 'hyper_nova' || move.id === 'thunder_tempest' || move.id === 'wild_volt' || move.id === 'magma_cannon' ? 28 : 22,
+        count: bigBurstMoves.has(move.id) ? 28 : 22,
         fontSize: result.isCrit ? 26 : 23,
         lifeScale: pace.particleLifeScale,
         popupLife: 1.45,
@@ -2713,8 +3417,25 @@ export class BattleEngine {
     if (!this.enemy || this.enemy.isFainted || !this.player || this.player.isFainted) {
       return null;
     }
-    const moves = this.enemy.getMoveObjects();
-    if (moves.length === 0) return null;
+    const allMoves = this.enemy.getMoveObjects();
+    if (allMoves.length === 0) return null;
+    const moves = typeof this.enemy.getMovePp === 'function'
+      ? allMoves.filter((m) => this.enemy.getMovePp(m.id).current > 0)
+      : allMoves;
+    if (moves.length === 0) {
+      return {
+        id: 'tackle',
+        name: 'Struggle',
+        type: 'normal',
+        power: 35,
+        accuracy: 100,
+        pp: 99,
+        damageClass: 'physical',
+        category: 'attack',
+        fx: 'impact',
+        _isStruggle: true,
+      };
+    }
     const attacks = moves.filter((m) => m.category === 'attack' || !m.category);
     let chosen = moves[Math.floor(Math.random() * moves.length)];
     if (chosen.category === 'heal' && this.enemy.hp > this.enemy.maxHp * 0.6 && attacks.length > 0) {
@@ -2817,6 +3538,10 @@ export class BattleEngine {
       return true;
     }
 
+    if (!isPlayer && !move?._isStruggle) {
+      attacker.consumeMovePp?.(move.id);
+    }
+
     const attackerLabel = isPlayer ? (attacker.displayName || attacker.name) : attacker.name;
     await this.say(`${attackerLabel} used ${move.name}!`);
     if (!this.isSessionValid(sid) || attacker.isFainted || defender.isFainted) return true;
@@ -2879,7 +3604,28 @@ export class BattleEngine {
       return false;
     }
 
+    const prevDefenderHp = Number(defender.hp) || 0;
     defender.takeDamage(result.damage);
+    let buddyEndured = false;
+    if (
+      !isPlayer &&
+      defender === this.player &&
+      prevDefenderHp > 1 &&
+      defender.hp <= 0 &&
+      (Number(this.player.bond) || 0) >= 60 &&
+      !this.playerBuddyEndured &&
+      this.allowBuddyEndure !== false
+    ) {
+      const bondVal = Number(this.player.bond) || 0;
+      const endureChance = this.forceBuddyEndure === true
+        ? 1.0
+        : (PokemonMod.getBondTier?.(bondVal)?.endureChance ?? (bondVal >= 85 ? 0.25 : 0.15));
+      if (this.forceBuddyEndure === true || Math.random() < endureChance) {
+        this.playerBuddyEndured = true;
+        this.player.hp = 1;
+        buddyEndured = true;
+      }
+    }
     if ((defender.shieldTurns || 0) > 0) {
       defender.shieldTurns = Math.max(0, defender.shieldTurns - 1);
     }
@@ -2888,6 +3634,15 @@ export class BattleEngine {
     await this.animateHpTo(defSide, defender.hp, pace.hpDrainMs);
     if (!this.isSessionValid(sid)) return true;
 
+    if (buddyEndured) {
+      if (typeof this.audio?.playBuddyEndure === 'function') {
+        this.audio.playBuddyEndure();
+      } else {
+        this.audio?.playShieldChime?.();
+      }
+      this.spawnBuddyEndureBurst('player');
+    }
+
     if (result.effectiveness > 1) {
       await this.say("It's super effective!");
     } else if (result.effectiveness < 1) {
@@ -2895,6 +3650,10 @@ export class BattleEngine {
     }
     if (result.isCrit) {
       await this.say('A critical hit!');
+    }
+    if (buddyEndured && this.isSessionValid(sid)) {
+      const playerName = this.player.displayName || this.player.name;
+      await this.say(`💖 ${playerName} toughed it out at 1 HP for its trainer!`);
     }
 
     if (!this.isSessionValid(sid)) return true;
@@ -3368,7 +4127,7 @@ export class BattleEngine {
     if (!this.isSessionValid(sid)) return;
 
     if (hasNextEnemy) {
-      await this.awardVictoryXp(1.0, sid, { deferBadges: false });
+      await this.awardVictoryXp(1.0, sid, { deferBadges: false, grantBenchBond: false });
       if (!this.isSessionValid(sid)) return;
 
       this.enemyPartyIndex = fallbackIdx;
@@ -3443,6 +4202,7 @@ export class BattleEngine {
           water: 'water_gem',
           volcano: Math.random() < 0.5 ? 'fire_gem' : 'thunder_gem',
           peak: 'ice_gem',
+          grove: 'astral_gem',
         };
         const fallbackGemNames = {
           leaf_gem: 'Verdant Gem',
@@ -3453,6 +4213,7 @@ export class BattleEngine {
           ice_gem: 'Aurora Gem',
           sun_gem: 'Sunburst Gem',
           dusk_gem: 'Twilight Gem',
+          astral_gem: 'Astral Gem',
         };
         const gemId = gemByBiome[dropBiome] || null;
         const roll = Math.random();
@@ -3587,7 +4348,7 @@ export class BattleEngine {
     return shards;
   }
 
-  async awardVictoryXp(scale = 1.0, sid = this.sessionId, { deferBadges = false, excludeUids = null } = {}) {
+  async awardVictoryXp(scale = 1.0, sid = this.sessionId, { deferBadges = false, excludeUids = null, grantBenchBond = true } = {}) {
     if (!this.isSessionValid(sid)) return [];
     const pace = this.getPaceConfig();
     const playerName = this.player.displayName || this.player.name;
@@ -3595,7 +4356,8 @@ export class BattleEngine {
     const prevXpToNext = Math.max(1, this.player.xpToNext);
     const startPct = Math.min(100, (prevXp / prevXpToNext) * 100);
 
-    const xpGain = Math.max(12, Math.round((this.enemy.level * 14 + 12) * scale));
+    const bondMult = PokemonMod.getBondTier?.(this.player.bond)?.xpMult ?? 1.0;
+    const xpGain = Math.max(12, Math.round((this.enemy.level * 14 + 12) * scale * bondMult));
     await this.say(`${playerName} gained ${xpGain} XP!`);
     if (!this.isSessionValid(sid)) return [];
 
@@ -3611,6 +4373,9 @@ export class BattleEngine {
         if (mate.uid && excludeSet.has(mate.uid)) continue;
         if (mate.isFainted || Number(mate.hp) <= 0) continue;
         const benchRes = mate.gainXp?.(benchShareXp);
+        if (grantBenchBond) {
+          mate.gainBond?.(2);
+        }
         benchReceivers.push(mate);
         if (benchRes?.leveledUp) {
           benchLevelUps.push({
@@ -3621,6 +4386,9 @@ export class BattleEngine {
       }
     }
 
+    const bondBadges = (grantBenchBond && typeof this.storage.evaluateBadges === 'function')
+      ? this.storage.evaluateBadges(false)
+      : [];
     this.storage.save();
     this.displayedPlayerHp = this.player.hp;
     const endPct = Math.min(100, (this.player.xp / Math.max(1, this.player.xpToNext)) * 100);
@@ -3666,9 +4434,16 @@ export class BattleEngine {
 
     const pendingEvo = this.player.getPendingLevelEvolution?.();
     if (pendingEvo && this.isSessionValid(sid)) {
-      return this.runEvolutionCeremony(pendingEvo, sid, { emitBadges: !deferBadges });
+      const evoBadges = await this.runEvolutionCeremony(pendingEvo, sid, { emitBadges: !deferBadges });
+      if (!deferBadges && bondBadges.length > 0) {
+        this.onBadgesUnlocked?.(bondBadges);
+      }
+      return [...bondBadges, ...(Array.isArray(evoBadges) ? evoBadges : [])];
     }
-    return [];
+    if (!deferBadges && bondBadges.length > 0) {
+      this.onBadgesUnlocked?.(bondBadges);
+    }
+    return bondBadges;
   }
 
   async runEvolutionCeremony(pendingEvo, sid = this.sessionId, { emitBadges = true } = {}) {
