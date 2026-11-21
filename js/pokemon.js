@@ -1,4 +1,5 @@
 import {
+  ABILITIES,
   SPECIES,
   MOVES,
   TYPE_CHART,
@@ -19,7 +20,93 @@ const BIOME_SCALING_OFFSETS = {
   volcano: 1,
   peak: 2,
   grove: 2,
+  desert: 1,
+  marsh: 2,
+  sanctum: 3,
 };
+
+function resolveAbilityId(monOrSpecies) {
+  if (!monOrSpecies) return null;
+  if (typeof monOrSpecies === 'number' || typeof monOrSpecies === 'string') {
+    if (typeof monOrSpecies === 'string' && ABILITIES?.[monOrSpecies]) {
+      return monOrSpecies;
+    }
+    const sp = SPECIES[Number(monOrSpecies)];
+    return sp?.ability && ABILITIES?.[sp.ability] ? sp.ability : null;
+  }
+  if (typeof monOrSpecies === 'object') {
+    if (typeof monOrSpecies.abilityId === 'string' && ABILITIES?.[monOrSpecies.abilityId]) {
+      return monOrSpecies.abilityId;
+    }
+    const sp = monOrSpecies.species?.id
+      ? monOrSpecies.species
+      : monOrSpecies.speciesId !== undefined
+        ? SPECIES[Number(monOrSpecies.speciesId)]
+        : monOrSpecies.id !== undefined
+          ? SPECIES[Number(monOrSpecies.id)]
+          : null;
+    if (sp?.ability && ABILITIES?.[sp.ability]) {
+      return sp.ability;
+    }
+    if (typeof monOrSpecies.ability === 'string' && ABILITIES?.[monOrSpecies.ability]) {
+      return monOrSpecies.ability;
+    }
+    if (
+      monOrSpecies.ability
+      && typeof monOrSpecies.ability === 'object'
+      && typeof monOrSpecies.ability.id === 'string'
+      && ABILITIES?.[monOrSpecies.ability.id]
+    ) {
+      return monOrSpecies.ability.id;
+    }
+  }
+  return null;
+}
+
+export function getPokemonAbility(monOrSpecies) {
+  const abilityId = resolveAbilityId(monOrSpecies);
+  return abilityId ? (ABILITIES?.[abilityId] || null) : null;
+}
+
+export function evaluateEntryAbility(mon) {
+  if (!mon || mon.isFainted || mon.abilityEntryTriggered) return null;
+  const hp = mon.hp;
+  if (hp !== undefined && hp !== null && Number.isFinite(Number(hp)) && Number(hp) <= 0) {
+    return null;
+  }
+  const ability = getPokemonAbility(mon);
+  if (!ability || ability.trigger !== 'entry') return null;
+
+  const stat = ['atk', 'def', 'spd'].includes(ability.stat) ? ability.stat : 'atk';
+  const stages = Number.isFinite(Number(ability.stages)) ? Number(ability.stages) : 1;
+  const statLabel = { atk: 'Attack', def: 'Defense', spd: 'Speed' }[stat] || stat.toUpperCase();
+  return {
+    abilityId: ability.id,
+    ability,
+    stat,
+    stages,
+    summary: `${statLabel} +${stages}`,
+  };
+}
+
+export function evaluateTurnEndAbility(mon) {
+  if (!mon || mon.isFainted) return null;
+  const hp = Number(mon.hp);
+  const maxHp = Number(mon.maxHp);
+  if (!Number.isFinite(hp) || !Number.isFinite(maxHp) || hp <= 0 || hp >= maxHp) {
+    return null;
+  }
+  const ability = getPokemonAbility(mon);
+  if (!ability || ability.trigger !== 'turn_end') return null;
+
+  const heal = Math.max(1, Math.round(maxHp * 0.08));
+  return {
+    abilityId: ability.id,
+    ability,
+    heal,
+    summary: `+${heal} HP`,
+  };
+}
 
 export function getBondTier(bond) {
   const raw = bond === null || bond === undefined || bond === '' ? 0 : Number(bond);
@@ -113,6 +200,7 @@ export class Pokemon {
   resetBattleState() {
     this.battleStages = { atk: 0, def: 0, spd: 0 };
     this.shieldTurns = 0;
+    this.abilityEntryTriggered = false;
   }
 
   applyStageBoost(stat, delta = 1) {
@@ -183,6 +271,16 @@ export class Pokemon {
 
   get typeInfo() {
     return TYPES[this.type];
+  }
+
+  get abilityId() {
+    const id = this.species?.ability;
+    return id && ABILITIES?.[id] ? id : null;
+  }
+
+  get ability() {
+    const id = this.abilityId;
+    return id ? (ABILITIES?.[id] || null) : null;
   }
 
   get isFainted() {
@@ -527,6 +625,15 @@ export function rollWildPokemon(biomeId, avgTeamLevelOrProfile = 5, options = {}
       if (cleared.has('starlight_shrine')) appendRoamer(151, 4);
     } else if (biomeId === 'grove') {
       if (cleared.has('grove_shrine')) appendRoamer(385, 4);
+    } else if (biomeId === 'desert') {
+      if (cleared.has('desert_shrine')) appendRoamer(248, 5);
+    } else if (biomeId === 'marsh') {
+      if (cleared.has('marsh_shrine')) appendRoamer(251, 4);
+    } else if (biomeId === 'sanctum') {
+      if (cleared.has('sanctum_shrine')) {
+        appendRoamer(384, 4);
+        appendRoamer(249, 4);
+      }
     }
   }
 
@@ -704,6 +811,70 @@ export function getTypeEffectiveness(moveType, defenderType) {
   return table[defenderType] ?? 1;
 }
 
+const PINCH_ABILITY_IDS = new Set(['overgrow', 'blaze', 'torrent']);
+const TYPE_BOOST_ABILITY_IDS = new Set([
+  'storm_conduit',
+  'dune_titan',
+  'mystic_prism',
+  'shadow_cloak',
+  'dragon_heart',
+]);
+
+function evaluateOffensiveAbility(attacker, move) {
+  const ability = getPokemonAbility(attacker);
+  if (!ability || ability.trigger !== 'attack' || !move?.type) return null;
+  if (move.type !== ability.type) return null;
+
+  let mult = 1;
+  if (PINCH_ABILITY_IDS.has(ability.id)) {
+    const hp = Number(attacker?.hp);
+    const maxHp = Number(attacker?.maxHp);
+    const isPinch = Number.isFinite(hp) && Number.isFinite(maxHp) && maxHp > 0 && hp > 0 && hp <= maxHp * 0.5;
+    mult = isPinch ? 1.35 : 1.2;
+  } else if (TYPE_BOOST_ABILITY_IDS.has(ability.id)) {
+    mult = 1.2;
+  } else {
+    return null;
+  }
+
+  const typeLabel = TYPES[move.type]?.label || move.type;
+  return {
+    abilityId: ability.id,
+    ability,
+    mult,
+    summary: `${typeLabel} +${Math.round((mult - 1) * 100)}%`,
+  };
+}
+
+function evaluateDefensiveAbility(defender, move) {
+  const ability = getPokemonAbility(defender);
+  if (!ability || ability.trigger !== 'defense') return null;
+
+  if (ability.id === 'permafrost' && (move?.type === 'fire' || move?.type === 'ice')) {
+    return {
+      abilityId: ability.id,
+      ability,
+      mult: 0.75,
+      summary: '-25% Damage',
+    };
+  }
+
+  if (ability.id === 'prism_scales') {
+    const hp = Number(defender?.hp);
+    const maxHp = Number(defender?.maxHp);
+    if (Number.isFinite(hp) && Number.isFinite(maxHp) && maxHp > 0 && hp >= maxHp) {
+      return {
+        abilityId: ability.id,
+        ability,
+        mult: 0.7,
+        summary: '-30% Damage',
+      };
+    }
+  }
+
+  return null;
+}
+
 export function calculateDamage(attacker, defender, move, options = {}) {
   const rawMaxHp = Number(attacker?.maxHp);
   const safeMaxHp = Number.isFinite(rawMaxHp) && rawMaxHp > 0 ? rawMaxHp : 20;
@@ -717,6 +888,8 @@ export function calculateDamage(attacker, defender, move, options = {}) {
       effectiveness: 1,
       isCrit: false,
       missed: false,
+      attackerAbilityTrigger: null,
+      defenderAbilityTrigger: null,
     };
   }
 
@@ -731,6 +904,8 @@ export function calculateDamage(attacker, defender, move, options = {}) {
       effectiveness: 1,
       isCrit: false,
       missed: false,
+      attackerAbilityTrigger: null,
+      defenderAbilityTrigger: null,
     };
   }
 
@@ -745,6 +920,8 @@ export function calculateDamage(attacker, defender, move, options = {}) {
       effectiveness: 1,
       isCrit: false,
       missed: false,
+      attackerAbilityTrigger: null,
+      defenderAbilityTrigger: null,
     };
   }
 
@@ -758,6 +935,8 @@ export function calculateDamage(attacker, defender, move, options = {}) {
       effectiveness: 1,
       isCrit: false,
       missed: true,
+      attackerAbilityTrigger: null,
+      defenderAbilityTrigger: null,
     };
   }
 
@@ -780,7 +959,17 @@ export function calculateDamage(attacker, defender, move, options = {}) {
 
   const basePower = (((2 * safeLv) / 5 + 2) * safePower * (safeAtk / safeDef)) / 18 + 2;
   const shieldMult = (Number(defender?.shieldTurns) || 0) > 0 ? 0.65 : 1;
-  const damage = Math.max(1, Math.round(basePower * stab * effectiveness * critMult * variance * shieldMult));
+
+  const applyAbilities = options?.applyAbilities === true;
+  const attackerAbilityTrigger = applyAbilities ? evaluateOffensiveAbility(attacker, move) : null;
+  const defenderAbilityTrigger = applyAbilities ? evaluateDefensiveAbility(defender, move) : null;
+  const attackerAbMult = attackerAbilityTrigger ? attackerAbilityTrigger.mult : 1;
+  const defenderAbMult = defenderAbilityTrigger ? defenderAbilityTrigger.mult : 1;
+
+  const damage = Math.max(
+    1,
+    Math.round(basePower * stab * effectiveness * critMult * variance * shieldMult * attackerAbMult * defenderAbMult),
+  );
 
   return {
     category: 'attack',
@@ -789,6 +978,8 @@ export function calculateDamage(attacker, defender, move, options = {}) {
     effectiveness,
     isCrit,
     missed: false,
+    attackerAbilityTrigger,
+    defenderAbilityTrigger,
   };
 }
 
