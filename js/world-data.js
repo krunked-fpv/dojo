@@ -25,6 +25,8 @@ export const TILE = {
   SNOW_PATH: 23,
   RUNE_TRAIL: 24,
   LANTERN: 25,
+  GROVE_GRASS: 26,
+  GROVE_PATH: 27,
 };
 
 export const SOLID_TILES = new Set([
@@ -100,6 +102,7 @@ export const BIOMES = {
       { id: 116, weight: 16 },
       { id: 117, weight: 8 },
       { id: 363, weight: 16 },
+      { id: 349, weight: 14 },
     ],
   },
   volcano: {
@@ -115,6 +118,9 @@ export const BIOMES = {
       { id: 74, weight: 16 },
       { id: 181, weight: 8 },
       { id: 404, weight: 14 },
+      { id: 155, weight: 18 },
+      { id: 156, weight: 10 },
+      { id: 371, weight: 14 },
     ],
   },
   peak: {
@@ -130,6 +136,27 @@ export const BIOMES = {
       { id: 148, weight: 16 },
       { id: 333, weight: 18 },
       { id: 364, weight: 14 },
+      { id: 361, weight: 18 },
+      { id: 372, weight: 10 },
+    ],
+  },
+  grove: {
+    id: 'grove',
+    name: 'Celestial Grove',
+    icon: '🌸',
+    levelRange: [12, 20],
+    encounters: [
+      { id: 175, weight: 20 },
+      { id: 252, weight: 20 },
+      { id: 447, weight: 16 },
+      { id: 280, weight: 14 },
+      { id: 133, weight: 12 },
+      { id: 333, weight: 12 },
+      { id: 176, weight: 10 },
+      { id: 253, weight: 10 },
+      { id: 1, weight: 8 },
+      { id: 4, weight: 8 },
+      { id: 7, weight: 8 },
     ],
   },
 };
@@ -161,9 +188,11 @@ const CHAR_TO_TILE = {
   f: TILE.SNOW_PATH,
   r: TILE.RUNE_TRAIL,
   i: TILE.LANTERN,
+  g: TILE.GROVE_GRASS,
+  m: TILE.GROVE_PATH,
 };
 
-// 52 columns x 38 rows cohesive island linking Village, Forest, Cavern, Lagoon, Ember Caldera & Starfall Peak
+// 52 columns x 48 rows cohesive island linking Village, Forest, Cavern, Lagoon, Ember Caldera, Starfall Peak & Celestial Grove
 const RAW_MAP = [
   'TTTTTTTTTTTTTTTTTTTT################################',
   'T..,,,,..T..,,,,.CT##ppcccCc#cccccc##vvvvaaaLLLLvvv#',
@@ -201,8 +230,18 @@ const RAW_MAP = [
   'T~~wwwwsssssswwww~~~~wwwwwInnnIInnnfffffrrriSiIfrffI',
   'T~~~wwwwwswwwww~~~~~~wwwwwInnCIInnnfffnnffrrrrrffCfI',
   'T~~~~~~wwwww~~~~~~~~~~~~~~InnnffnnnnnnnnfffffffffnnI',
-  'T~~~~~~~~~~~~~~~~~~~~~~~~~IfffffffffffffnffffffffnnI',
-  'TTTTTTTTTTTTTTTTTTTTTTTTTTIIIIIIIIIIIIIIIIIIIIIIIIII',
+  'T~~~~~~~BB~~~~~~~~~~~~~~~~IfffffffffffffnffffffffnnI',
+  'TTTTTTTTBBTTTTTTTTTTTTTTTTIIIIIIIIrrIIIIIIIIIIIIIIII',
+  'TTgggggimm!mmgigT~~Tg*ggggggg*gggirriggggggTTgg*gggT',
+  'TgT*ggmmmmmmmmggg~~gggmmmmmmmgggg*rr*ggggTgggggggTgT',
+  'Tg*gggmmmg*mmmmmmBBmmmmimmmimmmmmmrrmmmmmmmrirrriggT',
+  'Tggg*mmm*mmmmmggg~~gmmmmm+mmmmmmmmrrrrmrrrrrrrSrrmgT',
+  'Tggggmmgggggggg*g~~gmmmm*m*mmmmmmmmmmmmmmmmmmrrrgggT',
+  'Tgg*g*mgggggggggg~~ggmmmmmmmmggggggggggggggggmgggggT',
+  'TgggCmmmmmmmmmmmmBBmgmmmmmmmmgg*ggg*gggg*gggggmmg*gT',
+  'Tgg*gg*ggggggg*gg~~gg*gggg*ggTgggggggg*gggggggg*CgTT',
+  'TTgggggggggTTgggT~~TggggggggggTggggggggTgggggggggTTT',
+  'TTTTTTTTTTTTTTTTT~~TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT',
 ];
 
 export const WORLD_ROWS = RAW_MAP.length;
@@ -225,6 +264,7 @@ export const SIGNPOSTS = {
   '9,20': 'Sapphire Lagoon: Splash through shallow coral pools to meet Water Pokémon—and cross wooden bridges to find the Lagoon Shrine or Starfall Peak to the Southeast!',
   '42,13': 'Ember Caldera: Molten rivers glow beneath basalt bridges! Meet Ponyta, Vulpix, Growlithe, and Magmar—and follow the rune bridge north to Caldera Shrine.',
   '41,23': 'Starfall Peak: Frosty starlit grass sparkles under the aurora! Watch for Seel, Clefairy, Gastly, and rare Dratini as you climb toward Starfall Shrine.',
+  '10,38': 'Celestial Grove: Blossom petals drift over moonstone paths! Meet Togepi, Treecko, and Riolu in the emerald meadows, heal at the Starlight Fountain, and seek Celestial Grove Shrine to the East!',
 };
 
 export const SHRINES = {
@@ -307,6 +347,16 @@ export const SHRINES = {
     badgeId: 'eclipse',
     intro: 'The Guardian Gardevoir steps through violet starlight at Twilight Eclipse Shrine! Triumph to earn the Twilight Eclipse Badge!',
     clearedText: 'Serene moonbeams chime over the Twilight Eclipse Shrine. Your Twilight Eclipse Badge shines!',
+  },
+  '46,41': {
+    id: 'grove_shrine',
+    name: 'Celestial Grove Shrine',
+    biome: 'grove',
+    guardianId: 385,
+    level: 20,
+    badgeId: 'grove',
+    intro: 'The mythical Guardian Jirachi awakens beneath drifting sakura starlight! Triumph to earn the Astral Grove Badge!',
+    clearedText: 'Celestial melodies chime across the moonstone dais. Your Astral Grove Badge shines with starlight!',
   },
 };
 
@@ -394,6 +444,20 @@ export const CHESTS = {
     label: 'Twilight Cavern Chest',
     rewards: { potions: 2, greatBalls: 2, starShards: 3, gems: { dusk_gem: 1 } },
     message: '{trainer} opened the Twilight Cavern Chest and found a Twilight Gem 🔮 + 3 ✨ Star Shards + 2 Great Balls + 2 Berry Potions!',
+  },
+  '4,44': {
+    id: 'grove_chest_astral',
+    biome: 'grove',
+    label: 'Astral Wishing Chest',
+    rewards: { potions: 2, starBalls: 2, starShards: 4, gems: { astral_gem: 1 } },
+    message: '{trainer} opened the Astral Wishing Chest and found an Astral Gem 🌠 + 4 ✨ Star Shards + 2 🌟 Star Balls + 2 Berry Potions!',
+  },
+  '48,45': {
+    id: 'grove_chest_wish',
+    biome: 'grove',
+    label: 'Sakura Star Chest',
+    rewards: { potions: 3, greatBalls: 2, starShards: 3, gems: { moon_gem: 1, astral_gem: 1 } },
+    message: '{trainer} opened the Sakura Star Chest and found a Starlight Gem 🌙 + an Astral Gem 🌠 + 3 ✨ Star Shards + 2 Great Balls + 3 Berry Potions!',
   },
 };
 
@@ -548,6 +612,36 @@ export const NPCS = {
     greeting: 'The violet runes just east lead to Twilight Eclipse Shrine, {trainer}! Catch 2 Ghost or Psychic partners—or clear the Shrine—for a Twilight Gem!',
     questId: 'quest_selene_twilight',
   },
+  '12,40': {
+    id: 'npc_hana',
+    name: 'Botanist Hana',
+    role: 'Celestial Grove Naturalist',
+    biome: 'grove',
+    palette: {
+      outfitPrimary: '#be185d',
+      outfitSecondary: '#fbcfe8',
+      hair: '#4c1d95',
+      skin: '#fde2c8',
+      hat: '#ec4899',
+    },
+    greeting: 'Welcome to Celestial Grove, {trainer}! Befriend 2 Celestial Grove Pokémon—or clear the Celestial Grove Shrine—and I will share a rare Astral Gem!',
+    questId: 'quest_hana_grove',
+  },
+  '27,43': {
+    id: 'npc_sora',
+    name: 'Aura Master Sora',
+    role: 'Starlight Bond Mentor',
+    biome: 'grove',
+    palette: {
+      outfitPrimary: '#0f766e',
+      outfitSecondary: '#fde68a',
+      hair: '#1e293b',
+      skin: '#f6cfa9',
+      hat: '#115e59',
+    },
+    greeting: 'Your heart resonates with your partners, {trainer}! Reach 60+ Bond (Trusted Buddy 💖) with any Pokémon—or perform 2 evolutions—for an Astral Gem!',
+    questId: 'quest_sora_bond',
+  },
 };
 
 function countCaughtFromList(profile, ids) {
@@ -563,6 +657,7 @@ const VOLCANO_ALL_IDS = [77, 37, 58, 126, 74, 181, 404];
 const PEAK_CORE_IDS = [86, 147, 148];
 const YUKI_PEAK_IDS = [86, 87, 144, 147, 148, 149, 151, 230, 333, 334, 363, 364, 365, 471];
 const TWILIGHT_QUEST_IDS = [35, 36, 63, 64, 65, 92, 93, 94, 196, 197, 280, 281, 282];
+const GROVE_QUEST_IDS = [175, 176, 468, 252, 253, 254, 350, 385, 447, 448, 475, 478];
 
 export const FIELD_QUESTS = [
   {
@@ -729,6 +824,42 @@ export const FIELD_QUESTS = [
     },
     completeDialogue: 'The twilight crystals sing in harmony, {trainer}! Keeper Selene gifted you a Twilight Gem 🔮, 3 ✨ Star Shards, and 1 🌟 Star Ball!',
   },
+  {
+    id: 'quest_hana_grove',
+    npcId: 'npc_hana',
+    title: 'Celestial Grove Naturalist',
+    description: 'Catch 2 Celestial Grove species or clear the Celestial Grove Shrine.',
+    rewards: { gems: { astral_gem: 1 }, starBalls: 1, potions: 2 },
+    check(profile) {
+      if (profile?.shrinesCleared?.includes('grove_shrine')) return true;
+      return countCaughtFromList(profile, GROVE_QUEST_IDS) >= 2;
+    },
+    progressText(profile) {
+      if (profile?.shrinesCleared?.includes('grove_shrine')) return 'Celestial Grove Shrine cleared!';
+      const n = Math.min(2, countCaughtFromList(profile, GROVE_QUEST_IDS));
+      return `${n}/2 Celestial Grove species caught`;
+    },
+    completeDialogue: 'The blossoms bloom brighter for you, {trainer}! Botanist Hana gifted you an Astral Gem 🌠, 1 🌟 Star Ball, and 2 Berry Potions!',
+  },
+  {
+    id: 'quest_sora_bond',
+    npcId: 'npc_sora',
+    title: 'Heartfelt Bond Master',
+    description: 'Reach 60+ Bond on any owned Pokémon or perform at least 2 evolutions.',
+    rewards: { gems: { astral_gem: 1 }, starShards: 4, starBalls: 1 },
+    check(profile) {
+      if ((profile?.stats?.evolutions || 0) >= 2) return true;
+      const owned = [...(profile?.team || []), ...(profile?.box || [])];
+      return owned.some((mon) => (Number(mon?.bond) || 0) >= 60);
+    },
+    progressText(profile) {
+      const owned = [...(profile?.team || []), ...(profile?.box || [])];
+      const topBond = owned.reduce((best, mon) => Math.max(best, Number(mon?.bond) || 0), 0);
+      const evos = Math.min(2, profile?.stats?.evolutions || 0);
+      return `Highest Bond ${Math.min(60, topBond)}/60 or ${evos}/2 evolutions`;
+    },
+    completeDialogue: 'True harmony shines between trainer and partner, {trainer}! Aura Master Sora rewarded you with an Astral Gem 🌠, 4 ✨ Star Shards, and 1 🌟 Star Ball!',
+  },
 ];
 
 export const RIVAL_TRAINERS = {
@@ -854,6 +985,31 @@ export const RIVAL_TRAINERS = {
     winText: 'Radiant victory, {trainer}! Aurora Ace Astra gifted you 2 🌟 Star Balls, 4 ✨ Star Shards, and a Sunburst Gem ☀️!',
     rematchWinText: 'Celestial teamwork, {trainer}! Astra shared a 🌟 Star Ball and 3 ✨ Star Shards after an unforgettable rematch!',
   },
+  '38,41': {
+    id: 'rival_kieran',
+    name: 'Astral Envoy Kieran',
+    role: 'Celestial Grove Challenger',
+    biome: 'grove',
+    palette: {
+      outfitPrimary: '#0f766e',
+      outfitSecondary: '#fbcfe8',
+      hair: '#312e81',
+      skin: '#fde2c8',
+      hat: '#115e59',
+      accent: '#2dd4bf',
+    },
+    party: [
+      { speciesId: 254, level: 18 },
+      { speciesId: 350, level: 19 },
+      { speciesId: 448, level: 21 },
+    ],
+    rewards: { starBalls: 2, starShards: 5, gems: { astral_gem: 1 } },
+    rematchRewards: { starBalls: 1, starShards: 4 },
+    intro: 'The sakura starlight foretold your arrival, {trainer}! Let’s test our Celestial Grove partners in battle!',
+    rematchIntro: 'Ready for another radiant clash beneath the sakura canopy, {trainer}?',
+    winText: 'Luminous strategy, {trainer}! Astral Envoy Kieran gifted you 2 🌟 Star Balls, 5 ✨ Star Shards, and an Astral Gem 🌠!',
+    rematchWinText: 'Your bond glows like a comet, {trainer}! Kieran shared 1 🌟 Star Ball and 4 ✨ Star Shards after a thrilling rematch!',
+  },
 };
 
 export const LANDMARKS = {
@@ -906,9 +1062,24 @@ export const LANDMARKS = {
     icon: '🔮',
     description: 'Violet-gold runes point west to the Twilight Eclipse Shrine, where Gardevoir guards the Eclipse Badge. A Twilight Gem 🔮 awakens Steelix or Umbreon, while a Sunburst Gem ☀️ awakens Bellossom, Politoed, or Altaria!',
   },
+  '6,41': {
+    id: 'landmark_sakura_arbor',
+    name: 'Sakura Star Arbor',
+    biome: 'grove',
+    icon: '🌸',
+    description: 'An ancient blossom archway woven with glowing starlight vines. Wild Togepi, Treecko, and Riolu love playing in the emerald meadow nearby—and an Astral Gem 🌠 awakens Togetic, Riolu, Feebas, or Kirlia!',
+  },
+  '22,44': {
+    id: 'landmark_astral_sundial',
+    name: 'Astral Lotus Sundial',
+    biome: 'grove',
+    icon: '🌠',
+    description: 'A moonstone dial aligned with Jirachi’s Celestial Grove Shrine to the east. Partners with 60+ Bond (Trusted Buddy 💖) gain battle perks and may even tough out a knockout blow at 1 HP!',
+  },
 };
 
 export function getBiomeAt(x, y) {
+  if (y >= 38) return BIOMES.grove;
   if (y <= 9 && x <= 19) return BIOMES.forest;
   if (x >= 20 && x <= 35 && y <= 17) return BIOMES.cave;
   if (x >= 36 && y <= 18) return BIOMES.volcano;
@@ -1040,7 +1211,7 @@ export function getCompassGuidance(profile, speciesMap = null) {
   const npcsTalked = new Set(profile?.npcsTalked || []);
   const shrinesCleared = new Set(profile?.shrinesCleared || []);
   const caughtCount = Object.keys(profile?.pokedex?.caught || {}).length;
-  const totalSpecies = speciesMap ? Object.keys(speciesMap).length : 90;
+  const totalSpecies = speciesMap ? Object.keys(speciesMap).length : 110;
 
   let goal = null;
 
@@ -1122,6 +1293,15 @@ export function getCompassGuidance(profile, speciesMap = null) {
       icon: '👑',
       title: 'Starlight Sanctum (Peak Summit)',
       targetBiomeId: 'peak',
+      targetX: pos.x,
+      targetY: pos.y,
+    };
+  } else if (!shrinesCleared.has('grove_shrine')) {
+    const pos = findEntryCoords(SHRINES, (s) => s.id === 'grove_shrine');
+    goal = {
+      icon: '🌸',
+      title: 'Celestial Grove Shrine (South)',
+      targetBiomeId: 'grove',
       targetX: pos.x,
       targetY: pos.y,
     };
