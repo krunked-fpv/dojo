@@ -931,6 +931,14 @@ button {
   cursor: pointer;
 }
 
+.dex-card.is-caught {
+  border-color: rgba(74, 222, 128, 0.42);
+}
+
+.dex-card.is-seen {
+  border-color: rgba(148, 163, 184, 0.32);
+}
+
 .dex-card.is-selected {
   border-color: var(--trainer-accent);
   box-shadow: 0 0 0 2px var(--trainer-accent-soft);
@@ -960,6 +968,12 @@ button {
 .dex-sprite.is-silhouette,
 .dex-detail-sprite.is-silhouette {
   filter: brightness(0) invert(0.35);
+}
+
+.dex-sprite.is-seen-sprite,
+.dex-detail-sprite.is-seen-sprite {
+  filter: saturate(0.6) brightness(0.88);
+  opacity: 0.88;
 }
 
 .dex-mystery {

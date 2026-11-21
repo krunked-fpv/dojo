@@ -15,6 +15,100 @@ import { attachPokemonSprite } from './pokemon.js';
 
 const BIOME_ORDER = ['village', 'forest', 'cave', 'water', 'volcano', 'peak'];
 
+function resolveDexSpeciesId(raw) {
+  if (typeof raw === 'number') {
+    return Number.isInteger(raw) && SPECIES[raw] ? raw : null;
+  }
+  if (typeof raw === 'string') {
+    const trimmed = raw.trim().replace(/^#/, '');
+    if (/^\d+$/.test(trimmed)) {
+      const num = Number(trimmed);
+      return Number.isInteger(num) && SPECIES[num] ? num : null;
+    }
+    const lower = trimmed.toLowerCase();
+    if (lower) {
+      for (const sp of Object.values(SPECIES)) {
+        if (sp.name.toLowerCase() === lower) {
+          return sp.id;
+        }
+      }
+    }
+  }
+  return null;
+}
+
+export function getReconciledDexState(profile, storage = null) {
+  const caughtMap = new Map();
+  const seenSet = new Set();
+  if (!profile) {
+    return { caughtMap, seenSet };
+  }
+
+  storage?.syncPokedex?.(profile, true);
+
+  const rawCaught = profile.pokedex?.caught;
+  if (Array.isArray(rawCaught)) {
+    for (const rawId of rawCaught) {
+      const numId = resolveDexSpeciesId(rawId);
+      if (numId !== null) {
+        caughtMap.set(numId, Math.max(caughtMap.get(numId) || 0, 1));
+      }
+    }
+  } else if (rawCaught && typeof rawCaught === 'object') {
+    for (const [rawKey, rawCount] of Object.entries(rawCaught)) {
+      const numId = resolveDexSpeciesId(rawKey);
+      if (numId === null) continue;
+      const numCount = rawCount === true ? 1 : Number(rawCount);
+      if (Number.isFinite(numCount) && numCount > 0) {
+        caughtMap.set(numId, Math.max(caughtMap.get(numId) || 0, Math.floor(numCount) || 1));
+      }
+    }
+  }
+
+  const rawSeen = profile.pokedex?.seen;
+  if (Array.isArray(rawSeen)) {
+    for (const rawId of rawSeen) {
+      const numId = resolveDexSpeciesId(rawId);
+      if (numId !== null) {
+        seenSet.add(numId);
+      }
+    }
+  } else if (rawSeen && typeof rawSeen === 'object') {
+    for (const [rawKey, flag] of Object.entries(rawSeen)) {
+      if (!flag) continue;
+      const numId = resolveDexSpeciesId(rawKey);
+      if (numId !== null) {
+        seenSet.add(numId);
+      }
+    }
+  }
+
+  const starterId = resolveDexSpeciesId(profile.starterId);
+  if (starterId !== null) {
+    caughtMap.set(starterId, Math.max(caughtMap.get(starterId) || 0, 1));
+    seenSet.add(starterId);
+  }
+
+  const ownedCounts = new Map();
+  for (const mon of [...(profile.team || []), ...(profile.box || [])]) {
+    if (!mon) continue;
+    const spId = resolveDexSpeciesId(mon.speciesId);
+    if (spId !== null) {
+      ownedCounts.set(spId, (ownedCounts.get(spId) || 0) + 1);
+    }
+  }
+  for (const [spId, ownedCount] of ownedCounts.entries()) {
+    caughtMap.set(spId, Math.max(caughtMap.get(spId) || 0, ownedCount));
+    seenSet.add(spId);
+  }
+
+  for (const id of caughtMap.keys()) {
+    seenSet.add(id);
+  }
+
+  return { caughtMap, seenSet };
+}
+
 function formatEvolutionCondition(rule) {
   if (!rule) return '';
   const parts = [];
@@ -222,8 +316,9 @@ export class PokedexUI {
 
   renderDex(profile) {
     const allSpecies = Object.values(SPECIES).sort((a, b) => a.id - b.id);
-    const caughtCount = Object.keys(profile.pokedex.caught).length;
-    const seenCount = profile.pokedex.seen.length;
+    const { caughtMap, seenSet } = getReconciledDexState(profile, this.storage);
+    const caughtCount = allSpecies.filter((sp) => (caughtMap.get(sp.id) || 0) > 0).length;
+    const seenCount = allSpecies.filter((sp) => seenSet.has(sp.id)).length;
 
     if (!this.selectedSpeciesId || !SPECIES[this.selectedSpeciesId]) {
       this.selectedSpeciesId = allSpecies[0].id;
@@ -237,8 +332,8 @@ export class PokedexUI {
     header.innerHTML = `
       <span>📖 Caught: <strong>${caughtCount}/${allSpecies.length}</strong></span>
       <span>👀 Seen: <strong>${seenCount}/${allSpecies.length}</strong></span>
-      <span>🏆 Wins: <strong>${profile.stats.battlesWon}</strong></span>
-      <span>✨ Shimmers: <strong>${profile.stats.shiniesFound || 0}</strong></span>
+      <span>🏆 Wins: <strong>${profile.stats?.battlesWon || 0}</strong></span>
+      <span>✨ Shimmers: <strong>${profile.stats?.shiniesFound || 0}</strong></span>
     `;
     wrap.appendChild(header);
 
@@ -246,15 +341,17 @@ export class PokedexUI {
     grid.className = 'dex-grid';
 
     for (const sp of allSpecies) {
-      const isCaught = Boolean(profile.pokedex.caught[sp.id]);
-      const isSeen = isCaught || profile.pokedex.seen.includes(sp.id);
+      const isCaught = (caughtMap.get(sp.id) || 0) > 0;
+      const isSeen = isCaught || seenSet.has(sp.id);
       const typeInfo = TYPES[sp.type] || TYPES.normal;
 
       const card = document.createElement('button');
       card.type = 'button';
-      card.className = `dex-card ${isCaught ? 'is-caught' : isSeen ? 'is-seen' : 'is-unknown'} ${
-        this.selectedSpeciesId === sp.id ? 'is-selected' : ''
-      }`;
+      card.className = [
+        'dex-card',
+        isCaught ? 'is-caught' : isSeen ? 'is-seen' : 'is-unknown',
+        this.selectedSpeciesId === sp.id ? 'is-selected' : '',
+      ].filter(Boolean).join(' ');
 
       const numBadge = document.createElement('span');
       numBadge.className = 'dex-num';
@@ -263,8 +360,8 @@ export class PokedexUI {
 
       if (isSeen) {
         const img = document.createElement('img');
-        img.className = `dex-sprite ${isCaught ? '' : 'is-silhouette'}`;
-        attachPokemonSprite(img, sp.id, { back: false, timeoutMs: 1800 });
+        img.className = `dex-sprite ${isCaught ? 'is-caught-sprite' : 'is-seen-sprite'}`;
+        attachPokemonSprite(img, sp.id, { back: false, timeoutMs: 2200 });
         card.appendChild(img);
       } else {
         const mystery = document.createElement('div');
@@ -305,8 +402,8 @@ export class PokedexUI {
     wrap.appendChild(grid);
 
     const selected = SPECIES[this.selectedSpeciesId] || allSpecies[0];
-    const selCaught = profile.pokedex.caught[selected.id] || 0;
-    const selSeen = selCaught > 0 || profile.pokedex.seen.includes(selected.id);
+    const selCaught = caughtMap.get(selected.id) || 0;
+    const selSeen = selCaught > 0 || seenSet.has(selected.id);
     const selType = TYPES[selected.type] || TYPES.normal;
     const habitat = selected.biome === 'starter'
       ? 'Professor Lab Trio'
@@ -317,8 +414,8 @@ export class PokedexUI {
 
     if (selSeen) {
       const sprite = document.createElement('img');
-      sprite.className = `dex-detail-sprite ${selCaught ? '' : 'is-silhouette'}`;
-      attachPokemonSprite(sprite, selected.id, { back: false, timeoutMs: 1800 });
+      sprite.className = `dex-detail-sprite ${selCaught > 0 ? 'is-caught-sprite' : 'is-seen-sprite'}`;
+      attachPokemonSprite(sprite, selected.id, { back: false, timeoutMs: 2200 });
       detail.appendChild(sprite);
     }
 
@@ -327,11 +424,14 @@ export class PokedexUI {
     const moveTags = selCaught
       ? selected.movePool.map((mId) => MOVES[mId]?.name).filter(Boolean).join(' • ')
       : 'Catch to inspect full moveset!';
+    const typeBadgeHtml = selSeen
+      ? `<span class="type-pill" style="background:${selType.bg};border-color:${selType.color}">${selType.icon} ${selType.label}</span>`
+      : '<span class="type-pill" style="background:#1e293b;border-color:#475569">❓ Unknown</span>';
 
     info.innerHTML = `
       <div class="dex-detail-head">
         <strong>#${String(selected.id).padStart(3, '0')} ${selSeen ? selected.name : 'Undiscovered Pokémon'}</strong>
-        <span class="type-pill" style="background:${selType.bg};border-color:${selType.color}">${selType.icon} ${selType.label}</span>
+        ${typeBadgeHtml}
       </div>
       <p class="dex-detail-flavor">${selCaught ? selected.flavor : `Habitat Clue: Explore ${habitat} to meet this Pokémon!`}</p>
       <div class="dex-detail-meta">
@@ -656,8 +756,10 @@ export class PokedexUI {
     const wrap = document.createElement('div');
     wrap.className = 'guide-layout';
 
-    const totalSpecies = Object.keys(SPECIES).length;
-    const caughtCount = Object.keys(profile.pokedex.caught).length;
+    const allSpecies = Object.values(SPECIES);
+    const totalSpecies = allSpecies.length;
+    const { caughtMap } = getReconciledDexState(profile, this.storage);
+    const caughtCount = allSpecies.filter((sp) => (caughtMap.get(sp.id) || 0) > 0).length;
     const totalShrines = Object.keys(SHRINES).length;
     const quests = Array.isArray(FIELD_QUESTS) ? FIELD_QUESTS : Object.values(FIELD_QUESTS || {});
     const doneQuests = quests.filter((q) => profile.questsCompleted?.includes(q.id)).length;
@@ -677,7 +779,7 @@ export class PokedexUI {
       <div class="guide-compass-stats">
         ${targetBiome ? `<span>📍 Destination: <strong>${targetBiome.icon} ${targetBiome.name}</strong></span>` : ''}
         <span>📖 Dex: <strong>${caughtCount}/${totalSpecies}</strong></span>
-        <span>⛩️ Shrines: <strong>${profile.shrinesCleared.length}/${totalShrines}</strong></span>
+        <span>⛩️ Shrines: <strong>${(profile.shrinesCleared || []).length}/${totalShrines}</strong></span>
         <span>📜 Quests: <strong>${doneQuests}/${quests.length}</strong></span>
       </div>
     `;

@@ -21,6 +21,63 @@ import { OverworldEngine, drawTrainerPortrait } from './overworld.js';
 import { BattleEngine } from './battle.js';
 import { PokedexUI } from './pokedex.js';
 
+function resolveValidSpeciesId(raw) {
+  if (typeof raw === 'number') {
+    return Number.isInteger(raw) && SPECIES[raw] ? raw : null;
+  }
+  if (typeof raw === 'string') {
+    const trimmed = raw.trim().replace(/^#/, '');
+    if (/^\d+$/.test(trimmed)) {
+      const num = Number(trimmed);
+      return Number.isInteger(num) && SPECIES[num] ? num : null;
+    }
+    const lower = trimmed.toLowerCase();
+    if (lower) {
+      for (const sp of Object.values(SPECIES)) {
+        if (sp.name.toLowerCase() === lower) {
+          return sp.id;
+        }
+      }
+    }
+  }
+  return null;
+}
+
+function countCaughtSpecies(profile) {
+  if (!profile) return 0;
+  const caughtIds = new Set();
+  const rawCaught = profile.pokedex?.caught;
+  if (Array.isArray(rawCaught)) {
+    for (const rawId of rawCaught) {
+      const numId = resolveValidSpeciesId(rawId);
+      if (numId !== null) caughtIds.add(numId);
+    }
+  } else if (rawCaught && typeof rawCaught === 'object') {
+    for (const [rawKey, rawVal] of Object.entries(rawCaught)) {
+      const numId = resolveValidSpeciesId(rawKey);
+      if (numId === null) continue;
+      const val = rawVal === true ? 1 : Number(rawVal);
+      if (Number.isFinite(val) && val > 0) {
+        caughtIds.add(numId);
+      }
+    }
+  }
+
+  const starterId = resolveValidSpeciesId(profile.starterId);
+  if (starterId !== null) {
+    caughtIds.add(starterId);
+  }
+
+  for (const mon of [...(profile.team || []), ...(profile.box || [])]) {
+    const spId = resolveValidSpeciesId(mon?.speciesId);
+    if (spId !== null) {
+      caughtIds.add(spId);
+    }
+  }
+
+  return caughtIds.size;
+}
+
 class GameApp {
   constructor() {
     this.cabinetEl = document.getElementById('app-cabinet');
@@ -598,6 +655,8 @@ class GameApp {
     const profile = storage.getActiveProfile();
     if (!profile) return;
 
+    storage.syncPokedex?.(profile, false);
+
     this.bootScreenEl.hidden = true;
     this.starterScreenEl.hidden = true;
     this.gameShellEl.hidden = false;
@@ -628,6 +687,8 @@ class GameApp {
     const profile = storage.getActiveProfile();
     if (!profile) return;
 
+    storage.syncPokedex?.(profile, false);
+
     const lead = profile.team[0];
     if (lead) {
       this.hudLeadLabelEl.textContent = `Lv.${lead.level} ${lead.isShiny ? '✨ ' : ''}${lead.name}`;
@@ -637,9 +698,10 @@ class GameApp {
     }
 
     const totalSpecies = Object.keys(SPECIES).length;
-    const caughtCount = Object.keys(profile.pokedex.caught).length;
+    const caughtCount = countCaughtSpecies(profile);
     this.hudDexBtn.textContent = `📖 Dex ${caughtCount}/${totalSpecies}`;
     this.hudBadgesBtn.textContent = `🏅 ${profile.badges.length}/${BADGES.length}`;
+    this.overworld?.syncFollower?.();
     this.updateCompassHud();
   }
 
@@ -700,6 +762,8 @@ class GameApp {
     const profile = storage.getActiveProfile();
     if (!profile) return;
 
+    storage.syncPokedex?.(profile, false);
+
     const guidance = typeof getCompassGuidance === 'function' ? getCompassGuidance(profile, SPECIES) : null;
     const currentBiome = getBiomeAt(profile.pos.x, profile.pos.y) || BIOMES.village;
     const stats = typeof getBiomeDiscoveryStats === 'function' && currentBiome
@@ -716,7 +780,7 @@ class GameApp {
     }
     if (this.compassSubEl) {
       const totalSpecies = Object.keys(SPECIES).length;
-      const totalCaught = Object.keys(profile.pokedex.caught).length;
+      const totalCaught = countCaughtSpecies(profile);
       const totalShrines = Object.keys(SHRINES).length;
       if (stats && stats.totalSpecies > 0) {
         const chestPart = stats.chestsTotal > 0 ? ` • 📦 ${stats.chestsOpened}/${stats.chestsTotal}` : '';
