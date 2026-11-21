@@ -98,6 +98,26 @@ export const TRAINER_STYLES = {
     accentDark: '#9d174d',
     accentSoft: 'rgba(244, 114, 182, 0.22)',
   },
+  solstice: {
+    id: 'solstice',
+    name: 'Solar Sovereign',
+    icon: '☀️',
+    outfitPrimary: '#d97706',
+    outfitSecondary: '#fef08a',
+    accent: '#fbbf24',
+    accentDark: '#92400e',
+    accentSoft: 'rgba(251, 191, 36, 0.24)',
+  },
+  twilight: {
+    id: 'twilight',
+    name: 'Eclipse Mystic',
+    icon: '🔮',
+    outfitPrimary: '#581c87',
+    outfitSecondary: '#c084fc',
+    accent: '#a855f7',
+    accentDark: '#3b0764',
+    accentSoft: 'rgba(168, 85, 247, 0.24)',
+  },
 };
 
 export const TRAINER_ACCESSORIES = {
@@ -105,6 +125,15 @@ export const TRAINER_ACCESSORIES = {
   crown: { id: 'crown', name: 'Starlight Crown', icon: '👑' },
   wizard: { id: 'wizard', name: 'Mystic Hat', icon: '🧙' },
   headband: { id: 'headband', name: 'Thunder Headband', icon: '🎀' },
+  goggles: { id: 'goggles', name: 'Explorer Goggles', icon: '🥽' },
+  halo: { id: 'halo', name: 'Starlight Halo', icon: '💫' },
+};
+
+export const TRAINER_AURAS = {
+  none: { id: 'none', name: 'No Aura', icon: '⚪', color: '#94a3b8' },
+  stars: { id: 'stars', name: 'Starlight Sparks', icon: '✨', color: '#fde047' },
+  hearts: { id: 'hearts', name: 'Buddy Hearts', icon: '💖', color: '#f472b6' },
+  lightning: { id: 'lightning', name: 'Storm Sparks', icon: '⚡', color: '#38bdf8' },
 };
 
 export function resolveTrainerLook(trainerId, appearance = null) {
@@ -113,6 +142,8 @@ export function resolveTrainerLook(trainerId, appearance = null) {
   const styleId = rawStyleId && TRAINER_STYLES[rawStyleId] ? rawStyleId : 'default';
   const rawAccessory = appearance?.accessory;
   const accessory = rawAccessory && TRAINER_ACCESSORIES[rawAccessory] ? rawAccessory : 'cap';
+  const rawAura = appearance?.aura;
+  const aura = rawAura && TRAINER_AURAS[rawAura] ? rawAura : 'none';
   const cape = Boolean(appearance?.cape);
 
   const useBaseColors = !appearance || styleId === 'default';
@@ -130,6 +161,7 @@ export function resolveTrainerLook(trainerId, appearance = null) {
     skin: baseTrainer.skin,
     accessory,
     cape,
+    aura,
   };
 }
 
@@ -212,6 +244,14 @@ export const MOVES = {
   thunder_tempest: { id: 'thunder_tempest', name: 'Thunder Tempest', type: 'electric', power: 80, accuracy: 92, pp: 10, damageClass: 'special', category: 'attack', fx: 'electric' },
   aurora_flare: { id: 'aurora_flare', name: 'Aurora Flare', type: 'ice', power: 72, accuracy: 98, pp: 15, damageClass: 'special', category: 'attack', fx: 'ice' },
   cotton_guard: { id: 'cotton_guard', name: 'Cotton Guard', type: 'electric', power: 0, accuracy: 100, pp: 12, damageClass: 'status', category: 'shield', buffStat: 'def', buffStages: 1, grantShield: true, fx: 'shield' },
+  thunder_fang: { id: 'thunder_fang', name: 'Thunder Fang', type: 'electric', power: 62, accuracy: 98, pp: 20, damageClass: 'physical', category: 'attack', fx: 'electric' },
+  wild_volt: { id: 'wild_volt', name: 'Wild Volt', type: 'electric', power: 80, accuracy: 94, pp: 12, damageClass: 'physical', category: 'attack', fx: 'electric' },
+  moonblast: { id: 'moonblast', name: 'Moonblast', type: 'psychic', power: 78, accuracy: 98, pp: 12, damageClass: 'special', category: 'attack', fx: 'psychic' },
+  calm_aura: { id: 'calm_aura', name: 'Calm Aura', type: 'psychic', power: 0, accuracy: 100, pp: 12, damageClass: 'status', category: 'shield', buffStat: 'def', buffStages: 1, grantShield: true, fx: 'shield' },
+  shadow_pulse: { id: 'shadow_pulse', name: 'Shadow Pulse', type: 'ghost', power: 76, accuracy: 98, pp: 15, damageClass: 'special', category: 'attack', fx: 'ghost' },
+  iron_crush: { id: 'iron_crush', name: 'Iron Crush', type: 'rock', power: 78, accuracy: 94, pp: 12, damageClass: 'physical', category: 'attack', fx: 'rock' },
+  glacier_crash: { id: 'glacier_crash', name: 'Glacier Crash', type: 'ice', power: 76, accuracy: 95, pp: 12, damageClass: 'physical', category: 'attack', fx: 'ice' },
+  magma_cannon: { id: 'magma_cannon', name: 'Magma Cannon', type: 'fire', power: 82, accuracy: 92, pp: 10, damageClass: 'special', category: 'attack', fx: 'fire' },
 };
 
 export const EVOLUTION_ITEMS = {
@@ -256,6 +296,20 @@ export const EVOLUTION_ITEMS = {
     icon: '❄️',
     color: '#67e8f9',
     description: 'Evolves frosty friends like Eevee into Glaceon!',
+  },
+  sun_gem: {
+    id: 'sun_gem',
+    name: 'Sunburst Gem',
+    icon: '☀️',
+    color: '#fbbf24',
+    description: 'Evolves sunlit partners like Gloom, Poliwhirl, or Swablu!',
+  },
+  dusk_gem: {
+    id: 'dusk_gem',
+    name: 'Twilight Gem',
+    icon: '🔮',
+    color: '#9333ea',
+    description: 'Evolves twilight-hearted Pokémon like Onix or Eevee into Umbreon!',
   },
 };
 
@@ -1076,6 +1130,182 @@ export const SPECIES = {
     movePool: ['ice_beam', 'blizzard', 'aurora_flare', 'frost_veil'],
     flavor: 'Cools the mountain breeze into swirling diamond snowflakes that sparkle beneath the aurora.',
   },
+  182: {
+    id: 182,
+    name: 'Bellossom',
+    type: 'grass',
+    biome: 'forest',
+    catchFactor: 0.46,
+    color: '#4ade80',
+    baseStats: { hp: 76, atk: 80, def: 86, spd: 64 },
+    movePool: ['petal_blizzard', 'solar_pulse', 'petal_guard', 'synthesis'],
+    flavor: 'Dances in sunny forest clearings as its scarlet blossom petals chime in warm breezes.',
+  },
+  186: {
+    id: 186,
+    name: 'Politoed',
+    type: 'water',
+    biome: 'water',
+    catchFactor: 0.45,
+    color: '#34d399',
+    baseStats: { hp: 86, atk: 82, def: 78, spd: 78 },
+    movePool: ['surf_wave', 'bubble_beam', 'star_melody', 'aqua_ring'],
+    flavor: 'Calls cheerful lagoon choruses beneath starlight while ripples dance across the tides.',
+  },
+  197: {
+    id: 197,
+    name: 'Umbreon',
+    type: 'ghost',
+    biome: 'cave',
+    catchFactor: 0.50,
+    color: '#a855f7',
+    baseStats: { hp: 88, atk: 74, def: 96, spd: 68 },
+    movePool: ['shadow_pulse', 'phantom_claw', 'crystal_barrier', 'wish'],
+    flavor: 'Golden rings glow softly along its midnight fur, lighting safe paths through deep caverns.',
+  },
+  208: {
+    id: 208,
+    name: 'Steelix',
+    type: 'rock',
+    biome: 'cave',
+    catchFactor: 0.42,
+    color: '#94a3b8',
+    baseStats: { hp: 82, atk: 88, def: 106, spd: 54 },
+    movePool: ['iron_crush', 'meteor_slam', 'rock_slide', 'crystal_barrier'],
+    flavor: 'Polished like mirror-bright starsteel from rolling through shimmering crystal veins.',
+  },
+  280: {
+    id: 280,
+    name: 'Ralts',
+    type: 'psychic',
+    biome: 'forest',
+    catchFactor: 0.84,
+    color: '#4ade80',
+    baseStats: { hp: 40, atk: 50, def: 40, spd: 46 },
+    movePool: ['confusion', 'swift', 'calm_aura', 'wish'],
+    flavor: 'Senses warm friendship from afar and peeks shyly from behind glowing forest ferns.',
+  },
+  281: {
+    id: 281,
+    name: 'Kirlia',
+    type: 'psychic',
+    biome: 'cave',
+    catchFactor: 0.64,
+    color: '#e879f9',
+    baseStats: { hp: 54, atk: 68, def: 52, spd: 62 },
+    movePool: ['psybeam', 'star_melody', 'calm_aura', 'wish'],
+    flavor: 'Twirls gracefully like a starlit dancer when its trainer cheers with cheerful spirit.',
+  },
+  282: {
+    id: 282,
+    name: 'Gardevoir',
+    type: 'psychic',
+    biome: 'cave',
+    catchFactor: 0.44,
+    color: '#f472b6',
+    baseStats: { hp: 76, atk: 96, def: 74, spd: 86 },
+    movePool: ['moonblast', 'starlight_ray', 'cosmos_mind', 'calm_aura'],
+    flavor: 'Channels radiant moonbeams into protective cosmic barriers to keep its trusted partner safe.',
+  },
+  333: {
+    id: 333,
+    name: 'Swablu',
+    type: 'normal',
+    biome: 'peak',
+    catchFactor: 0.84,
+    color: '#7dd3fc',
+    baseStats: { hp: 48, atk: 46, def: 56, spd: 52 },
+    movePool: ['gust', 'star_melody', 'sky_wing', 'wish'],
+    flavor: 'Rests on trainers’ heads like a fluffy sky-blue cloud while humming gentle mountain songs.',
+  },
+  334: {
+    id: 334,
+    name: 'Altaria',
+    type: 'dragon',
+    biome: 'peak',
+    catchFactor: 0.50,
+    color: '#60a5fa',
+    baseStats: { hp: 78, atk: 78, def: 86, spd: 80 },
+    movePool: ['dragon_pulse', 'sky_wing', 'dragon_dance', 'star_melody'],
+    flavor: 'Soars through aurora clouds on cotton-soft wings, singing harmonies that echo down Starfall Peak.',
+  },
+  363: {
+    id: 363,
+    name: 'Spheal',
+    type: 'ice',
+    biome: 'water',
+    catchFactor: 0.86,
+    color: '#67e8f9',
+    baseStats: { hp: 62, atk: 48, def: 52, spd: 38 },
+    movePool: ['frost_breath', 'water_gun', 'frost_veil', 'aqua_ring'],
+    flavor: 'Round, bouncy, and always clapping its flippers whenever waves sparkle at Sapphire Lagoon!',
+  },
+  364: {
+    id: 364,
+    name: 'Sealeo',
+    type: 'ice',
+    biome: 'peak',
+    catchFactor: 0.64,
+    color: '#38bdf8',
+    baseStats: { hp: 78, atk: 66, def: 70, spd: 52 },
+    movePool: ['ice_beam', 'bubble_beam', 'frost_veil', 'aqua_ring'],
+    flavor: 'Juggles frosty starlight crystals on its whiskers to entertain explorers climbing Starfall Peak.',
+  },
+  365: {
+    id: 365,
+    name: 'Walrein',
+    type: 'ice',
+    biome: 'peak',
+    catchFactor: 0.44,
+    color: '#0284c7',
+    baseStats: { hp: 96, atk: 88, def: 88, spd: 68 },
+    movePool: ['glacier_crash', 'blizzard', 'surf_wave', 'frost_veil'],
+    flavor: 'Breaks glacial drift effortlessly with gleaming tusks while sheltering younger sea Pokémon.',
+  },
+  403: {
+    id: 403,
+    name: 'Shinx',
+    type: 'electric',
+    biome: 'forest',
+    catchFactor: 0.86,
+    color: '#60a5fa',
+    baseStats: { hp: 48, atk: 60, def: 42, spd: 52 },
+    movePool: ['thunder_shock', 'quick_attack', 'thunder_fang', 'howl_cheer'],
+    flavor: 'Flashes golden star sparks from its tail tip whenever it spots a friendly challenger.',
+  },
+  404: {
+    id: 404,
+    name: 'Luxio',
+    type: 'electric',
+    biome: 'volcano',
+    catchFactor: 0.64,
+    color: '#3b82f6',
+    baseStats: { hp: 64, atk: 78, def: 56, spd: 66 },
+    movePool: ['thunder_fang', 'spark_dash', 'thunderbolt', 'howl_cheer'],
+    flavor: 'Links paws with packmates to share bright currents along Ember Caldera’s basalt ridges.',
+  },
+  405: {
+    id: 405,
+    name: 'Luxray',
+    type: 'electric',
+    biome: 'volcano',
+    catchFactor: 0.46,
+    color: '#facc15',
+    baseStats: { hp: 82, atk: 98, def: 76, spd: 82 },
+    movePool: ['wild_volt', 'thunder_fang', 'phantom_claw', 'agility_dash'],
+    flavor: 'Its gleaming golden eyes spot lost travelers through storm clouds, guiding them safely home.',
+  },
+  467: {
+    id: 467,
+    name: 'Magmortar',
+    type: 'fire',
+    biome: 'volcano',
+    catchFactor: 0.44,
+    color: '#ef4444',
+    baseStats: { hp: 82, atk: 100, def: 76, spd: 86 },
+    movePool: ['magma_cannon', 'fire_spin', 'thunderbolt', 'focus_roar'],
+    flavor: 'Fires dazzling golden-crimson starfire blasts from twin arm cannons atop Ember Caldera.',
+  },
 };
 
 export const EVOLUTIONS = {
@@ -1094,11 +1324,17 @@ export const EVOLUTIONS = {
   37: [{ to: 38, item: 'fire_gem', minLevel: 15 }],
   39: [{ to: 40, item: 'moon_gem', minLevel: 16 }],
   43: [{ to: 44, minLevel: 12 }],
-  44: [{ to: 45, item: 'leaf_gem', minLevel: 21 }],
+  44: [
+    { to: 45, item: 'leaf_gem', minLevel: 21 },
+    { to: 182, item: 'sun_gem' },
+  ],
   54: [{ to: 55, minLevel: 15 }],
   58: [{ to: 59, item: 'fire_gem', minLevel: 16 }],
   60: [{ to: 61, minLevel: 12 }],
-  61: [{ to: 62, item: 'water_gem', minLevel: 21 }],
+  61: [
+    { to: 62, item: 'water_gem', minLevel: 21 },
+    { to: 186, item: 'sun_gem' },
+  ],
   63: [{ to: 64, minLevel: 12 }],
   64: [{ to: 65, item: 'moon_gem', minLevel: 21 }],
   74: [{ to: 75, minLevel: 13 }],
@@ -1107,15 +1343,18 @@ export const EVOLUTIONS = {
   86: [{ to: 87, minLevel: 15 }],
   92: [{ to: 93, minLevel: 14 }],
   93: [{ to: 94, item: 'moon_gem', minLevel: 22 }],
+  95: [{ to: 208, item: 'dusk_gem', minLevel: 20 }],
   116: [{ to: 117, minLevel: 15 }],
   117: [{ to: 230, item: 'water_gem', minLevel: 24 }],
   120: [{ to: 121, item: 'water_gem', minLevel: 15 }],
+  126: [{ to: 467, item: 'fire_gem', minLevel: 22 }],
   129: [{ to: 130, minLevel: 12 }],
   133: [
     { to: 134, item: 'water_gem' },
     { to: 135, item: 'thunder_gem' },
     { to: 136, item: 'fire_gem' },
     { to: 196, item: 'moon_gem' },
+    { to: 197, item: 'dusk_gem' },
     { to: 470, item: 'leaf_gem' },
     { to: 471, item: 'ice_gem' },
   ],
@@ -1123,6 +1362,13 @@ export const EVOLUTIONS = {
   148: [{ to: 149, minLevel: 24 }],
   179: [{ to: 180, minLevel: 13 }],
   180: [{ to: 181, minLevel: 22 }],
+  280: [{ to: 281, minLevel: 12 }],
+  281: [{ to: 282, item: 'moon_gem', minLevel: 22 }],
+  333: [{ to: 334, item: 'sun_gem', minLevel: 18 }],
+  363: [{ to: 364, minLevel: 14 }],
+  364: [{ to: 365, item: 'ice_gem', minLevel: 24 }],
+  403: [{ to: 404, minLevel: 12 }],
+  404: [{ to: 405, item: 'thunder_gem', minLevel: 23 }],
 };
 
 export function getSpriteUrls(id, back = false, shiny = false) {
@@ -1257,6 +1503,32 @@ export const BADGES = [
     check(profile) {
       if (profile?.shrinesCleared?.includes('starlight_shrine')) return true;
       return Object.keys(profile?.pokedex?.caught || {}).length >= 25;
+    },
+  },
+  {
+    id: 'eclipse',
+    name: 'Twilight Eclipse Badge',
+    type: 'ghost',
+    icon: '🔮',
+    description: 'Clear the Twilight Eclipse Shrine or catch 4 Ghost/Psychic Pokémon.',
+    check(profile) {
+      if (profile?.shrinesCleared?.includes('eclipse_shrine')) return true;
+      const twilightCount = Object.entries(profile?.pokedex?.caught || {}).filter(([id, count]) => {
+        if (!(count === true || Number(count) > 0)) return false;
+        const sp = SPECIES[Number(id)];
+        return sp && (sp.type === 'ghost' || sp.type === 'psychic');
+      }).length;
+      return twilightCount >= 4;
+    },
+  },
+  {
+    id: 'stardust',
+    name: 'Starlight Mentor Badge',
+    type: 'normal',
+    icon: '🌠',
+    description: 'Power up a Pokémon with Star Shards or perform 3 evolutions.',
+    check(profile) {
+      return (profile?.stats?.upgrades || 0) >= 1 || (profile?.stats?.evolutions || 0) >= 3;
     },
   },
 ];
