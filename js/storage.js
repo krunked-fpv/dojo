@@ -5,6 +5,7 @@ import {
   EVOLUTIONS,
   GAME_META,
   SHRINES,
+  SOLID_TILES,
   SPECIES,
   STARTER_IDS,
   TRAINERS,
@@ -281,7 +282,9 @@ function isMapTileWalkable(x, y) {
   if (!Array.isArray(WORLD_MAP) || WORLD_ROWS <= 0 || WORLD_COLS <= 0) return true;
   if (x < 0 || y < 0 || x >= WORLD_COLS || y >= WORLD_ROWS) return false;
   const tile = WORLD_MAP[y]?.[x];
-  return tile !== undefined && !SOLID_TILE_IDS.has(tile);
+  if (tile === undefined) return false;
+  const solidSet = SOLID_TILES instanceof Set ? SOLID_TILES : SOLID_TILE_IDS;
+  return !solidSet.has(tile);
 }
 
 function isSafeWorldTile(x, y) {
