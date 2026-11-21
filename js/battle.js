@@ -1,4 +1,4 @@
-import { MOVES, TYPES } from './config.js';
+import { EVOLUTION_ITEMS, MOVES, TYPES } from './config.js';
 import {
   attachPokemonSprite,
   calculateCatchAttempt,
@@ -90,6 +90,32 @@ const PHYSICAL_MOVE_IDS = new Set([
   'starlight_claw',
 ]);
 
+function normalizeBallStyle(ballType) {
+  if (ballType === true || ballType === 'great') return 'great';
+  if (ballType === 'star') return 'star';
+  return 'pokeball';
+}
+
+function resolveMoveParticleShape(move) {
+  if (!move) return 'circle';
+  if (move.id === 'star_melody') return 'note';
+  if (move.fx === 'wind' || move.id === 'sky_wing' || move.id === 'gust') return 'wind';
+  if (move.id === 'phantom_claw' || move.id === 'starlight_claw') return 'slash';
+  const shapeByType = {
+    fire: 'ember',
+    water: 'bubble',
+    grass: 'leaf',
+    electric: 'bolt',
+    psychic: 'star',
+    rock: 'dust',
+    ice: 'crystal',
+    ghost: 'wisp',
+    dragon: 'dragonflame',
+    normal: move.fx === 'star' ? 'star' : 'dust',
+  };
+  return shapeByType[move.type] || 'circle';
+}
+
 export class BattleEngine {
   constructor({ storage, audio, onBattleEnd, onBadgesUnlocked, onHudRefresh }) {
     this.storage = storage;
@@ -124,6 +150,7 @@ export class BattleEngine {
     this.movesEl = document.getElementById('battle-moves');
     this.btnBall = document.getElementById('battle-btn-ball');
     this.btnGreat = document.getElementById('battle-btn-great');
+    this.btnStar = document.getElementById('battle-btn-star');
     this.btnPotion = document.getElementById('battle-btn-potion');
     this.btnTeam = document.getElementById('battle-btn-team');
     this.btnRun = document.getElementById('battle-btn-run');
@@ -131,6 +158,7 @@ export class BattleEngine {
     this.teamDrawerEl = document.getElementById('battle-team-drawer');
     this.teamListEl = document.getElementById('battle-team-list');
     this.teamCloseBtn = document.getElementById('battle-team-close');
+    this.enemyPartyPipsEl = this.ensureEnemyPartyPipsEl();
 
     this.active = false;
     this.busy = false;
@@ -141,11 +169,15 @@ export class BattleEngine {
     this.selectedMoveIndex = 0;
 
     this.enemy = null;
+    this.enemyParty = [];
+    this.enemyPartyIndex = 0;
     this.player = null;
     this.playerIndex = 0;
     this.biomeId = 'forest';
     this.isShrine = false;
     this.shrineData = null;
+    this.isTrainer = false;
+    this.trainerData = null;
 
     this.particles = [];
     this.popups = [];
@@ -158,6 +190,8 @@ export class BattleEngine {
     this.lastFxTime = 0;
     this.hpRafs = { enemy: null, player: null };
     this.hpResolvers = { enemy: null, player: null };
+    this.xpRaf = null;
+    this.xpResolver = null;
     this.ballRafId = null;
     this.ballResolver = null;
     this.pendingTimers = new Map();
@@ -180,16 +214,34 @@ export class BattleEngine {
     this.bindUI();
   }
 
+  ensureEnemyPartyPipsEl() {
+    let el = document.getElementById('enemy-party-pips');
+    if (el) return el;
+    const head = this.enemyLevelEl?.parentElement || document.querySelector('.status-card-enemy .status-head');
+    if (!head) return null;
+    el = document.createElement('span');
+    el.id = 'enemy-party-pips';
+    el.className = 'enemy-party-pips';
+    el.hidden = true;
+    if (this.enemyLevelEl && this.enemyLevelEl.parentElement === head) {
+      head.insertBefore(el, this.enemyLevelEl);
+    } else {
+      head.appendChild(el);
+    }
+    return el;
+  }
+
   bindUI() {
     const signal = this._uiAbort.signal;
     this.logEl?.addEventListener('click', () => this.finishTypewriter(), { signal });
-    this.btnBall?.addEventListener('click', () => this.handleThrowBall(false), { signal });
-    this.btnGreat?.addEventListener('click', () => this.handleThrowBall(true), { signal });
+    this.btnBall?.addEventListener('click', () => this.handleThrowBall('pokeball'), { signal });
+    this.btnGreat?.addEventListener('click', () => this.handleThrowBall('great'), { signal });
+    this.btnStar?.addEventListener('click', () => this.handleThrowBall('star'), { signal });
     this.btnPotion?.addEventListener('click', () => this.handleUsePotion(), { signal });
     this.btnTeam?.addEventListener('click', () => this.openTeamDrawer(false), { signal });
     this.btnRun?.addEventListener('click', () => this.handleRun(), { signal });
 
-    const actionButtons = [this.btnBall, this.btnGreat, this.btnPotion, this.btnTeam, this.btnRun];
+    const actionButtons = [this.btnBall, this.btnGreat, this.btnStar, this.btnPotion, this.btnTeam, this.btnRun];
     for (const btn of actionButtons) {
       if (!btn) continue;
       const playHoverCue = () => {
@@ -261,6 +313,16 @@ export class BattleEngine {
       res();
     }
 
+    if (this.xpRaf !== null) {
+      cancelAnimationFrame(this.xpRaf);
+      this.xpRaf = null;
+    }
+    if (this.xpResolver) {
+      const res = this.xpResolver;
+      this.xpResolver = null;
+      res();
+    }
+
     for (const [timerId, resolve] of this.pendingTimers.entries()) {
       clearTimeout(timerId);
       this.pendingTimers.delete(timerId);
@@ -314,6 +376,7 @@ export class BattleEngine {
   unlockPlayerInput() {
     if (!this.active) return;
     this.busy = false;
+    this.lastActionAt = -ACTION_COOLDOWN_MS;
     this.state = BATTLE_STATES.PLAYER_INPUT;
     this.screenEl?.classList.remove('is-action-locked');
     this.setControlsDisabled(false);
@@ -353,7 +416,7 @@ export class BattleEngine {
 
     this.renderStatusCards();
     this.renderMoveButtons();
-    this.setIdlePrompt(`What will ${this.player.name} do?`);
+    this.setIdlePrompt(`What will ${this.player.displayName || this.player.name} do?`);
     this.unlockPlayerInput();
   }
 
@@ -379,7 +442,15 @@ export class BattleEngine {
     };
   }
 
-  async start({ enemy, biomeId = 'forest', isShrine = false, shrineData = null }) {
+  async start({
+    enemy,
+    enemyParty = null,
+    biomeId = 'forest',
+    isShrine = false,
+    shrineData = null,
+    isTrainer = false,
+    trainerData = null,
+  }) {
     const profile = this.storage.getActiveProfile();
     if (!profile) {
       this.onBattleEnd?.({ outcome: 'escaped', faintedAll: false });
@@ -387,7 +458,16 @@ export class BattleEngine {
     }
 
     this.storage.ensureHealthyParty?.(profile);
-    if (profile.team.length === 0 || !enemy) {
+    const party = Array.isArray(enemyParty) && enemyParty.length > 0
+      ? enemyParty.filter(Boolean)
+      : (enemy ? [enemy] : []);
+    const firstHealthyEnemy = party.findIndex((m) => !m.isFainted);
+    const activeEnemyIdx = enemy && party.includes(enemy) && !enemy.isFainted
+      ? party.indexOf(enemy)
+      : (firstHealthyEnemy >= 0 ? firstHealthyEnemy : 0);
+    const leadEnemy = party[activeEnemyIdx] || enemy || null;
+
+    if (profile.team.length === 0 || !leadEnemy) {
       this.onBattleEnd?.({ outcome: 'escaped', faintedAll: false });
       return;
     }
@@ -406,13 +486,19 @@ export class BattleEngine {
     this.turnToken = 0;
     this.lastActionAt = -ACTION_COOLDOWN_MS;
     this.selectedMoveIndex = 0;
-    this.enemy = enemy;
+    this.enemyParty = party;
+    this.enemyPartyIndex = Math.max(0, activeEnemyIdx);
+    this.enemy = leadEnemy;
     this.biomeId = isShrine ? 'shrine' : biomeId;
     this.isShrine = isShrine;
     this.shrineData = shrineData;
+    this.isTrainer = Boolean(isTrainer);
+    this.trainerData = trainerData || null;
 
     this.player.resetBattleState?.();
-    this.enemy.resetBattleState?.();
+    for (const enemyMon of this.enemyParty) {
+      enemyMon.resetBattleState?.();
+    }
 
     this.active = true;
     this.busy = true;
@@ -425,7 +511,7 @@ export class BattleEngine {
     this.shakeTimer = 0;
     if (this.stageEl) this.stageEl.style.transform = '';
 
-    this.storage.recordSeen(enemy.speciesId);
+    this.storage.recordSeen(leadEnemy.speciesId);
 
     if (this.screenEl) {
       this.screenEl.hidden = false;
@@ -439,7 +525,7 @@ export class BattleEngine {
 
     this._resetSpriteClasses('enemy');
     this._resetSpriteClasses('player');
-    this.displayedEnemyHp = enemy.hp;
+    this.displayedEnemyHp = leadEnemy.hp;
     this.displayedPlayerHp = this.player.hp;
 
     this.renderStatusCards();
@@ -448,9 +534,9 @@ export class BattleEngine {
     this.setControlsDisabled(true);
 
     await Promise.all([
-      attachPokemonSprite(this.enemySpriteEl, enemy.speciesId, {
+      attachPokemonSprite(this.enemySpriteEl, leadEnemy.speciesId, {
         back: false,
-        shiny: Boolean(enemy.isShiny),
+        shiny: Boolean(leadEnemy.isShiny),
         timeoutMs: 2000,
       }),
       attachPokemonSprite(this.playerSpriteEl, this.player.speciesId, {
@@ -462,19 +548,29 @@ export class BattleEngine {
 
     if (!this.isSessionValid(sid)) return;
 
-    this.enemySpriteEl?.classList.toggle('is-shiny-sprite', Boolean(enemy.isShiny));
+    this.enemySpriteEl?.classList.toggle('is-shiny-sprite', Boolean(leadEnemy.isShiny));
     this.playerSpriteEl?.classList.toggle('is-shiny-sprite', Boolean(this.player.isShiny));
 
-    if (enemy.isShiny) {
+    if (leadEnemy.isShiny) {
       this.audio?.playShinySparkle?.();
       this.spawnShinyIntroSparkles('enemy');
     }
 
-    const introMsg = isShrine && shrineData
-      ? shrineData.intro
-      : enemy.isShiny
-        ? `✨ A rare Starlight Shimmer ${enemy.name} appeared! Go, ${this.player.name}!`
-        : `A wild ${enemy.name} appeared! Go, ${this.player.name}!`;
+    const playerName = this.player.displayName || this.player.name;
+    let introMsg = '';
+    if (isShrine && shrineData) {
+      introMsg = shrineData.intro;
+    } else if (this.isTrainer && this.trainerData) {
+      const isRematch = Boolean(this.trainerData.id && profile.rivalsDefeated?.includes(this.trainerData.id));
+      const line = (isRematch && this.trainerData.rematchIntro) || this.trainerData.intro;
+      introMsg = line
+        ? `${this.trainerData.name}: "${line}" Sent out ${leadEnemy.name}! Go, ${playerName}!`
+        : `${this.trainerData.name} sent out ${leadEnemy.name}! Go, ${playerName}!`;
+    } else if (leadEnemy.isShiny) {
+      introMsg = `✨ A rare Starlight Shimmer ${leadEnemy.name} appeared! Go, ${playerName}!`;
+    } else {
+      introMsg = `A wild ${leadEnemy.name} appeared! Go, ${playerName}!`;
+    }
     await this.say(introMsg);
 
     if (!this.isSessionValid(sid)) return;
@@ -488,14 +584,18 @@ export class BattleEngine {
     this.busy = false;
     this.state = BATTLE_STATES.INACTIVE;
     this.mustSwitchForced = false;
+    this.isTrainer = false;
+    this.trainerData = null;
+    this.enemyParty = [];
+    this.enemyPartyIndex = 0;
     this.pokeballAnim = null;
     this.captureBeam = null;
     this.particles = [];
     this.popups = [];
     this.shakeTimer = 0;
     if (this.stageEl) this.stageEl.style.transform = '';
-    this.enemySpriteEl?.classList.remove('windup', 'hit-stop', 'hit-shake', 'evo-glow', 'evo-flash');
-    this.playerSpriteEl?.classList.remove('windup', 'hit-stop', 'hit-shake', 'evo-glow', 'evo-flash');
+    this.enemySpriteEl?.classList.remove('windup', 'hit-stop', 'hit-shake', 'evo-glow', 'evo-flash', 'enemy-sendout', 'faint-drop');
+    this.playerSpriteEl?.classList.remove('windup', 'hit-stop', 'hit-shake', 'evo-glow', 'evo-flash', 'faint-drop');
 
     this.closeTeamDrawer();
     this.clearAllTimersAndLoops();
@@ -565,14 +665,29 @@ export class BattleEngine {
       this.enemyTypeEl.style.color = '#ffffff';
     }
     if (this.enemyDexPillEl) {
-      this.enemyDexPillEl.hidden = !caughtBefore || this.isShrine;
+      this.enemyDexPillEl.hidden = !caughtBefore || this.isShrine || this.isTrainer;
+    }
+    const pipsEl = this.enemyPartyPipsEl || this.ensureEnemyPartyPipsEl();
+    if (pipsEl) {
+      this.enemyPartyPipsEl = pipsEl;
+      if (Array.isArray(this.enemyParty) && this.enemyParty.length > 1) {
+        pipsEl.innerHTML = this.enemyParty.map((mon, idx) => {
+          const stateCls = mon?.isFainted ? ' is-fainted' : idx === this.enemyPartyIndex ? ' is-active' : '';
+          const title = mon ? `${mon.name} Lv.${mon.level}${mon.isFainted ? ' (Fainted)' : ''}` : '';
+          return `<span class="enemy-party-pip${stateCls}" title="${title}"></span>`;
+        }).join('');
+        pipsEl.hidden = false;
+      } else {
+        pipsEl.innerHTML = '';
+        pipsEl.hidden = true;
+      }
     }
     this.updateHpBarVisual(this.enemyHpFillEl, this.displayedEnemyHp, this.enemy.maxHp);
     if (this.enemyStagesEl) {
       this.renderStagePills(this.enemyStagesEl, this.enemy);
     }
 
-    if (this.playerNameEl) this.playerNameEl.textContent = this.player.name;
+    if (this.playerNameEl) this.playerNameEl.textContent = this.player.displayName || this.player.name;
     if (this.playerLevelEl) this.playerLevelEl.textContent = `Lv.${this.player.level}`;
     const pType = TYPES[this.player.type] || TYPES.normal;
     if (this.playerTypeEl) {
@@ -584,7 +699,7 @@ export class BattleEngine {
     if (this.playerHpTextEl) {
       this.playerHpTextEl.textContent = `HP ${Math.round(this.displayedPlayerHp)}/${this.player.maxHp}`;
     }
-    if (this.playerXpFillEl) {
+    if (this.playerXpFillEl && this.xpRaf === null) {
       const xpPct = Math.min(100, Math.round((this.player.xp / Math.max(1, this.player.xpToNext)) * 100));
       this.playerXpFillEl.style.width = `${xpPct}%`;
     }
@@ -718,14 +833,74 @@ export class BattleEngine {
     this.selectMoveCard(this.selectedMoveIndex, false);
   }
 
+  moveSelectionCursor(dir) {
+    if (!this.canAcceptPlayerAction() || !this.movesEl) return false;
+    const cards = Array.from(this.movesEl.querySelectorAll('.move-card'));
+    const count = cards.length;
+    if (count === 0) return false;
+
+    const cur = Math.max(0, Math.min(count - 1, this.selectedMoveIndex));
+    let next = cur;
+
+    if (dir === 'left') {
+      if (cur % 2 === 1) next = cur - 1;
+    } else if (dir === 'right') {
+      if (cur % 2 === 0 && cur + 1 < count) next = cur + 1;
+    } else if (dir === 'up') {
+      if (cur >= 2) next = cur - 2;
+    } else if (dir === 'down') {
+      if (cur + 2 < count) next = cur + 2;
+      else if (cur < 2 && count === 3) next = 2;
+    }
+
+    if (next !== cur && cards[next]?.disabled) {
+      const alt = cards.findIndex((c, idx) => idx !== cur && !c.disabled && (
+        (dir === 'down' && idx >= 2) ||
+        (dir === 'up' && idx < 2) ||
+        (dir === 'right' && idx % 2 === 1) ||
+        (dir === 'left' && idx % 2 === 0)
+      ));
+      if (alt >= 0) next = alt;
+      else return false;
+    }
+
+    this.selectMoveCard(next, true);
+    return next !== cur;
+  }
+
+  selectMoveBySlot(slotIdx) {
+    if (!this.canAcceptPlayerAction() || !this.movesEl) return false;
+    const idx = Number(slotIdx);
+    if (!Number.isInteger(idx) || idx < 0) return false;
+    const cards = Array.from(this.movesEl.querySelectorAll('.move-card'));
+    const card = cards[idx];
+    if (!card || card.disabled) {
+      if (card?.disabled) this.audio?.playMenuBlip?.(300);
+      return false;
+    }
+    this.selectMoveCard(idx, false);
+    card.click();
+    return true;
+  }
+
   renderMoveButtons() {
     if (!this.movesEl || !this.player || !this.enemy) return;
     const moves = this.player.getMoveObjects();
     const hasAnyPp = this.player.hasAnyMovePp();
     this.movesEl.innerHTML = '';
 
-    if (this.selectedMoveIndex >= moves.length) {
+    if (this.selectedMoveIndex < 0 || this.selectedMoveIndex >= moves.length) {
       this.selectedMoveIndex = 0;
+    }
+    if (moves.length > 0 && hasAnyPp) {
+      const currentMove = moves[this.selectedMoveIndex];
+      const currentPp = currentMove ? this.player.getMovePp(currentMove.id).current : 0;
+      if (currentPp <= 0) {
+        const firstAvailableIdx = moves.findIndex((m) => this.player.getMovePp(m.id).current > 0);
+        if (firstAvailableIdx >= 0) {
+          this.selectedMoveIndex = firstAvailableIdx;
+        }
+      }
     }
 
     moves.forEach((move, idx) => {
@@ -829,13 +1004,18 @@ export class BattleEngine {
     if (!profile || !this.player) return;
 
     const locked = this.busy || this.state !== BATTLE_STATES.PLAYER_INPUT;
+    const starBalls = Math.max(0, Number(profile.bag?.starBalls) || 0);
     if (this.btnBall) {
       this.btnBall.textContent = this.isShrine ? '🛡️ Guardian' : '🔴 Poké Ball ∞';
       this.btnBall.disabled = locked;
     }
     if (this.btnGreat) {
       this.btnGreat.textContent = `🔵 Great Ball (${profile.bag.greatBalls})`;
-      this.btnGreat.disabled = locked || this.isShrine || profile.bag.greatBalls <= 0;
+      this.btnGreat.disabled = locked || this.isShrine || this.isTrainer || profile.bag.greatBalls <= 0;
+    }
+    if (this.btnStar) {
+      this.btnStar.textContent = `🌟 Star Ball (${starBalls})`;
+      this.btnStar.disabled = locked || this.isShrine || this.isTrainer || starBalls <= 0;
     }
     if (this.btnPotion) {
       this.btnPotion.textContent = `🍓 Potion (${profile.bag.potions})`;
@@ -858,6 +1038,7 @@ export class BattleEngine {
     if (this.btnRun) this.btnRun.disabled = Boolean(disabled);
     if (disabled) {
       if (this.btnGreat) this.btnGreat.disabled = true;
+      if (this.btnStar) this.btnStar.disabled = true;
       if (this.btnPotion) this.btnPotion.disabled = true;
       if (this.btnTeam) this.btnTeam.disabled = true;
     } else {
@@ -1128,26 +1309,67 @@ export class BattleEngine {
       buff: 'star',
       shield: 'crystal',
       star: 'star',
+      wind: 'wind',
+      slash: 'slash',
+      note: 'note',
     };
-    const shape = shapeMap[type] || 'circle';
+    const shape = options.shapeOverride || shapeMap[type] || 'circle';
+
+    if (options.slash) {
+      const slashAngles = [-0.65, 0.65, -0.35, 0.45];
+      slashAngles.forEach((ang, idx) => {
+        this.particles.push({
+          x: center.x + (Math.random() - 0.5) * 18,
+          y: center.y + (Math.random() - 0.5) * 18,
+          vx: Math.cos(ang) * 42,
+          vy: Math.sin(ang) * 42,
+          gravity: 0,
+          life: -(idx * 0.02),
+          maxLife: 0.24 * Math.min(1.4, lifeScale),
+          color: idx % 2 === 0 ? (options.slashColor || typeColor) : '#ffffff',
+          size: 14 + Math.random() * 5,
+          rotation: ang,
+          spin: 0,
+          shape: 'slash',
+        });
+      });
+    }
+
+    if (options.extraDust) {
+      this.spawnImpactDust(pedestal, 10, lifeScale);
+    }
 
     for (let i = 0; i < count; i++) {
       const angle = (Math.PI * 2 * i) / count + Math.random() * 0.35;
       const speed = 75 + Math.random() * 155;
-      const isBuoyant = shape === 'ember' || shape === 'bubble' || shape === 'wisp' || shape === 'dragonflame';
+      const isBuoyant = shape === 'ember' || shape === 'bubble' || shape === 'wisp' || shape === 'dragonflame' || shape === 'note';
+      let pShape = shape;
+      let pColor = i % 3 === 0 ? '#ffffff' : typeColor;
+      if (options.aurora) {
+        const auroraCols = ['#67e8f9', '#a7f3d0', '#f472b6', '#ffffff'];
+        pColor = auroraCols[i % auroraCols.length];
+        if (i % 3 === 0) pShape = 'star';
+      } else if (options.petalColors) {
+        const petalCols = ['#22c55e', '#4ade80', '#f9a8d4', '#fbcfe8'];
+        pColor = petalCols[i % petalCols.length];
+      } else if (options.extraNotes && i % 2 === 0) {
+        pShape = 'note';
+        const noteCols = ['#fde047', '#f472b6', '#38bdf8', '#ffffff'];
+        pColor = noteCols[i % noteCols.length];
+      }
       this.particles.push({
         x: center.x + (Math.random() - 0.5) * 18,
         y: center.y + (Math.random() - 0.5) * 18,
         vx: Math.cos(angle) * speed,
         vy: Math.sin(angle) * speed - (isBuoyant ? 55 : 22),
-        gravity: isBuoyant ? -75 : shape === 'leaf' || shape === 'crystal' ? 48 : 190,
+        gravity: isBuoyant ? -75 : pShape === 'leaf' || pShape === 'crystal' ? 48 : 190,
         life: 0,
         maxLife: (0.45 + Math.random() * 0.28) * lifeScale,
-        color: i % 3 === 0 ? '#ffffff' : typeColor,
-        size: shape === 'leaf' ? 7 + Math.random() * 4 : 3.5 + Math.random() * 4.5,
+        color: pColor,
+        size: pShape === 'leaf' ? 7 + Math.random() * 4 : 3.5 + Math.random() * 4.5,
         rotation: angle,
         spin: (Math.random() - 0.5) * 10,
-        shape,
+        shape: pShape,
       });
     }
 
@@ -1164,25 +1386,48 @@ export class BattleEngine {
     }
   }
 
+  spawnPhysicalElementalTrail(attackerSide, defenderSide, move, pace) {
+    if (!move || (move.type === 'normal' && move.fx !== 'wind')) return;
+    const start = this.getSpriteCenter(attackerSide);
+    const target = this.getSpriteCenter(defenderSide);
+    const typeMeta = TYPES[move.type] || TYPES.normal;
+    const lifeScale = pace?.particleLifeScale || 1.2;
+    const shape = resolveMoveParticleShape(move);
+    const dx = target.x - start.x;
+    const dy = target.y - start.y;
+    const angle = Math.atan2(dy, dx);
+    const steps = 7;
+
+    for (let s = 0; s < steps; s++) {
+      const t = s / Math.max(1, steps - 1);
+      const px = start.x + dx * (0.2 + t * 0.72);
+      const py = start.y + dy * (0.2 + t * 0.72);
+      const isPetal = move.id === 'petal_blizzard';
+      const color = isPetal && s % 2 === 1 ? '#f9a8d4' : (s % 2 === 0 ? typeMeta.color : '#ffffff');
+      this.particles.push({
+        x: px + (Math.random() - 0.5) * 16,
+        y: py + (Math.random() - 0.5) * 16,
+        vx: Math.cos(angle) * (45 + Math.random() * 55),
+        vy: Math.sin(angle) * (45 + Math.random() * 55),
+        gravity: 10,
+        life: -(s * 0.014),
+        maxLife: (0.24 + Math.random() * 0.14) * Math.min(1.4, lifeScale),
+        color,
+        size: shape === 'slash' ? 11 + Math.random() * 4 : shape === 'leaf' ? 7 : 5 + Math.random() * 3,
+        rotation: angle + (Math.random() - 0.5) * 0.5,
+        spin: shape === 'leaf' ? 9 : 2,
+        shape,
+      });
+    }
+  }
+
   async animateElementalStream(attackerSide, defenderSide, move, sessionId) {
     const pace = this.getPaceConfig();
     const start = this.getSpriteCenter(attackerSide);
     const target = this.getSpriteCenter(defenderSide);
     const typeMeta = TYPES[move.type] || TYPES.normal;
 
-    const shapeByType = {
-      fire: 'ember',
-      water: 'bubble',
-      grass: 'leaf',
-      electric: 'bolt',
-      psychic: 'star',
-      rock: 'dust',
-      ice: 'crystal',
-      ghost: 'wisp',
-      dragon: 'dragonflame',
-      normal: move.fx === 'star' ? 'star' : 'dust',
-    };
-    const shape = shapeByType[move.type] || 'circle';
+    const shape = resolveMoveParticleShape(move);
     const steps = pace.streamSteps || 14;
     const stepWaitMs = pace.streamStepMs || 30;
     const lifeScale = pace.particleLifeScale || 1.2;
@@ -1203,20 +1448,38 @@ export class BattleEngine {
         const dx = target.x - start.x;
         const dy = target.y - start.y;
         const angle = Math.atan2(dy, dx) + (Math.random() - 0.5) * 0.38;
+        let particleShape = shape;
+        let particleColor = k === 0 && shape !== 'leaf' ? '#ffffff' : typeMeta.color;
+
+        if (move.id === 'star_melody') {
+          particleShape = k % 2 === 0 ? 'note' : 'star';
+          const melodyCols = ['#fde047', '#f472b6', '#38bdf8', '#ffffff'];
+          particleColor = melodyCols[(s + k) % melodyCols.length];
+        } else if (move.id === 'hyper_nova') {
+          particleShape = 'star';
+          const novaCols = ['#fde047', '#c084fc', '#38bdf8', '#ffffff'];
+          particleColor = novaCols[(s + k) % novaCols.length];
+        } else if (move.id === 'aurora_flare') {
+          particleShape = k % 2 === 0 ? 'crystal' : 'star';
+          const auroraCols = ['#67e8f9', '#a7f3d0', '#f472b6', '#ffffff'];
+          particleColor = auroraCols[(s + k) % auroraCols.length];
+        } else if (move.id === 'petal_blizzard' && k % 2 === 1) {
+          particleColor = '#f9a8d4';
+        }
 
         this.particles.push({
           x: px + spread,
           y: py + (Math.random() - 0.5) * 16,
           vx: Math.cos(angle) * speed,
-          vy: Math.sin(angle) * speed - (shape === 'bubble' || shape === 'ember' || shape === 'wisp' ? 32 : 0),
-          gravity: shape === 'bubble' || shape === 'ember' || shape === 'wisp' ? -55 : 22,
+          vy: Math.sin(angle) * speed - (particleShape === 'bubble' || particleShape === 'ember' || particleShape === 'wisp' || particleShape === 'note' ? 32 : 0),
+          gravity: particleShape === 'bubble' || particleShape === 'ember' || particleShape === 'wisp' || particleShape === 'note' ? -55 : 22,
           life: 0,
           maxLife: (0.34 + Math.random() * 0.18) * Math.min(1.4, lifeScale),
-          color: k === 0 && shape !== 'leaf' ? '#ffffff' : typeMeta.color,
-          size: shape === 'leaf' ? 8 : 5 + Math.random() * 3.5,
+          color: particleColor,
+          size: particleShape === 'leaf' ? 8 : move.id === 'hyper_nova' ? 6.5 + Math.random() * 3.5 : 5 + Math.random() * 3.5,
           rotation: angle,
-          spin: shape === 'leaf' || shape === 'crystal' ? 10 : 4,
-          shape,
+          spin: particleShape === 'leaf' || particleShape === 'crystal' ? 10 : 4,
+          shape: particleShape,
         });
       }
       if (s < steps - 1) {
@@ -1303,9 +1566,20 @@ export class BattleEngine {
       const b = this.pokeballAnim;
       const t = this.captureBeam;
       const grad = ctx.createLinearGradient(b.x, b.y, t.x, t.y);
-      grad.addColorStop(0, 'rgba(254, 202, 202, 0.92)');
-      grad.addColorStop(0.5, 'rgba(239, 68, 68, 0.65)');
-      grad.addColorStop(1, 'rgba(239, 68, 68, 0.08)');
+      if (b.isStar || b.ballStyle === 'star') {
+        grad.addColorStop(0, 'rgba(254, 240, 138, 0.95)');
+        grad.addColorStop(0.35, 'rgba(192, 132, 252, 0.78)');
+        grad.addColorStop(0.7, 'rgba(56, 189, 248, 0.48)');
+        grad.addColorStop(1, 'rgba(168, 85, 247, 0.08)');
+      } else if (b.isGreat || b.ballStyle === 'great') {
+        grad.addColorStop(0, 'rgba(186, 230, 253, 0.92)');
+        grad.addColorStop(0.5, 'rgba(14, 165, 233, 0.65)');
+        grad.addColorStop(1, 'rgba(14, 165, 233, 0.08)');
+      } else {
+        grad.addColorStop(0, 'rgba(254, 202, 202, 0.92)');
+        grad.addColorStop(0.5, 'rgba(239, 68, 68, 0.65)');
+        grad.addColorStop(1, 'rgba(239, 68, 68, 0.08)');
+      }
       ctx.save();
       ctx.fillStyle = grad;
       ctx.beginPath();
@@ -1407,7 +1681,7 @@ export class BattleEngine {
         ctx.fill();
       } else if (p.shape === 'leaf') {
         ctx.rotate(p.rotation || 0);
-        ctx.fillStyle = '#22c55e';
+        ctx.fillStyle = p.color && p.color !== '#ffffff' ? p.color : '#22c55e';
         ctx.strokeStyle = '#14532d';
         ctx.lineWidth = 1.4;
         ctx.beginPath();
@@ -1415,6 +1689,51 @@ export class BattleEngine {
         ctx.quadraticCurveTo(0, -p.size * 0.65, -p.size, 0);
         ctx.quadraticCurveTo(0, p.size * 0.65, p.size, 0);
         ctx.fill();
+        ctx.stroke();
+      } else if (p.shape === 'slash') {
+        ctx.rotate(p.rotation || 0);
+        const len = p.size * (1.4 + progress * 1.3);
+        const thick = Math.max(1.2, p.size * 0.4 * (1 - progress * 0.68));
+        ctx.fillStyle = p.color || '#ffffff';
+        ctx.beginPath();
+        ctx.moveTo(-len, 0);
+        ctx.quadraticCurveTo(0, -thick, len, 0);
+        ctx.quadraticCurveTo(0, thick * 0.42, -len, 0);
+        ctx.closePath();
+        ctx.fill();
+        ctx.fillStyle = '#ffffff';
+        ctx.beginPath();
+        ctx.moveTo(-len * 0.72, 0);
+        ctx.quadraticCurveTo(0, -thick * 0.45, len * 0.72, 0);
+        ctx.quadraticCurveTo(0, thick * 0.16, -len * 0.72, 0);
+        ctx.closePath();
+        ctx.fill();
+      } else if (p.shape === 'wind') {
+        ctx.rotate(p.rotation || 0);
+        const w = p.size * (1.65 + progress * 0.85);
+        ctx.strokeStyle = p.color || '#e2e8f0';
+        ctx.lineWidth = Math.max(1.4, 3.2 * (1 - progress * 0.6));
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.moveTo(-w, 0);
+        ctx.quadraticCurveTo(-w * 0.25, -p.size * 0.75, w * 0.4, 0);
+        ctx.quadraticCurveTo(w * 0.85, p.size * 0.55, w, -p.size * 0.2);
+        ctx.stroke();
+      } else if (p.shape === 'note') {
+        const wobble = Math.sin(p.life * 10) * 0.14;
+        ctx.rotate((p.rotation || 0) * 0.15 + wobble);
+        const s = p.size;
+        ctx.fillStyle = p.color || '#fde047';
+        ctx.strokeStyle = p.color || '#fde047';
+        ctx.beginPath();
+        ctx.ellipse(-s * 0.24, s * 0.42, s * 0.52, s * 0.36, -0.35, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.lineWidth = Math.max(1.6, s * 0.26);
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.moveTo(s * 0.18, s * 0.38);
+        ctx.lineTo(s * 0.18, -s * 0.92);
+        ctx.quadraticCurveTo(s * 0.82, -s * 0.7, s * 0.7, -s * 0.18);
         ctx.stroke();
       } else if (p.shape === 'dust') {
         const radius = p.size * (0.7 + progress * 0.9);
@@ -1486,6 +1805,8 @@ export class BattleEngine {
     ctx.scale(scale, scale);
     ctx.rotate(ball.angle || 0);
     const r = 17;
+    const isStar = Boolean(ball.isStar || ball.ballStyle === 'star');
+    const isGreat = Boolean(!isStar && (ball.isGreat || ball.ballStyle === 'great'));
 
     if (ball.shadowAlpha) {
       ctx.save();
@@ -1497,18 +1818,34 @@ export class BattleEngine {
       ctx.restore();
     }
 
-    ctx.fillStyle = '#ffffff';
+    ctx.fillStyle = isStar ? '#f5f3ff' : '#ffffff';
     ctx.beginPath();
     ctx.arc(0, 0, r, 0, Math.PI * 2);
     ctx.fill();
 
-    ctx.fillStyle = ball.isGreat ? '#0ea5e9' : '#ef4444';
+    if (isStar) {
+      const starGrad = ctx.createLinearGradient(-r, -r, r, 0);
+      starGrad.addColorStop(0, '#a855f7');
+      starGrad.addColorStop(0.5, '#6b21a8');
+      starGrad.addColorStop(1, '#3b0764');
+      ctx.fillStyle = starGrad;
+    } else {
+      ctx.fillStyle = isGreat ? '#0ea5e9' : '#ef4444';
+    }
     ctx.beginPath();
     ctx.arc(0, 0, r, Math.PI, 0);
     ctx.closePath();
     ctx.fill();
 
-    if (ball.isGreat) {
+    if (isStar) {
+      // Gold cosmic star emblem on dome
+      ctx.fillStyle = '#fde047';
+      ctx.fillRect(-5, -11, 10, 2.4);
+      ctx.fillRect(-1.2, -14.8, 2.4, 10);
+      ctx.fillStyle = '#fef08a';
+      ctx.fillRect(-10, -8, 3, 3);
+      ctx.fillRect(7, -8, 3, 3);
+    } else if (isGreat) {
       ctx.fillStyle = '#f43f5e';
       ctx.fillRect(-10, -10, 5, 4);
       ctx.fillRect(5, -10, 5, 4);
@@ -1520,7 +1857,7 @@ export class BattleEngine {
     ctx.fill();
 
     ctx.lineWidth = 3;
-    ctx.strokeStyle = '#0f172a';
+    ctx.strokeStyle = isStar ? '#fde047' : '#0f172a';
     ctx.beginPath();
     ctx.arc(0, 0, r, 0, Math.PI * 2);
     ctx.stroke();
@@ -1528,11 +1865,12 @@ export class BattleEngine {
     ctx.fillStyle = '#0f172a';
     ctx.fillRect(-r, -2.5, r * 2, 5);
 
-    ctx.fillStyle = ball.glow ? '#fde047' : '#ffffff';
+    ctx.fillStyle = ball.glow ? '#fde047' : isStar ? '#fef08a' : '#ffffff';
     ctx.beginPath();
     ctx.arc(0, 0, 5.8, 0, Math.PI * 2);
     ctx.fill();
     ctx.lineWidth = 2.5;
+    ctx.strokeStyle = '#0f172a';
     ctx.stroke();
     ctx.restore();
   }
@@ -1541,7 +1879,11 @@ export class BattleEngine {
     const pace = this.getPaceConfig();
     const atkSprite = attackerSide === 'player' ? this.playerSpriteEl : this.enemySpriteEl;
     const defSprite = defenderSide === 'enemy' ? this.enemySpriteEl : this.playerSpriteEl;
-    const isQuick = move.id === 'quick_attack' || move.id === 'spark_dash' || move.id === 'agility_dash';
+    const isQuick = move.id === 'quick_attack'
+      || move.id === 'spark_dash'
+      || move.id === 'agility_dash'
+      || move.id === 'sky_wing'
+      || move.id === 'phantom_claw';
     const lungeClass = attackerSide === 'player'
       ? (isQuick ? 'quick-lunge-right' : 'lunge-right')
       : (isQuick ? 'quick-lunge-left' : 'lunge-left');
@@ -1573,14 +1915,17 @@ export class BattleEngine {
 
     if (move.category === 'buff' || result.category === 'buff') {
       atkSprite?.classList.add(lungeClass);
+      if (move.id === 'cosmos_mind') {
+        this.audio?.playElemental?.('psychic', 'cosmos_mind');
+      }
       this.audio?.playBuffChime?.();
       const statShort = { atk: 'ATK', def: 'DEF', spd: 'SPD' }[result.buffStat || move.buffStat || 'atk'] || 'STAT';
       const fxType = move.type && move.type !== 'normal' ? move.type : 'buff';
       this.spawnImpactFX(attackerSide, fxType, `${statShort} ▲!`, '#fde047', {
         ring: true,
-        ringRadius: 88,
-        ringColor: '#fde047',
-        count: 20,
+        ringRadius: move.id === 'cosmos_mind' ? 102 : 88,
+        ringColor: move.id === 'cosmos_mind' ? '#f472b6' : '#fde047',
+        count: move.id === 'cosmos_mind' ? 28 : 20,
         fontSize: 22,
         lifeScale: pace.particleLifeScale,
       });
@@ -1594,10 +1939,11 @@ export class BattleEngine {
     if (move.category === 'shield' || result.category === 'shield') {
       atkSprite?.classList.add(lungeClass);
       this.audio?.playShieldChime?.();
-      this.spawnImpactFX(attackerSide, 'shield', 'SHIELD UP!', '#67e8f9', {
+      const isCotton = move.id === 'cotton_guard';
+      this.spawnImpactFX(attackerSide, isCotton ? 'buff' : 'shield', isCotton ? 'COTTON GUARD!' : 'SHIELD UP!', isCotton ? '#fef08a' : '#67e8f9', {
         ring: true,
         ringRadius: 94,
-        ringColor: '#67e8f9',
+        ringColor: isCotton ? '#fde047' : '#67e8f9',
         count: 22,
         fontSize: 21,
         lifeScale: pace.particleLifeScale,
@@ -1611,12 +1957,16 @@ export class BattleEngine {
 
     // Beat 2: Travel / Delivery
     atkSprite?.classList.add(lungeClass);
-    const isPhysical = PHYSICAL_MOVE_IDS.has(move.id) || move.fx === 'impact';
+    const isPhysical = move.damageClass === 'physical' || PHYSICAL_MOVE_IDS.has(move.id) || move.fx === 'impact';
+    const hasElementalTrail = isPhysical && (move.type !== 'normal' || move.fx === 'wind');
     if (isPhysical) {
-      if (move.id === 'tackle' || move.id === 'quick_attack') {
+      if ((move.id === 'tackle' || move.id === 'quick_attack') && move.fx !== 'wind') {
         this.audio?.playPhysicalImpact?.(move.power);
       } else {
-        this.audio?.playElemental?.(move.type, move.id);
+        this.audio?.playElemental?.(move.fx === 'wind' ? 'wind' : move.type, move.id);
+      }
+      if (hasElementalTrail) {
+        this.spawnPhysicalElementalTrail(attackerSide, defenderSide, move, pace);
       }
       await this.wait(pace.physicalStrikeMs, sessionId);
     } else {
@@ -1643,15 +1993,26 @@ export class BattleEngine {
       defSprite?.classList.add('hit-shake');
 
       const maxHp = Math.max(1, defender?.maxHp || 30);
-      const dmgIntensity = (result.damage / maxHp) * 18 + (result.isCrit ? 4 : 0) + (result.effectiveness > 1 ? 3 : 0);
+      const dmgIntensity = (result.damage / maxHp) * 18
+        + (result.isCrit ? 4 : 0)
+        + (result.effectiveness > 1 ? 3 : 0)
+        + (move.id === 'meteor_slam' || move.id === 'hyper_nova' ? 3 : 0);
       this.triggerScreenShake(Math.max(4, Math.min(15, dmgIntensity)), isPhysical ? 280 : 240);
 
       const center = this.getSpriteCenter(defenderSide);
       const dmgColor = result.isCrit ? '#fde047' : result.effectiveness > 1 ? '#fb923c' : '#ffffff';
-      this.spawnImpactFX(defenderSide, move.type, `-${result.damage}`, dmgColor, {
+      const impactType = move.fx === 'wind' ? 'wind' : move.fx === 'star' && move.type === 'normal' ? 'star' : move.type;
+      this.spawnImpactFX(defenderSide, impactType, `-${result.damage}`, dmgColor, {
         dust: isPhysical,
+        extraDust: move.id === 'meteor_slam',
+        slash: hasElementalTrail || move.id === 'phantom_claw' || move.id === 'starlight_claw',
+        shapeOverride: move.id === 'star_melody' ? 'note' : move.fx === 'wind' ? 'wind' : null,
+        extraNotes: move.id === 'star_melody',
+        aurora: move.id === 'aurora_flare',
+        petalColors: move.id === 'petal_blizzard',
         ring: true,
-        ringRadius: result.isCrit ? 96 : 74,
+        ringRadius: result.isCrit ? 96 : move.id === 'hyper_nova' || move.id === 'meteor_slam' ? 104 : 74,
+        count: move.id === 'hyper_nova' || move.id === 'thunder_tempest' ? 28 : 22,
         fontSize: result.isCrit ? 26 : 23,
         lifeScale: pace.particleLifeScale,
         popupLife: 1.45,
@@ -1786,7 +2147,8 @@ export class BattleEngine {
       return true;
     }
 
-    await this.say(`${attacker.name} used ${move.name}!`);
+    const attackerLabel = isPlayer ? (attacker.displayName || attacker.name) : attacker.name;
+    await this.say(`${attackerLabel} used ${move.name}!`);
     if (!this.isSessionValid(sid) || attacker.isFainted || defender.isFainted) return true;
 
     const result = calculateDamage(attacker, defender, move);
@@ -1798,7 +2160,7 @@ export class BattleEngine {
       this.storage.save();
       await this.animateHpTo(side, attacker.hp, pace.hpDrainMs);
       if (!this.isSessionValid(sid)) return true;
-      await this.say(`${attacker.name} restored ${gained} HP!`);
+      await this.say(`${attackerLabel} restored ${gained} HP!`);
       this.state = BATTLE_STATES.CHECK_FAINT;
       return false;
     }
@@ -1811,8 +2173,8 @@ export class BattleEngine {
       const statLabel = { atk: 'Attack', def: 'Defense', spd: 'Speed' }[stat] || 'Power';
       await this.say(
         boostRes && !boostRes.changed
-          ? `${attacker.name}'s ${statLabel} can't go any higher!`
-          : `${attacker.name}'s ${statLabel} rose!`,
+          ? `${attackerLabel}'s ${statLabel} can't go any higher!`
+          : `${attackerLabel}'s ${statLabel} rose!`,
       );
       this.state = BATTLE_STATES.CHECK_FAINT;
       return false;
@@ -1835,14 +2197,14 @@ export class BattleEngine {
         if (!this.isSessionValid(sid)) return true;
       }
       await this.say(
-        `${attacker.name} raised a Starlight Shield!${gained > 0 ? ` (+${gained} HP)` : ''}`,
+        `${attackerLabel} raised a Starlight Shield!${gained > 0 ? ` (+${gained} HP)` : ''}`,
       );
       this.state = BATTLE_STATES.CHECK_FAINT;
       return false;
     }
 
     if (result.missed) {
-      await this.say(`${attacker.name}'s attack missed!`);
+      await this.say(`${attackerLabel}'s attack missed!`);
       this.state = BATTLE_STATES.CHECK_FAINT;
       return false;
     }
@@ -1870,7 +2232,6 @@ export class BattleEngine {
     this.state = BATTLE_STATES.CHECK_FAINT;
     if (defender.isFainted) {
       if (defSide === 'enemy') {
-        this.state = BATTLE_STATES.BATTLE_END;
         await this.handleEnemyDefeated(sid);
       } else {
         await this.handlePlayerFainted(sid);
@@ -1917,7 +2278,7 @@ export class BattleEngine {
       });
       await this.animateHpTo('player', this.player.hp, pace.hpDrainMs);
       if (!this.isSessionValid(sid) || this.turnToken !== token) return;
-      await this.say(`Used a Berry Potion! ${this.player.name} recovered ${gained} HP!`);
+      await this.say(`Used a Berry Potion! ${this.player.displayName || this.player.name} recovered ${gained} HP!`);
       if (!this.isSessionValid(sid) || this.turnToken !== token) return;
 
       await this.wait(Math.round(pace.interTurnMs * 0.7), sid);
@@ -1941,7 +2302,7 @@ export class BattleEngine {
     }
   }
 
-  async handleThrowBall(isGreat) {
+  async handleThrowBall(ballType = 'pokeball') {
     if (!this.canAcceptPlayerAction()) return;
     if (!this.enemy || this.enemy.isFainted || !this.player || this.player.isFainted) return;
 
@@ -1955,36 +2316,73 @@ export class BattleEngine {
       return;
     }
 
+    if (this.isTrainer) {
+      const token = this.lockPlayerAction(BATTLE_STATES.ACTION_ANIMATING);
+      this.audio?.playMenuBlip?.(340);
+      await this.say("You can't catch another trainer's Pokémon!");
+      if (!this.isSessionValid(sid) || this.turnToken !== token) return;
+      this.returnToPlayerInput(sid);
+      return;
+    }
+
+    const ballStyle = normalizeBallStyle(ballType);
+    const isGreat = ballStyle === 'great';
+    const isStar = ballStyle === 'star';
+
     if (isGreat && !this.storage.useItem('greatBalls')) {
+      return;
+    }
+    if (isStar && !this.storage.useItem('starBalls')) {
       return;
     }
 
     const token = this.lockPlayerAction(BATTLE_STATES.ACTION_ANIMATING);
     try {
-      const ballName = isGreat ? 'Great Ball' : 'Poké Ball';
+      const ballName = isStar ? 'Star Ball' : isGreat ? 'Great Ball' : 'Poké Ball';
+      const ballBonus = isStar ? 2.0 : isGreat ? 1.45 : 1.0;
       await this.say(`Threw a ${ballName}!`);
       if (!this.isSessionValid(sid) || this.turnToken !== token) return;
 
       this.audio?.playPokeballThrow?.();
+      if (isStar) {
+        this.audio?.playStarBallShimmer?.();
+      }
 
       const start = this.getSpriteCenter('player');
       const target = this.getSpriteCenter('enemy');
       const pedestal = this.getPedestalPoint('enemy');
       const hoverPos = { x: target.x, y: target.y - 38 };
-      const attempt = calculateCatchAttempt(this.enemy, isGreat ? 1.45 : 1.0);
+      const attempt = calculateCatchAttempt(this.enemy, ballBonus);
 
-      await this.animateBallFlight(start, hoverPos, isGreat, 430, sid);
+      await this.animateBallFlight(start, hoverPos, ballStyle, 430, sid);
       if (!this.isSessionValid(sid) || this.turnToken !== token) return;
 
       this.captureBeam = { x: target.x, y: target.y };
-      this.pokeballAnim = { x: hoverPos.x, y: hoverPos.y, angle: 0, isGreat, glow: true, scale: 1.08 };
+      this.pokeballAnim = {
+        x: hoverPos.x,
+        y: hoverPos.y,
+        angle: 0,
+        ballStyle,
+        isGreat,
+        isStar,
+        glow: true,
+        scale: 1.08,
+      };
       this.enemySpriteEl?.classList.remove('is-idle');
       this.enemySpriteEl?.classList.add('capture-energize');
       this.audio?.playPokeballAbsorb?.();
+      if (isStar) {
+        this.audio?.playStarBallShimmer?.();
+      }
       await this.wait(180, sid);
       if (!this.isSessionValid(sid) || this.turnToken !== token) return;
 
-      for (let i = 0; i < 16; i++) {
+      const absorbColors = isStar
+        ? ['#fde047', '#c084fc', '#67e8f9', '#f472b6']
+        : isGreat
+          ? ['#7dd3fc', '#f43f5e']
+          : ['#f87171', '#fecaca'];
+      for (let i = 0; i < (isStar ? 22 : 16); i++) {
         this.particles.push({
           x: target.x + (Math.random() - 0.5) * 66,
           y: target.y + (Math.random() - 0.5) * 66,
@@ -1994,7 +2392,7 @@ export class BattleEngine {
           pullTo: hoverPos,
           life: 0,
           maxLife: 0.32,
-          color: i % 2 === 0 ? '#f87171' : '#fecaca',
+          color: absorbColors[i % absorbColors.length],
           size: 4 + Math.random() * 3,
           shape: 'star',
         });
@@ -2005,7 +2403,7 @@ export class BattleEngine {
       if (!this.isSessionValid(sid) || this.turnToken !== token) return;
       this.captureBeam = null;
 
-      await this.animateBallDropAndBounce(hoverPos.x, hoverPos.y, pedestal.y - 12, isGreat, sid);
+      await this.animateBallDropAndBounce(hoverPos.x, hoverPos.y, pedestal.y - 12, ballStyle, sid);
       if (!this.isSessionValid(sid) || this.turnToken !== token) return;
 
       const pace = this.getPaceConfig();
@@ -2013,14 +2411,23 @@ export class BattleEngine {
       for (let i = 1; i <= attempt.shakes; i++) {
         if (!this.isSessionValid(sid) || this.turnToken !== token) return;
         this.audio?.playPokeballWobble?.(i);
-        await this.animateBallWobble(hoverPos.x, restY, isGreat, i % 2 === 1 ? -1 : 1, sid);
+        await this.animateBallWobble(hoverPos.x, restY, ballStyle, i % 2 === 1 ? -1 : 1, sid);
         await this.wait(pace.ballWobblePauseMs, sid);
       }
       if (!this.isSessionValid(sid) || this.turnToken !== token) return;
 
       if (attempt.caught) {
         this.state = BATTLE_STATES.BATTLE_END;
-        this.pokeballAnim = { x: hoverPos.x, y: restY, angle: 0, isGreat, glow: true, shadowAlpha: 0.45 };
+        this.pokeballAnim = {
+          x: hoverPos.x,
+          y: restY,
+          angle: 0,
+          ballStyle,
+          isGreat,
+          isStar,
+          glow: true,
+          shadowAlpha: 0.45,
+        };
         this.audio?.playCaptureSuccess?.();
         this.spawnStarBurst({ x: hoverPos.x, y: restY });
         this.spawnFloatingText(hoverPos.x, restY - 36, 'GOTCHA!', '#fde047', 24, 0, 1.45);
@@ -2029,6 +2436,7 @@ export class BattleEngine {
         this.pokeballAnim = null;
 
         this.enemy.hp = Math.max(1, this.enemy.hp);
+        this.player?.gainBond?.(4);
         const { destination, newBadges } = this.storage.recordCaught(this.enemy);
         const winBadges = this.storage.recordBattleWin();
         const allNewBadges = [...newBadges, ...winBadges];
@@ -2130,7 +2538,11 @@ export class BattleEngine {
     });
   }
 
-  animateBallFlight(start, target, isGreat, duration, sid = this.sessionId) {
+  animateBallFlight(start, target, ballOpt, duration, sid = this.sessionId) {
+    const ballStyle = normalizeBallStyle(ballOpt);
+    const isGreat = ballStyle === 'great';
+    const isStar = ballStyle === 'star';
+    const trailColors = isStar ? ['#fde047', '#c084fc', '#38bdf8'] : isGreat ? ['#7dd3fc'] : ['#fef08a'];
     return this._runBallRaf(duration, sid, (t) => {
       const arcHeight = Math.sin(t * Math.PI) * 104;
       const bx = start.x + (target.x - start.x) * t;
@@ -2139,11 +2551,13 @@ export class BattleEngine {
         x: bx,
         y: by,
         angle: t * Math.PI * 5,
+        ballStyle,
         isGreat,
-        glow: false,
+        isStar,
+        glow: isStar,
         scale: 1.0 - t * 0.08,
       };
-      if (Math.random() < 0.45) {
+      if (Math.random() < (isStar ? 0.8 : 0.45)) {
         this.particles.push({
           x: bx,
           y: by,
@@ -2151,17 +2565,18 @@ export class BattleEngine {
           vy: (Math.random() - 0.5) * 28,
           gravity: 0,
           life: 0,
-          maxLife: 0.22,
-          color: isGreat ? '#7dd3fc' : '#fef08a',
-          size: 2.5,
+          maxLife: isStar ? 0.3 : 0.22,
+          color: trailColors[Math.floor(Math.random() * trailColors.length)],
+          size: isStar ? 3.5 : 2.5,
           shape: 'star',
         });
       }
     });
   }
 
-  async animateBallDropAndBounce(x, fromY, groundY, isGreat, sid = this.sessionId) {
-    await this.animateBallSegment(x, fromY, groundY, 0, isGreat, 210, sid);
+  async animateBallDropAndBounce(x, fromY, groundY, ballOpt, sid = this.sessionId) {
+    const ballStyle = normalizeBallStyle(ballOpt);
+    await this.animateBallSegment(x, fromY, groundY, 0, ballStyle, 210, sid);
     if (!this.isSessionValid(sid)) return;
     this.audio?.playPokeballBounce?.(0);
     this.spawnImpactDust({ x, y: groundY + 12 }, 7);
@@ -2170,42 +2585,55 @@ export class BattleEngine {
     const bounceDurations = [190, 140, 100];
     for (let b = 0; b < bounceHeights.length; b++) {
       if (!this.isSessionValid(sid)) return;
-      await this.animateBallBounceArc(x, groundY, bounceHeights[b], isGreat, bounceDurations[b], sid);
+      await this.animateBallBounceArc(x, groundY, bounceHeights[b], ballStyle, bounceDurations[b], sid);
       if (!this.isSessionValid(sid)) return;
       this.audio?.playPokeballBounce?.(b + 1);
       if (b === 0) this.spawnImpactDust({ x, y: groundY + 12 }, 4);
     }
   }
 
-  animateBallSegment(x, y0, y1, angle, isGreat, duration, sid) {
+  animateBallSegment(x, y0, y1, angle, ballOpt, duration, sid) {
+    const ballStyle = normalizeBallStyle(ballOpt);
+    const isGreat = ballStyle === 'great';
+    const isStar = ballStyle === 'star';
     return this._runBallRaf(duration, sid, (t) => {
       const eased = t * t;
       this.pokeballAnim = {
         x,
         y: y0 + (y1 - y0) * eased,
         angle,
+        ballStyle,
         isGreat,
+        isStar,
         glow: false,
         shadowAlpha: 0.25 + eased * 0.2,
       };
     });
   }
 
-  animateBallBounceArc(x, groundY, height, isGreat, duration, sid) {
+  animateBallBounceArc(x, groundY, height, ballOpt, duration, sid) {
+    const ballStyle = normalizeBallStyle(ballOpt);
+    const isGreat = ballStyle === 'great';
+    const isStar = ballStyle === 'star';
     return this._runBallRaf(duration, sid, (t) => {
       const arc = Math.sin(t * Math.PI) * height;
       this.pokeballAnim = {
         x,
         y: groundY - arc,
         angle: 0,
+        ballStyle,
         isGreat,
+        isStar,
         glow: false,
         shadowAlpha: Math.max(0.18, 0.45 - (arc / 40) * 0.22),
       };
     });
   }
 
-  animateBallWobble(x, y, isGreat, dir, sid = this.sessionId) {
+  animateBallWobble(x, y, ballOpt, dir, sid = this.sessionId) {
+    const ballStyle = normalizeBallStyle(ballOpt);
+    const isGreat = ballStyle === 'great';
+    const isStar = ballStyle === 'star';
     return this._runBallRaf(
       280,
       sid,
@@ -2215,29 +2643,93 @@ export class BattleEngine {
           x: x + Math.sin(t * Math.PI * 2) * 7 * dir,
           y,
           angle: swing,
+          ballStyle,
           isGreat,
+          isStar,
           glow: t < 0.55,
           shadowAlpha: 0.42,
         };
       },
       () => {
-        this.pokeballAnim = { x, y, angle: 0, isGreat, glow: false, shadowAlpha: 0.42 };
+        this.pokeballAnim = {
+          x,
+          y,
+          angle: 0,
+          ballStyle,
+          isGreat,
+          isStar,
+          glow: false,
+          shadowAlpha: 0.42,
+        };
       },
     );
   }
 
   async handleEnemyDefeated(sid = this.sessionId) {
     const pace = this.getPaceConfig();
-    this.state = BATTLE_STATES.BATTLE_END;
+    const nextEnemyIdx = this.isTrainer
+      ? this.enemyParty.findIndex((mon, idx) => idx > this.enemyPartyIndex && !mon.isFainted)
+      : -1;
+    const fallbackIdx = nextEnemyIdx >= 0
+      ? nextEnemyIdx
+      : (this.isTrainer ? this.enemyParty.findIndex((mon) => !mon.isFainted) : -1);
+    const hasNextEnemy = fallbackIdx >= 0;
+
+    this.state = hasNextEnemy ? BATTLE_STATES.CHECK_FAINT : BATTLE_STATES.BATTLE_END;
     this.audio?.playFaint?.();
     this.enemySpriteEl?.classList.remove('is-idle');
     this.enemySpriteEl?.classList.add('faint-drop');
     await this.wait(Math.max(320, pace.postImpactMs), sid);
     if (!this.isSessionValid(sid)) return;
 
+    this.renderStatusCards();
     await this.say(`${this.enemy.name} fainted!`);
     if (!this.isSessionValid(sid)) return;
 
+    if (hasNextEnemy) {
+      await this.awardVictoryXp(1.0, sid, { deferBadges: false });
+      if (!this.isSessionValid(sid)) return;
+
+      this.enemyPartyIndex = fallbackIdx;
+      this.enemy = this.enemyParty[this.enemyPartyIndex];
+      this.enemy.resetBattleState?.();
+      this.displayedEnemyHp = this.enemy.hp;
+      this.storage.recordSeen(this.enemy.speciesId);
+
+      this._resetSpriteClasses('enemy');
+      this.enemySpriteEl?.classList.remove('faint-drop');
+      this.renderStatusCards();
+      await attachPokemonSprite(this.enemySpriteEl, this.enemy.speciesId, {
+        back: false,
+        shiny: Boolean(this.enemy.isShiny),
+        timeoutMs: 2000,
+      });
+      if (!this.isSessionValid(sid)) return;
+
+      this.enemySpriteEl?.classList.toggle('is-shiny-sprite', Boolean(this.enemy.isShiny));
+      this.enemySpriteEl?.classList.remove('is-idle');
+      this.enemySpriteEl?.classList.add('enemy-sendout');
+      this.audio?.playPokeballThrow?.();
+      this.spawnImpactFX('enemy', this.enemy.type, '', '#ffffff', {
+        ring: true,
+        ringRadius: 84,
+        count: 18,
+        lifeScale: pace.particleLifeScale,
+      });
+      if (this.enemy.isShiny) {
+        this.audio?.playShinySparkle?.();
+        this.spawnShinyIntroSparkles('enemy');
+      }
+
+      const rivalName = this.trainerData?.name || 'Rival';
+      await this.say(`${rivalName} sent out ${this.enemy.name}!`);
+      if (!this.isSessionValid(sid)) return;
+
+      this.returnToPlayerInput(sid);
+      return;
+    }
+
+    this.player?.gainBond?.(4);
     const badgeList = [...this.storage.recordBattleWin()];
     if (this.isShrine && this.shrineData) {
       const shrineBadges = this.storage.markShrineCleared(this.shrineData.id);
@@ -2250,40 +2742,173 @@ export class BattleEngine {
       badgeList.push(...evoBadges);
     }
 
-    if (Math.random() < 0.35) {
-      const bonus = Math.random() < 0.5 ? { potions: 1 } : { greatBalls: 1 };
-      this.storage.addRewards(bonus);
-      const itemLabel = bonus.potions ? 'a Berry Potion' : 'a Great Ball';
-      await this.say(`Found ${itemLabel} on the victory trail!`);
-      if (!this.isSessionValid(sid)) return;
+    if (!this.isTrainer) {
+      const dropChance = this.isShrine ? 0.9 : 0.45;
+      if (Math.random() < dropChance) {
+        const dropBiome = this.shrineData?.biome || this.biomeId;
+        const gemByBiome = {
+          forest: 'leaf_gem',
+          cave: 'moon_gem',
+          water: 'water_gem',
+          volcano: Math.random() < 0.5 ? 'fire_gem' : 'thunder_gem',
+          peak: 'ice_gem',
+        };
+        const fallbackGemNames = {
+          leaf_gem: 'Verdant Gem',
+          moon_gem: 'Starlight Gem',
+          water_gem: 'Tide Gem',
+          fire_gem: 'Ember Gem',
+          thunder_gem: 'Spark Gem',
+          ice_gem: 'Aurora Gem',
+        };
+        const gemId = gemByBiome[dropBiome] || null;
+        const roll = Math.random();
+        let bonus = null;
+        let itemLabel = '';
+
+        if (gemId && roll < 0.34) {
+          bonus = { gems: { [gemId]: 1 } };
+          const gemMeta = EVOLUTION_ITEMS?.[gemId];
+          const gemName = gemMeta?.name || fallbackGemNames[gemId] || 'Evolution Gem';
+          itemLabel = `${gemMeta?.icon || '💎'} a ${gemName}`;
+        } else if (roll < 0.58) {
+          bonus = { starBalls: 1 };
+          itemLabel = '🌟 a Star Ball';
+        } else if (roll < 0.8) {
+          bonus = { greatBalls: 1 };
+          itemLabel = '🔵 a Great Ball';
+        } else {
+          bonus = { potions: 1 };
+          itemLabel = '🍓 a Berry Potion';
+        }
+
+        this.storage.addRewards(bonus);
+        await this.say(`Found ${itemLabel} on the victory trail!`);
+        if (!this.isSessionValid(sid)) return;
+      }
     }
 
     this.onHudRefresh?.();
     if (badgeList.length > 0) {
       this.onBadgesUnlocked?.(badgeList);
     }
-    this.stop({ outcome: 'won', isShrine: this.isShrine });
+    this.stop({
+      outcome: 'won',
+      isShrine: this.isShrine,
+      isTrainer: this.isTrainer,
+      trainerData: this.trainerData,
+    });
+  }
+
+  async animateXpTo(fromPct, toPct, duration = 450, sid = this.sessionId) {
+    if (!this.isSessionValid(sid) || !this.playerXpFillEl) return;
+    const safeFrom = Math.max(0, Math.min(100, Number(fromPct) || 0));
+    const safeTo = Math.max(0, Math.min(100, Number(toPct) || 0));
+    if (duration <= 0 || Math.abs(safeTo - safeFrom) < 0.25) {
+      this.playerXpFillEl.style.width = `${safeTo}%`;
+      return;
+    }
+
+    if (this.xpRaf !== null) {
+      cancelAnimationFrame(this.xpRaf);
+      this.xpRaf = null;
+    }
+    if (this.xpResolver) {
+      const prev = this.xpResolver;
+      this.xpResolver = null;
+      prev();
+    }
+
+    const startTime = performance.now();
+    let lastTickAt = -100;
+
+    return new Promise((resolve) => {
+      let settled = false;
+      const done = () => {
+        if (settled) return;
+        settled = true;
+        this.xpRaf = null;
+        if (this.xpResolver === done) {
+          this.xpResolver = null;
+        }
+        resolve();
+      };
+      this.xpResolver = done;
+
+      const tick = (now) => {
+        if (!this.isSessionValid(sid)) {
+          done();
+          return;
+        }
+        const t = Math.min(1, (now - startTime) / Math.max(1, duration));
+        const eased = 1 - Math.pow(1 - t, 2);
+        const pct = safeFrom + (safeTo - safeFrom) * eased;
+        if (this.playerXpFillEl) {
+          this.playerXpFillEl.style.width = `${pct.toFixed(2)}%`;
+        }
+        if (now - lastTickAt >= 58 && t < 0.98) {
+          lastTickAt = now;
+          this.audio?.playXpTick?.(pct / 100);
+        }
+
+        if (t < 1 && this.isSessionValid(sid)) {
+          this.xpRaf = requestAnimationFrame(tick);
+        } else {
+          if (this.playerXpFillEl) {
+            this.playerXpFillEl.style.width = `${Math.round(safeTo)}%`;
+          }
+          done();
+        }
+      };
+
+      this.xpRaf = requestAnimationFrame(tick);
+    });
   }
 
   async awardVictoryXp(scale = 1.0, sid = this.sessionId, { deferBadges = false } = {}) {
     if (!this.isSessionValid(sid)) return [];
+    const pace = this.getPaceConfig();
+    const playerName = this.player.displayName || this.player.name;
+    const prevXp = this.player.xp;
+    const prevXpToNext = Math.max(1, this.player.xpToNext);
+    const startPct = Math.min(100, (prevXp / prevXpToNext) * 100);
+
     const xpGain = Math.max(12, Math.round((this.enemy.level * 14 + 12) * scale));
-    await this.say(`${this.player.name} gained ${xpGain} XP!`);
+    await this.say(`${playerName} gained ${xpGain} XP!`);
     if (!this.isSessionValid(sid)) return [];
 
     const levelResult = this.player.gainXp(xpGain);
     this.storage.save();
     this.displayedPlayerHp = this.player.hp;
-    this.renderStatusCards();
-    this.onHudRefresh?.();
+    const endPct = Math.min(100, (this.player.xp / Math.max(1, this.player.xpToNext)) * 100);
 
     if (levelResult.leveledUp) {
+      await this.animateXpTo(startPct, 100, Math.round((pace.hpDrainMs || 460) * 0.8), sid);
+      if (!this.isSessionValid(sid)) return [];
+
       this.audio?.playLevelUp?.();
       const center = this.getSpriteCenter('player');
       this.spawnStarBurst(center);
       this.spawnFloatingText(center.x, center.y - 40, `LEVEL UP! Lv.${levelResult.newLevel}`, '#fde047', 20, 0, 1.45);
-      await this.say(`${this.player.name} grew to Level ${levelResult.newLevel}!`);
+      this.renderStatusCards();
+      if (this.playerXpFillEl) {
+        this.playerXpFillEl.style.width = '0%';
+      }
+      this.onHudRefresh?.();
+      await this.say(`${playerName} grew to Level ${levelResult.newLevel}!`);
+      if (!this.isSessionValid(sid)) return [];
+
+      if (endPct > 0) {
+        await this.animateXpTo(0, endPct, Math.round((pace.hpDrainMs || 460) * 0.7), sid);
+        if (!this.isSessionValid(sid)) return [];
+      }
+    } else {
+      await this.animateXpTo(startPct, endPct, pace.hpDrainMs || 460, sid);
+      if (!this.isSessionValid(sid)) return [];
     }
+
+    this.renderStatusCards();
+    this.onHudRefresh?.();
 
     const pendingEvo = this.player.getPendingLevelEvolution?.();
     if (pendingEvo && this.isSessionValid(sid)) {
@@ -2295,7 +2920,7 @@ export class BattleEngine {
   async runEvolutionCeremony(pendingEvo, sid = this.sessionId, { emitBadges = true } = {}) {
     if (!pendingEvo || !this.player || !this.isSessionValid(sid)) return [];
 
-    const oldName = this.player.name;
+    const oldName = this.player.displayName || this.player.name;
     const center = this.getSpriteCenter('player');
     await this.say(`What?! ${oldName} is glowing with Starlight energy!`);
     if (!this.isSessionValid(sid)) return [];
@@ -2377,7 +3002,7 @@ export class BattleEngine {
     this.playerSpriteEl?.classList.add('faint-drop');
     await this.wait(Math.max(320, pace.postImpactMs), sid);
     if (!this.isSessionValid(sid)) return;
-    await this.say(`${this.player.name} fainted!`);
+    await this.say(`${this.player.displayName || this.player.name} fainted!`);
     if (!this.isSessionValid(sid)) return;
 
     const profile = this.storage.getActiveProfile();
@@ -2402,7 +3027,13 @@ export class BattleEngine {
     const sid = this.sessionId;
     const token = this.lockPlayerAction(BATTLE_STATES.BATTLE_END);
     this.audio?.playMenuBlip?.(520);
-    await this.say(this.isShrine ? 'Stepped back safely from the Shrine!' : 'Got away safely!');
+    await this.say(
+      this.isShrine
+        ? 'Stepped back safely from the Shrine!'
+        : this.isTrainer
+          ? 'Stepped back safely from the duel!'
+          : 'Got away safely!',
+    );
     if (!this.isSessionValid(sid) || this.turnToken !== token) return;
     this.stop({ outcome: 'escaped', faintedAll: false });
   }
@@ -2438,7 +3069,7 @@ export class BattleEngine {
 
       const info = document.createElement('div');
       info.innerHTML = `
-        <strong>${mon.isShiny ? '✨ ' : ''}${mon.name}</strong> <span style="color:#fde047">Lv.${mon.level}</span>
+        <strong>${mon.isShiny ? '✨ ' : ''}${mon.displayName || mon.name}</strong> <span style="color:#fde047">Lv.${mon.level}</span>
         <div style="font-size:0.75rem;color:#cbd5e1">HP ${mon.hp}/${mon.maxHp} ${isCurrent ? '• Active' : mon.isFainted ? '• Fainted' : ''}</div>
       `;
 
@@ -2489,7 +3120,7 @@ export class BattleEngine {
       });
       if (!this.isSessionValid(sid) || this.turnToken !== token) return;
       this.playerSpriteEl?.classList.toggle('is-shiny-sprite', Boolean(this.player.isShiny));
-      await this.say(`Go, ${this.player.name}!`);
+      await this.say(`Go, ${this.player.displayName || this.player.name}!`);
       if (!this.isSessionValid(sid) || this.turnToken !== token) return;
 
       if (!wasForced) {

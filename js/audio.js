@@ -418,6 +418,53 @@ export const THEMES = {
     bassGain: 0.108,
     drumGain: 0.052,
   },
+  rival: {
+    // Energetic Rival Duel chiptune (C Minor heroic pulse groove, 128 steps)
+    stepSec: 0.132,
+    leadWave: 'pulse25',
+    melody: [
+      // Bar 1: Crisp rival challenge motif
+      G4, -1, 0, G4, C5, -1, Ds5, 0, D5, -1, C5, 0, B4, -1, G4, 0,
+      // Bar 2: Syncopated climb to G5
+      C5, -1, D5, 0, Ds5, -1, F5, 0, G5, -1, -1, 0, D5, -1, 0, 0,
+      // Bar 3: High-energy rival hook
+      G5, -1, 0, F5, Ds5, 0, D5, -1, C5, -1, D5, 0, Ds5, -1, G4, 0,
+      // Bar 4: Ab -> G dominant answer
+      Gs5, -1, G5, 0, F5, -1, Ds5, 0, D5, -1, B4, 0, G4, -1, 0, 0,
+      // Bar 5: Driving octave leap & melodic run
+      C5, -1, G5, -1, F5, 0, Ds5, 0, D5, -1, F5, 0, Ds5, -1, C5, 0,
+      // Bar 6: Fm -> Bb -> Eb lift
+      F5, -1, Gs5, 0, G5, 0, F5, 0, Ds5, -1, Bb4, 0, Ds5, -1, G5, 0,
+      // Bar 7: Climactic run toward C6
+      Gs5, -1, G5, 0, F5, 0, Ds5, 0, F5, -1, G5, 0, Bb5, -1, C6, 0,
+      // Bar 8: B5 -> G5 -> C5 triumphant turnaround
+      B5, -1, G5, 0, D5, -1, B4, 0, C5, -1, -1, 0, 0, 0, 0, 0,
+    ],
+    arp: [
+      C4, -1, Ds4, 0, G4, -1, Ds4, 0, D4, -1, G4, 0, B4, -1, G4, 0,
+      C4, -1, Ds4, 0, G4, -1, C5, 0, D4, -1, G4, 0, B4, -1, G4, 0,
+      Gs4, -1, C5, 0, Ds5, -1, C5, 0, G4, -1, Bb4, 0, D5, -1, Bb4, 0,
+      F4, -1, Gs4, 0, C5, -1, Gs4, 0, G4, -1, B4, 0, D5, -1, B4, 0,
+    ],
+    bass: [
+      C2, 0, C3, 0, C2, 0, G2, 0, G2, 0, G3, 0, B2, 0, D3, 0,
+      C2, 0, C3, 0, Ds2, 0, G2, 0, G2, 0, D3, 0, G2, 0, B2, 0,
+      C2, 0, C3, 0, G2, 0, C3, 0, Bb2, 0, F3, 0, Ds2, 0, Bb2, 0,
+      Gs2, 0, Ds3, 0, F2, 0, C3, 0, G2, 0, D3, 0, G2, 0, B2, 0,
+      C2, 0, C3, 0, Ds2, 0, C3, 0, Bb2, 0, D3, 0, C2, 0, G2, 0,
+      F2, 0, C3, 0, F2, 0, Gs2, 0, Ds2, 0, Bb2, 0, G2, 0, Ds3, 0,
+      Gs2, 0, Ds3, 0, F2, 0, C3, 0, Bb2, 0, F3, 0, C3, 0, G3, 0,
+      G2, 0, D3, 0, G2, 0, B2, 0, C2, 0, G2, 0, C3, 0, 0, 0,
+    ],
+    drums: [
+      'K', 0, 'h', 0, 'S', 0, 'h', 'K',
+      'K', 0, 'h', 0, 'S', 0, 'h', 'S',
+    ],
+    leadGain: 0.062,
+    arpGain: 0.034,
+    bassGain: 0.106,
+    drumGain: 0.052,
+  },
 };
 
 export class AudioEngine {
@@ -1187,6 +1234,193 @@ export class AudioEngine {
       return;
     }
 
+    if (moveId === 'sky_wing') {
+      this.playNoise({
+        duration: 0.2,
+        gain: 0.16,
+        filterType: 'bandpass',
+        startFreq: 440,
+        endFreq: 1120,
+        q: 1.4,
+      });
+      this.triggerVoice({
+        freq: 523.25,
+        endFreq: 880,
+        wave: 'triangle',
+        duration: 0.14,
+        gain: 0.1,
+      });
+      this.playPhysicalImpact(56);
+      return;
+    }
+
+    if (moveId === 'star_melody') {
+      [523.25, 659.25, 783.99, 987.77, 1046.5].forEach((freq, i) => {
+        this.triggerVoice({
+          freq,
+          endFreq: freq * 1.02,
+          wave: i % 2 === 0 ? 'pulse25' : 'sine',
+          duration: 0.11,
+          gain: 0.082,
+          delay: i * 0.045,
+        });
+      });
+      return;
+    }
+
+    if (moveId === 'hyper_nova') {
+      this.triggerVoice({
+        freq: 220,
+        midFreq: 659.25,
+        endFreq: 1046.5,
+        wave: 'pulse25',
+        duration: 0.28,
+        gain: 0.11,
+      });
+      [523.25, 783.99, 1046.5].forEach((freq, i) => {
+        this.triggerVoice({
+          freq,
+          wave: 'sine',
+          duration: 0.24,
+          gain: 0.085,
+          delay: 0.05 + i * 0.03,
+        });
+      });
+      this.playNoise({
+        duration: 0.2,
+        gain: 0.14,
+        filterType: 'lowpass',
+        startFreq: 980,
+        endFreq: 240,
+        delay: 0.06,
+      });
+      return;
+    }
+
+    if (moveId === 'petal_blizzard') {
+      [587.33, 739.99, 880.0, 1174.66].forEach((f, i) => {
+        this.triggerVoice({
+          freq: f,
+          endFreq: f * 1.12,
+          wave: 'pulse25',
+          duration: 0.1,
+          gain: 0.088,
+          delay: i * 0.04,
+        });
+      });
+      this.playNoise({
+        duration: 0.22,
+        gain: 0.13,
+        filterType: 'bandpass',
+        startFreq: 1050,
+        endFreq: 480,
+        q: 1.3,
+      });
+      return;
+    }
+
+    if (moveId === 'cosmos_mind') {
+      [440, 554.37, 659.25, 880, 1108.73].forEach((f, i) => {
+        this.triggerVoice({
+          freq: f,
+          wave: 'sine',
+          duration: 0.14,
+          gain: 0.082,
+          delay: i * 0.045,
+        });
+      });
+      return;
+    }
+
+    if (moveId === 'meteor_slam') {
+      this.triggerVoice({
+        freq: 420,
+        endFreq: 52,
+        wave: 'triangle',
+        duration: 0.24,
+        gain: 0.2,
+      });
+      this.playNoise({
+        duration: 0.22,
+        gain: 0.22,
+        filterType: 'lowpass',
+        startFreq: 760,
+        endFreq: 95,
+        q: 0.8,
+        delay: 0.04,
+      });
+      return;
+    }
+
+    if (moveId === 'phantom_claw') {
+      this.triggerVoice({
+        freq: 466.16,
+        midFreq: 622.25,
+        endFreq: 246.94,
+        wave: 'pulse12',
+        duration: 0.22,
+        gain: 0.085,
+      });
+      this.playNoise({
+        duration: 0.14,
+        gain: 0.14,
+        filterType: 'bandpass',
+        startFreq: 980,
+        endFreq: 360,
+        q: 1.8,
+      });
+      return;
+    }
+
+    if (moveId === 'thunder_tempest') {
+      [987.77, 1174.66, 880, 1318.51].forEach((f, i) => {
+        this.triggerVoice({
+          freq: f,
+          endFreq: f * 0.55,
+          wave: i % 2 === 0 ? 'pulse12' : 'pulse25',
+          duration: 0.095,
+          gain: 0.09,
+          delay: i * 0.042,
+        });
+      });
+      this.playNoise({
+        duration: 0.18,
+        gain: 0.15,
+        filterType: 'lowpass',
+        startFreq: 960,
+        endFreq: 180,
+        delay: 0.04,
+      });
+      return;
+    }
+
+    if (moveId === 'aurora_flare') {
+      this.playNoise({
+        duration: 0.22,
+        gain: 0.1,
+        filterType: 'bandpass',
+        startFreq: 1200,
+        endFreq: 720,
+        q: 1.6,
+      });
+      [783.99, 987.77, 1174.66, 1567.98].forEach((f, i) => {
+        this.triggerVoice({
+          freq: f,
+          endFreq: f * 1.06,
+          wave: i % 2 === 0 ? 'sine' : 'pulse12',
+          duration: 0.14,
+          gain: 0.08,
+          delay: i * 0.04,
+        });
+      });
+      return;
+    }
+
+    if (moveId === 'cotton_guard') {
+      this.playShieldChime();
+      return;
+    }
+
     switch (type) {
       case 'fire':
         this.triggerVoice({
@@ -1799,6 +2033,46 @@ export class AudioEngine {
         gain: 0.08,
         delay: 0.60,
       });
+    });
+  }
+
+  playXpTick(progress = 0.5) {
+    const p = Math.max(0, Math.min(1, Number.isFinite(Number(progress)) ? Number(progress) : 0.5));
+    const freq = 420 + p * 640;
+    this.triggerVoice({
+      freq,
+      endFreq: freq * 1.06,
+      wave: 'pulse25',
+      duration: 0.048,
+      attack: 0.002,
+      decay: 0.018,
+      sustain: 0.3,
+      gain: 0.06,
+    });
+  }
+
+  playStarBallShimmer() {
+    const notes = [783.99, 987.77, 1174.66, 1567.98, 1975.53];
+    notes.forEach((freq, i) => {
+      this.triggerVoice({
+        freq,
+        endFreq: freq * 1.03,
+        wave: i % 2 === 0 ? 'pulse12' : 'sine',
+        duration: 0.16,
+        attack: 0.004,
+        decay: 0.04,
+        sustain: 0.45,
+        gain: 0.08,
+        delay: i * 0.048,
+      });
+    });
+    this.triggerVoice({
+      freq: 392.0,
+      endFreq: 783.99,
+      wave: 'triangle',
+      duration: 0.28,
+      gain: 0.085,
+      delay: 0.02,
     });
   }
 }
