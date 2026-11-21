@@ -17,7 +17,7 @@ import {
   findNearestSafePosition,
   isTileWalkableAt,
 } from './config.js';
-import { Pokemon, createStarterPokemon } from './pokemon.js';
+import { Pokemon, createStarterPokemon, getBondTier } from './pokemon.js';
 
 export const STORAGE_KEY = 'starlight_pokemon_save_v1';
 
@@ -936,6 +936,41 @@ export class StorageManager {
       newTier: upgradeRes.newTier,
       levelResult: upgradeRes.levelResult,
       pendingEvo: upgradeRes.pendingEvo,
+      newBadges,
+    };
+  }
+
+  cheerPokemon(monOrUid) {
+    const profile = this.getActiveProfile();
+    if (!profile) {
+      return { cheered: false, reason: 'no_profile' };
+    }
+
+    const targetUid = typeof monOrUid === 'string' ? monOrUid : monOrUid?.uid;
+    const mons = [
+      ...(Array.isArray(profile.team) ? profile.team : []),
+      ...(Array.isArray(profile.box) ? profile.box : []),
+    ];
+    const mon = mons.find((m) => m && ((monOrUid && m === monOrUid) || (targetUid && m.uid === targetUid))) || null;
+    if (!mon) {
+      return { cheered: false, reason: 'not_found' };
+    }
+
+    if (typeof mon.gainBond === 'function') {
+      mon.gainBond(10);
+    } else {
+      const current = Number(mon.bond);
+      const base = Number.isFinite(current) ? current : 20;
+      mon.bond = Math.max(0, Math.min(100, Math.round(base + 10)));
+    }
+
+    const newBadges = this.evaluateBadges(false);
+    this.save();
+
+    return {
+      cheered: true,
+      bond: mon.bond,
+      tier: getBondTier(mon.bond),
       newBadges,
     };
   }
