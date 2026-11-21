@@ -64,6 +64,8 @@ export const BIOMES = {
       { id: 39, weight: 14 },
       { id: 179, weight: 14 },
       { id: 143, weight: 6 },
+      { id: 280, weight: 12 },
+      { id: 403, weight: 14 },
     ],
   },
   cave: {
@@ -80,6 +82,7 @@ export const BIOMES = {
       { id: 95, weight: 8 },
       { id: 180, weight: 12 },
       { id: 93, weight: 8 },
+      { id: 281, weight: 12 },
     ],
   },
   water: {
@@ -96,6 +99,7 @@ export const BIOMES = {
       { id: 131, weight: 10 },
       { id: 116, weight: 16 },
       { id: 117, weight: 8 },
+      { id: 363, weight: 16 },
     ],
   },
   volcano: {
@@ -110,6 +114,7 @@ export const BIOMES = {
       { id: 126, weight: 20 },
       { id: 74, weight: 16 },
       { id: 181, weight: 8 },
+      { id: 404, weight: 14 },
     ],
   },
   peak: {
@@ -123,6 +128,8 @@ export const BIOMES = {
       { id: 35, weight: 18 },
       { id: 92, weight: 16 },
       { id: 148, weight: 16 },
+      { id: 333, weight: 18 },
+      { id: 364, weight: 14 },
     ],
   },
 };
@@ -162,16 +169,16 @@ const RAW_MAP = [
   'T..,,,,..T..,,,,.CT##ppcccCc#cccccc##vvvvaaaLLLLvvv#',
   'T.,,,,,,....,,,,..T#pccccccp#cppppp##vCvaaaLLvvLLvv#',
   'T..C,,,..T..,,,S..T#cp###ccp#cp##Sp##vvvvaaLviSivLv#',
-  'T..,,,,..T..,,,r..T#cp#ppccp#cp##rpi#aaaaavLvvrvvLv#',
+  'T..,,,,..T..,,,r..T#cp#Cpccp#cp##rpi#aaaaavLvvrvvLv#',
   'T....====...=rrr..T#cpppccccpppccrprraaaaavLLBBLLLL#',
   'T.,,====,,,,====,.T##ccc######cccppi#vvvvvaaaaraavv#',
   'T.,,==,,,T..==,,,,T#ccccccppccccccp##vvvvvLLaaaarav#',
   'T..===..==!===..,.T#pccccc#pcccccpp####vvLLaLaaaarS#',
   'TTTi====iTTTTTTTTTT#ppcccc#pp####pp##vvvaaaaaaavvvv#',
   'T..*====*.........T##pccccccp#pp#pp##vvaaaLLLLaaavv#',
-  'T.RRRR..*..RRRR..*T#pp###ccpp#ppCpp##vvaaLLBBLLaaav#',
-  'T.HHHH.*...HHHH..*T#cp#p#ccpppppppp##vvaaavvvaaaavv#',
-  'T..==..+====..==..T#cp#p#ccccccc#pp##aaa+a!aaaaaCv##',
+  'T.RRRR..*..RRRR..*T#pp#r#ccpp#ppCpp##vvaaLLBBLLaaav#',
+  'T.HHHH.*...HHHH..*T#cp#r#ccpppppppp##vvaaavvvaaaavv#',
+  'T..==..+====..==..T#cp#S#ccccccc#pp##aaa+a!aaaaaCv##',
   'T..==..===!==.==..Tipp#!###pppp##ppi#aaaaiaaaaaavvv#',
   'T..==...==..=======pppppppppppppppprraaaaaaaaaaavvv#',
   'T..**...==........TippppppppppppppprraaaaaiaaaaaLLv#',
@@ -186,7 +193,7 @@ const RAW_MAP = [
   'Tsswssssssww~~~~~~~~~~~ssssss~~~~~~TInnnnnfffffnnnnI',
   'T~~~~~~wwww~~~~~~~~~~~~~BB~~~~~~~~~TInnnIIfffffIIInI',
   'TTTTTTTTBBTTTTTTTTTTTTTirriTTTTTTTTTIfnnIIffrrfIIffI',
-  'T~~wwwwwBBww~~~wwww~~sssssffffnnfffIInffffrrffnnfffI',
+  'T~~wwwwwBBww~~~wwww~~CssssffffnnfffIInffffrrffnnfffI',
   'T~wwwwsssssss~~wwww~~sssssffnnnnfffIIfffffrrfffnnnnI',
   'T~wwwsssssssswwww~~~~sssssffffnnffffffffffffIffnnnnI',
   'T~wwssssss*ssssswwBBBBBBBBrffffffffffnffffffIffnnffI',
@@ -291,6 +298,16 @@ export const SHRINES = {
     intro: 'The mythical Guardian Mew floats in an aurora halo at Starlight Sanctum! Prove your heart to claim the Celestial Mythic Crown!',
     clearedText: 'Starlight Sanctum shimmers with timeless cosmic grace. You hold Mew’s celestial blessing!',
   },
+  '23,13': {
+    id: 'eclipse_shrine',
+    name: 'Twilight Eclipse Shrine',
+    biome: 'cave',
+    guardianId: 282,
+    level: 16,
+    badgeId: 'eclipse',
+    intro: 'The Guardian Gardevoir steps through violet starlight at Twilight Eclipse Shrine! Triumph to earn the Twilight Eclipse Badge!',
+    clearedText: 'Serene moonbeams chime over the Twilight Eclipse Shrine. Your Twilight Eclipse Badge shines!',
+  },
 };
 
 export const CHESTS = {
@@ -312,57 +329,71 @@ export const CHESTS = {
     id: 'cave_chest_star',
     biome: 'cave',
     label: 'Starlight Vault Chest',
-    rewards: { potions: 2, greatBalls: 1, starBalls: 2 },
-    message: '{trainer} opened the Starlight Vault Chest and found 2 🌟 Star Balls + 1 Great Ball + 2 Berry Potions!',
+    rewards: { potions: 2, greatBalls: 1, starBalls: 2, starShards: 2 },
+    message: '{trainer} opened the Starlight Vault Chest and found 2 🌟 Star Balls + 2 ✨ Star Shards + 1 Great Ball + 2 Berry Potions!',
   },
   '32,11': {
     id: 'cave_chest',
     biome: 'cave',
     label: 'Crystal Cache',
-    rewards: { potions: 2, greatBalls: 3 },
-    message: '{trainer} opened the Crystal Cache and found 2 Berry Potions + 3 Great Balls!',
+    rewards: { potions: 2, greatBalls: 3, starShards: 2 },
+    message: '{trainer} opened the Crystal Cache and found 2 Berry Potions + 3 Great Balls + 2 ✨ Star Shards!',
   },
   '4,24': {
     id: 'lagoon_chest',
     biome: 'water',
     label: 'Lagoon Shell Chest',
-    rewards: { potions: 3, greatBalls: 3 },
-    message: '{trainer} opened the Shell Chest and found 3 Berry Potions + 3 Great Balls!',
+    rewards: { potions: 3, greatBalls: 3, starShards: 2 },
+    message: '{trainer} opened the Shell Chest and found 3 Berry Potions + 3 Great Balls + 2 ✨ Star Shards!',
   },
   '38,2': {
     id: 'volcano_chest_ember',
     biome: 'volcano',
     label: 'Caldera Ember Chest',
-    rewards: { potions: 2, greatBalls: 2, gems: { fire_gem: 1 } },
-    message: '{trainer} opened the Caldera Ember Chest and found an Ember Gem 🔥 + 2 Berry Potions + 2 Great Balls!',
+    rewards: { potions: 2, greatBalls: 2, starShards: 3, gems: { fire_gem: 1 } },
+    message: '{trainer} opened the Caldera Ember Chest and found an Ember Gem 🔥 + 3 ✨ Star Shards + 2 Berry Potions + 2 Great Balls!',
   },
   '48,13': {
     id: 'volcano_chest_spark',
     biome: 'volcano',
     label: 'Lightning Basalt Chest',
-    rewards: { potions: 1, greatBalls: 2, gems: { thunder_gem: 1 } },
-    message: '{trainer} opened the Lightning Basalt Chest and found a Spark Gem ⚡ + 1 Berry Potion + 2 Great Balls!',
+    rewards: { potions: 1, greatBalls: 2, starShards: 3, gems: { thunder_gem: 1 } },
+    message: '{trainer} opened the Lightning Basalt Chest and found a Spark Gem ⚡ + 3 ✨ Star Shards + 1 Berry Potion + 2 Great Balls!',
   },
   '49,22': {
     id: 'peak_chest_water',
     biome: 'peak',
     label: 'Glacial Tide Chest',
-    rewards: { potions: 2, greatBalls: 2, gems: { water_gem: 1 } },
-    message: '{trainer} opened the Glacial Tide Chest and found a Tide Gem 💧 + 2 Berry Potions + 2 Great Balls!',
+    rewards: { potions: 2, greatBalls: 2, starShards: 3, gems: { water_gem: 1 } },
+    message: '{trainer} opened the Glacial Tide Chest and found a Tide Gem 💧 + 3 ✨ Star Shards + 2 Berry Potions + 2 Great Balls!',
   },
   '29,34': {
     id: 'peak_chest_moon',
     biome: 'peak',
     label: 'Moonbeam Ice Chest',
-    rewards: { potions: 2, greatBalls: 3, gems: { moon_gem: 1 } },
-    message: '{trainer} opened the Moonbeam Ice Chest and found a Starlight Gem 🌙 + 2 Berry Potions + 3 Great Balls!',
+    rewards: { potions: 2, greatBalls: 3, starShards: 3, gems: { moon_gem: 1 } },
+    message: '{trainer} opened the Moonbeam Ice Chest and found a Starlight Gem 🌙 + 3 ✨ Star Shards + 2 Berry Potions + 3 Great Balls!',
   },
   '49,34': {
     id: 'peak_chest_ice',
     biome: 'peak',
     label: 'Frost Crystal Chest',
-    rewards: { potions: 2, greatBalls: 2, gems: { ice_gem: 1 } },
-    message: '{trainer} opened the Frost Crystal Chest and found an Aurora Gem ❄️ + 2 Berry Potions + 2 Great Balls!',
+    rewards: { potions: 2, greatBalls: 2, starShards: 3, gems: { ice_gem: 1 } },
+    message: '{trainer} opened the Frost Crystal Chest and found an Aurora Gem ❄️ + 3 ✨ Star Shards + 2 Berry Potions + 2 Great Balls!',
+  },
+  '21,28': {
+    id: 'lagoon_chest_sun',
+    biome: 'water',
+    label: 'Sunlit Cove Chest',
+    rewards: { potions: 2, starBalls: 1, starShards: 3, gems: { sun_gem: 1 } },
+    message: '{trainer} opened the Sunlit Cove Chest and found a Sunburst Gem ☀️ + 3 ✨ Star Shards + 1 🌟 Star Ball + 2 Berry Potions!',
+  },
+  '23,4': {
+    id: 'cave_chest_dusk',
+    biome: 'cave',
+    label: 'Twilight Cavern Chest',
+    rewards: { potions: 2, greatBalls: 2, starShards: 3, gems: { dusk_gem: 1 } },
+    message: '{trainer} opened the Twilight Cavern Chest and found a Twilight Gem 🔮 + 3 ✨ Star Shards + 2 Great Balls + 2 Berry Potions!',
   },
 };
 
@@ -487,6 +518,36 @@ export const NPCS = {
     greeting: 'The frost glitters like spun starlight, {trainer}! Befriend 2 Peak, Ice, or Dragon Pokémon—or clear Starfall Shrine—for an Aurora Gem!',
     questId: 'quest_yuki_peak',
   },
+  '10,10': {
+    id: 'npc_orion',
+    name: 'Master Orion',
+    role: 'Starlight Mentor',
+    biome: 'village',
+    palette: {
+      outfitPrimary: '#312e81',
+      outfitSecondary: '#fbbf24',
+      hair: '#e2e8f0',
+      skin: '#fde2c8',
+      hat: '#4338ca',
+    },
+    greeting: 'Greetings, {trainer}! Open Team & Box in your Pokédex to channel ✨ Star Shards and Power Up a Pokémon’s Star Rank!',
+    questId: 'quest_orion_upgrade',
+  },
+  '22,10': {
+    id: 'npc_selene',
+    name: 'Twilight Keeper Selene',
+    role: 'Eclipse Lorekeeper',
+    biome: 'cave',
+    palette: {
+      outfitPrimary: '#581c87',
+      outfitSecondary: '#e879f9',
+      hair: '#c7d2fe',
+      skin: '#fde2c8',
+      hat: '#3b0764',
+    },
+    greeting: 'The violet runes just east lead to Twilight Eclipse Shrine, {trainer}! Catch 2 Ghost or Psychic partners—or clear the Shrine—for a Twilight Gem!',
+    questId: 'quest_selene_twilight',
+  },
 };
 
 function countCaughtFromList(profile, ids) {
@@ -494,13 +555,14 @@ function countCaughtFromList(profile, ids) {
   return ids.filter((id) => Boolean(caught[id])).length;
 }
 
-const FOREST_QUEST_IDS = [10, 11, 16, 25, 39, 43, 133, 143, 179];
-const CAVE_QUEST_IDS = [35, 37, 63, 74, 92, 93, 95, 180];
-const WATER_QUEST_IDS = [54, 58, 60, 116, 117, 120, 129, 131];
+const FOREST_QUEST_IDS = [10, 11, 16, 25, 39, 43, 133, 143, 179, 280, 403];
+const CAVE_QUEST_IDS = [35, 37, 63, 74, 92, 93, 95, 180, 281];
+const WATER_QUEST_IDS = [54, 58, 60, 116, 117, 120, 129, 131, 363];
 const VOLCANO_CORE_IDS = [77, 126];
-const VOLCANO_ALL_IDS = [77, 37, 58, 126, 74, 181];
+const VOLCANO_ALL_IDS = [77, 37, 58, 126, 74, 181, 404];
 const PEAK_CORE_IDS = [86, 147, 148];
-const YUKI_PEAK_IDS = [86, 87, 144, 147, 148, 149, 151, 230, 471];
+const YUKI_PEAK_IDS = [86, 87, 144, 147, 148, 149, 151, 230, 333, 334, 363, 364, 365, 471];
+const TWILIGHT_QUEST_IDS = [35, 36, 63, 64, 65, 92, 93, 94, 196, 197, 280, 281, 282];
 
 export const FIELD_QUESTS = [
   {
@@ -635,6 +697,38 @@ export const FIELD_QUESTS = [
     },
     completeDialogue: 'Chiseled like starlit crystal, {trainer}! Sculptor Yuki gifted you 1 🌟 Star Ball and an Aurora Gem ❄️!',
   },
+  {
+    id: 'quest_orion_upgrade',
+    npcId: 'npc_orion',
+    title: 'Star Rank Awakening',
+    description: 'Use ✨ Star Shards in Team & Box to Power Up any Pokémon at least once.',
+    rewards: { starShards: 4, starBalls: 1 },
+    check(profile) {
+      return (profile?.stats?.upgrades || 0) >= 1;
+    },
+    progressText(profile) {
+      const n = Math.min(1, profile?.stats?.upgrades || 0);
+      return `${n}/1 Pokémon powered up via Star Shards`;
+    },
+    completeDialogue: 'Magnificent resonance, {trainer}! Master Orion gifted you 4 ✨ Star Shards and 1 🌟 Star Ball!',
+  },
+  {
+    id: 'quest_selene_twilight',
+    npcId: 'npc_selene',
+    title: 'Twilight Eclipse Watcher',
+    description: 'Clear Twilight Eclipse Shrine or catch 2 Ghost/Psychic species.',
+    rewards: { gems: { dusk_gem: 1 }, starShards: 3, starBalls: 1 },
+    check(profile) {
+      if (profile?.shrinesCleared?.includes('eclipse_shrine')) return true;
+      return countCaughtFromList(profile, TWILIGHT_QUEST_IDS) >= 2;
+    },
+    progressText(profile) {
+      if (profile?.shrinesCleared?.includes('eclipse_shrine')) return 'Twilight Eclipse Shrine cleared!';
+      const n = Math.min(2, countCaughtFromList(profile, TWILIGHT_QUEST_IDS));
+      return `${n}/2 Twilight Ghost/Psychic species caught`;
+    },
+    completeDialogue: 'The twilight crystals sing in harmony, {trainer}! Keeper Selene gifted you a Twilight Gem 🔮, 3 ✨ Star Shards, and 1 🌟 Star Ball!',
+  },
 ];
 
 export const RIVAL_TRAINERS = {
@@ -735,6 +829,31 @@ export const RIVAL_TRAINERS = {
     winText: 'Unstoppable spirit, {trainer}! Caldera Champion Blaze awarded you 2 🌟 Star Balls and an Aurora Gem ❄️!',
     rematchWinText: 'True Champion caliber, {trainer}! Blaze gifted you a 🌟 Star Ball and Berry Potions!',
   },
+  '46,30': {
+    id: 'rival_astra',
+    name: 'Aurora Ace Astra',
+    role: 'Starfall Peak Challenger',
+    biome: 'peak',
+    palette: {
+      outfitPrimary: '#4338ca',
+      outfitSecondary: '#fef08a',
+      hair: '#f8fafc',
+      skin: '#fde2c8',
+      hat: '#312e81',
+      accent: '#38bdf8',
+    },
+    party: [
+      { speciesId: 334, level: 17 },
+      { speciesId: 365, level: 18 },
+      { speciesId: 282, level: 19 },
+    ],
+    rewards: { starBalls: 2, starShards: 4, gems: { sun_gem: 1 } },
+    rematchRewards: { starBalls: 1, starShards: 3 },
+    intro: 'The auroras shine brightest for fearless challengers, {trainer}! Ready to face Starfall Peak’s finest?',
+    rematchIntro: 'Back beneath the starlight ridge, {trainer}? Let’s dance with aurora power again!',
+    winText: 'Radiant victory, {trainer}! Aurora Ace Astra gifted you 2 🌟 Star Balls, 4 ✨ Star Shards, and a Sunburst Gem ☀️!',
+    rematchWinText: 'Celestial teamwork, {trainer}! Astra shared a 🌟 Star Ball and 3 ✨ Star Shards after an unforgettable rematch!',
+  },
 };
 
 export const LANDMARKS = {
@@ -772,6 +891,20 @@ export const LANDMARKS = {
     biome: 'peak',
     icon: '🌠',
     description: 'A crystalline obelisk that gathers falling starlight. Trainers say rare Dratini and Dragonair dance in the frosty grass near the summit!',
+  },
+  '7,8': {
+    id: 'landmark_starlight_forge',
+    name: 'Starlight Shard Pillar',
+    biome: 'forest',
+    icon: '✨',
+    description: 'A humming crystal pillar etched with Star Ranks (★1–★5). Collect ✨ Star Shards from wild battles, shrines, chests, and rivals—then open Team & Box in your Pokédex to Power Up any partner!',
+  },
+  '25,13': {
+    id: 'landmark_eclipse_monolith',
+    name: 'Twilight Eclipse Monolith',
+    biome: 'cave',
+    icon: '🔮',
+    description: 'Violet-gold runes point west to the Twilight Eclipse Shrine, where Gardevoir guards the Eclipse Badge. A Twilight Gem 🔮 awakens Steelix or Umbreon, while a Sunburst Gem ☀️ awakens Bellossom, Politoed, or Altaria!',
   },
 };
 
@@ -907,7 +1040,7 @@ export function getCompassGuidance(profile, speciesMap = null) {
   const npcsTalked = new Set(profile?.npcsTalked || []);
   const shrinesCleared = new Set(profile?.shrinesCleared || []);
   const caughtCount = Object.keys(profile?.pokedex?.caught || {}).length;
-  const totalSpecies = speciesMap ? Object.keys(speciesMap).length : 74;
+  const totalSpecies = speciesMap ? Object.keys(speciesMap).length : 90;
 
   let goal = null;
 
@@ -971,6 +1104,15 @@ export function getCompassGuidance(profile, speciesMap = null) {
       icon: '🌩️',
       title: 'Thunder Roost Shrine (NE Cliff)',
       targetBiomeId: 'volcano',
+      targetX: pos.x,
+      targetY: pos.y,
+    };
+  } else if (!shrinesCleared.has('eclipse_shrine')) {
+    const pos = findEntryCoords(SHRINES, (s) => s.id === 'eclipse_shrine');
+    goal = {
+      icon: '🔮',
+      title: 'Twilight Eclipse Shrine (Cavern)',
+      targetBiomeId: 'cave',
       targetX: pos.x,
       targetY: pos.y,
     };

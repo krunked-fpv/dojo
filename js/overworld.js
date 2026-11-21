@@ -55,20 +55,67 @@ const FALLBACK_TRAINER_STYLES = {
     accentDark: '#1e1b4b',
     accentSoft: 'rgba(129, 140, 248, 0.25)',
   },
+  solstice: {
+    outfitPrimary: '#d97706',
+    outfitSecondary: '#fef08a',
+    accent: '#fbbf24',
+    accentDark: '#92400e',
+    accentSoft: 'rgba(251, 191, 36, 0.25)',
+  },
+  twilight: {
+    outfitPrimary: '#581c87',
+    outfitSecondary: '#c084fc',
+    accent: '#e879f9',
+    accentDark: '#3b0764',
+    accentSoft: 'rgba(192, 132, 252, 0.25)',
+  },
 };
 
+const FALLBACK_ACCESSORY_IDS = new Set(['cap', 'crown', 'wizard', 'headband', 'goggles', 'halo']);
+const FALLBACK_AURA_IDS = new Set(['none', 'stars', 'hearts', 'lightning']);
+
 function getResolvedTrainerLook(trainerId, appearance = null) {
-  if (typeof Config.resolveTrainerLook === 'function') {
-    return Config.resolveTrainerLook(trainerId, appearance);
-  }
   const base = TRAINERS[trainerId] || TRAINERS.violet;
-  const styleId = appearance?.styleId && Object.prototype.hasOwnProperty.call(FALLBACK_TRAINER_STYLES, appearance.styleId)
-    ? appearance.styleId
-    : 'default';
-  const style = FALLBACK_TRAINER_STYLES[styleId];
-  const accessory = ['cap', 'crown', 'wizard', 'headband'].includes(appearance?.accessory)
-    ? appearance.accessory
-    : 'cap';
+  const rawStyleId = appearance?.styleId;
+  const rawAcc = appearance?.accessory;
+  const rawAura = appearance?.aura;
+
+  const resolved = typeof Config.resolveTrainerLook === 'function'
+    ? Config.resolveTrainerLook(trainerId, appearance)
+    : null;
+
+  const configHasStyle = !rawStyleId || rawStyleId === 'default' || Boolean(Config.TRAINER_STYLES?.[rawStyleId]);
+  const fallbackStyle = rawStyleId && Object.prototype.hasOwnProperty.call(FALLBACK_TRAINER_STYLES, rawStyleId)
+    ? FALLBACK_TRAINER_STYLES[rawStyleId]
+    : null;
+  const useFallbackStyle = !configHasStyle && Boolean(fallbackStyle);
+
+  const styleId = useFallbackStyle
+    ? rawStyleId
+    : (resolved?.styleId || (rawStyleId && fallbackStyle ? rawStyleId : 'default'));
+
+  const accessory = (rawAcc && (Config.TRAINER_ACCESSORIES?.[rawAcc] || FALLBACK_ACCESSORY_IDS.has(rawAcc)))
+    ? rawAcc
+    : (resolved?.accessory || 'cap');
+
+  const aura = (rawAura && (Config.TRAINER_AURAS?.[rawAura] || FALLBACK_AURA_IDS.has(rawAura)))
+    ? rawAura
+    : (resolved?.aura || 'none');
+
+  if (resolved && !useFallbackStyle) {
+    return {
+      ...resolved,
+      styleId,
+      accessory,
+      aura,
+      cape: Boolean(appearance?.cape ?? resolved.cape),
+    };
+  }
+
+  const style = useFallbackStyle
+    ? fallbackStyle
+    : (styleId !== 'default' ? FALLBACK_TRAINER_STYLES[styleId] : null);
+
   return {
     ...base,
     styleId,
@@ -78,6 +125,7 @@ function getResolvedTrainerLook(trainerId, appearance = null) {
     accentDark: style?.accentDark || base.accentDark,
     accentSoft: style?.accentSoft || base.accentSoft,
     accessory,
+    aura,
     cape: Boolean(appearance?.cape),
   };
 }
@@ -123,8 +171,14 @@ export function drawTrainerPortrait(canvas, trainerId, appearance = null) {
   ctx.beginPath();
   ctx.arc(18, 19, 15, 0, Math.PI * 2);
   ctx.fill();
-  if (look.styleId !== 'default' || look.cape) {
-    ctx.strokeStyle = look.accent;
+  if (look.styleId !== 'default' || look.cape || look.aura !== 'none') {
+    ctx.strokeStyle = look.aura === 'hearts'
+      ? '#f472b6'
+      : look.aura === 'lightning'
+        ? '#38bdf8'
+        : look.aura === 'stars'
+          ? '#facc15'
+          : look.accent;
     ctx.lineWidth = 1;
     ctx.stroke();
   }
@@ -198,6 +252,34 @@ export function drawTrainerPortrait(canvas, trainerId, appearance = null) {
     ctx.fillRect(28, 12, 3, 2);
     ctx.fillStyle = '#fef08a';
     ctx.fillRect(16, 9, 4, 2);
+  } else if (look.accessory === 'goggles') {
+    ctx.fillStyle = look.accentDark || '#334155';
+    ctx.fillRect(9, 9, 18, 3);
+    ctx.fillStyle = '#475569';
+    ctx.fillRect(10, 7, 7, 5);
+    ctx.fillRect(19, 7, 7, 5);
+    ctx.fillStyle = '#38bdf8';
+    ctx.fillRect(11, 8, 5, 3);
+    ctx.fillRect(20, 8, 5, 3);
+    ctx.fillStyle = '#e0f2fe';
+    ctx.fillRect(12, 8, 2, 1);
+    ctx.fillRect(21, 8, 2, 1);
+  } else if (look.accessory === 'halo') {
+    ctx.save();
+    ctx.strokeStyle = 'rgba(250, 204, 21, 0.42)';
+    ctx.lineWidth = 2.6;
+    ctx.beginPath();
+    ctx.ellipse(18, 4.5, 8.5, 2.3, 0, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.strokeStyle = '#fef08a';
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    ctx.ellipse(18, 4.5, 8.5, 2.3, 0, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(11, 3, 2, 2);
+    ctx.fillRect(24, 4, 2, 2);
+    ctx.restore();
   } else {
     // Default Adventure Cap
     ctx.fillStyle = look.outfitPrimary;
@@ -218,6 +300,38 @@ export function drawTrainerPortrait(canvas, trainerId, appearance = null) {
   if (look.cape) {
     ctx.fillRect(10, 22, 2, 2);
     ctx.fillRect(24, 22, 2, 2);
+  }
+
+  // Optional Aura Motifs on Portrait
+  if (look.aura === 'stars') {
+    const pts = [[5, 9, '#fde047'], [30, 10, '#fef08a'], [6, 26, '#c084fc'], [30, 25, '#fde047']];
+    for (const [ax, ay, col] of pts) {
+      ctx.fillStyle = col;
+      ctx.fillRect(ax - 1, ay, 3, 1);
+      ctx.fillRect(ax, ay - 1, 1, 3);
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(ax, ay, 1, 1);
+    }
+  } else if (look.aura === 'hearts') {
+    const hearts = [[5, 9], [28, 11], [6, 25]];
+    for (const [hx, hy] of hearts) {
+      ctx.fillStyle = '#fb7185';
+      ctx.fillRect(hx, hy, 2, 2);
+      ctx.fillRect(hx + 3, hy, 2, 2);
+      ctx.fillRect(hx + 1, hy + 1, 3, 2);
+      ctx.fillRect(hx + 2, hy + 3, 1, 1);
+      ctx.fillStyle = '#fecdd3';
+      ctx.fillRect(hx, hy, 1, 1);
+    }
+  } else if (look.aura === 'lightning') {
+    ctx.fillStyle = '#fde047';
+    ctx.fillRect(5, 8, 2, 3);
+    ctx.fillRect(4, 11, 3, 2);
+    ctx.fillRect(6, 13, 2, 3);
+    ctx.fillStyle = '#38bdf8';
+    ctx.fillRect(29, 10, 2, 3);
+    ctx.fillRect(28, 13, 3, 2);
+    ctx.fillRect(30, 15, 2, 3);
   }
 
   ctx.restore();
@@ -267,6 +381,7 @@ export class OverworldEngine {
     this.followerUid = null;
     this.followerSpeciesId = null;
     this.followerShiny = false;
+    this.followerUpgradeTier = 0;
     this.followerInitialized = false;
     this.followerX = GAME_META.spawn?.x ?? 8;
     this.followerY = GAME_META.spawn?.y ?? 15;
@@ -370,13 +485,15 @@ export class OverworldEngine {
 
   _readLeadMeta(lead) {
     if (!lead) {
-      return { uid: null, speciesId: null, isShiny: false };
+      return { uid: null, speciesId: null, isShiny: false, upgradeTier: 0 };
     }
     const rawId = Number(lead.speciesId);
+    const upgradeTier = Math.max(0, Math.min(5, Number(lead.upgradeTier) || 0));
     return {
       uid: lead.uid ?? null,
       speciesId: Number.isFinite(rawId) ? rawId : null,
       isShiny: Boolean(lead.isShiny),
+      upgradeTier,
     };
   }
 
@@ -386,6 +503,7 @@ export class OverworldEngine {
       this.followerUid = null;
       this.followerSpeciesId = null;
       this.followerShiny = false;
+      this.followerUpgradeTier = 0;
       this.followerMoving = false;
       return this.getFollowerState();
     }
@@ -403,19 +521,22 @@ export class OverworldEngine {
       this.followerUid = next.uid;
       this.followerSpeciesId = next.speciesId;
       this.followerShiny = next.isShiny;
+      this.followerUpgradeTier = next.upgradeTier;
       return this.getFollowerState();
     }
 
     const changed = (
       next.uid !== this.followerUid ||
       next.speciesId !== this.followerSpeciesId ||
-      next.isShiny !== this.followerShiny
+      next.isShiny !== this.followerShiny ||
+      next.upgradeTier !== this.followerUpgradeTier
     );
 
     if (changed) {
       this.followerUid = next.uid;
       this.followerSpeciesId = next.speciesId;
       this.followerShiny = next.isShiny;
+      this.followerUpgradeTier = next.upgradeTier;
       if (lead) {
         this._spawnFollowerChangePuff(profile);
       } else {
@@ -436,7 +557,7 @@ export class OverworldEngine {
     const renderY = isMoving
       ? this.followerStartY + (this.followerTargetY - this.followerStartY) * this.moveProgress
       : this.followerY;
-    const { speciesId } = this._readLeadMeta(lead);
+    const { speciesId, upgradeTier } = this._readLeadMeta(lead);
     const name = lead ? (lead.name ?? SPECIES[speciesId]?.name ?? null) : null;
 
     return {
@@ -445,6 +566,7 @@ export class OverworldEngine {
       speciesId,
       name,
       isShiny: Boolean(lead?.isShiny),
+      upgradeTier,
       x: this.followerX,
       y: this.followerY,
       renderX,
@@ -1556,19 +1678,21 @@ export class OverworldEngine {
             ? '#fde047'
             : shrine?.id === 'starlight_shrine'
               ? '#f472b6'
-              : shrine?.biome === 'forest'
-                ? '#4ade80'
-                : shrine?.biome === 'cave'
-                  ? '#c084fc'
-                  : shrine?.biome === 'volcano'
-                    ? '#fb7185'
-                    : shrine?.biome === 'peak'
-                      ? '#67e8f9'
-                      : '#38bdf8';
-        if (cleared) {
+              : shrine?.id === 'eclipse_shrine'
+                ? '#e879f9'
+                : shrine?.biome === 'forest'
+                  ? '#4ade80'
+                  : shrine?.biome === 'cave'
+                    ? '#c084fc'
+                    : shrine?.biome === 'volcano'
+                      ? '#fb7185'
+                      : shrine?.biome === 'peak'
+                        ? '#67e8f9'
+                        : '#38bdf8';
+        if (cleared || shrine?.id === 'eclipse_shrine') {
           ctx.save();
           ctx.globalAlpha = 0.35 + 0.25 * Math.sin(nowMs * 0.007);
-          ctx.strokeStyle = '#fef08a';
+          ctx.strokeStyle = shrine?.id === 'eclipse_shrine' && !cleared ? '#c084fc' : '#fef08a';
           ctx.lineWidth = 1.5;
           ctx.beginPath();
           ctx.arc(sx + 16, sy + 9 + bob, 9, 0, Math.PI * 2);
@@ -1578,7 +1702,11 @@ export class OverworldEngine {
         ctx.beginPath();
         ctx.arc(sx + 16, sy + 9 + bob, 6, 0, Math.PI * 2);
         ctx.fill();
-        ctx.fillStyle = shrine?.id === 'thunder_shrine' && !cleared ? '#38bdf8' : '#ffffff';
+        ctx.fillStyle = shrine?.id === 'thunder_shrine' && !cleared
+          ? '#38bdf8'
+          : shrine?.id === 'eclipse_shrine' && !cleared
+            ? '#312e81'
+            : '#ffffff';
         ctx.fillRect(sx + 14, sy + 7 + bob, 2, 2);
         break;
       }
@@ -1604,18 +1732,31 @@ export class OverworldEngine {
   drawRarePatchOverlay(ctx, sx, sy, nowMs) {
     const ts = this.tileSize;
     const pulse = 0.55 + 0.45 * Math.sin(nowMs * 0.01);
+    const aurora = 0.5 + 0.5 * Math.cos(nowMs * 0.007 + sx * 0.05);
     ctx.save();
-    ctx.strokeStyle = `rgba(250, 204, 21, ${(0.5 + pulse * 0.45).toFixed(2)})`;
+    ctx.fillStyle = `rgba(103, 232, 249, ${(0.08 + aurora * 0.1).toFixed(2)})`;
+    ctx.fillRect(sx + 3, sy + 3, ts - 6, ts - 6);
+
+    ctx.strokeStyle = `rgba(250, 204, 21, ${(0.55 + pulse * 0.42).toFixed(2)})`;
     ctx.lineWidth = 2;
     ctx.strokeRect(sx + 2, sy + 2, ts - 4, ts - 4);
 
-    // Shimmering gold star sparkles dancing over the rustling patch
-    for (let i = 0; i < 3; i++) {
-      const phase = nowMs * 0.007 + i * 2.1;
-      const rx = sx + 8 + ((i * 8 + Math.sin(phase) * 4) % 18);
-      const ry = sy + 16 - Math.abs(Math.cos(phase * 1.1)) * 12;
-      ctx.fillStyle = i === 1 ? '#ffffff' : '#fef08a';
-      ctx.fillRect(Math.round(rx), Math.round(ry), 3, 3);
+    // Subtle aurora corner glints
+    ctx.fillStyle = `rgba(103, 232, 249, ${(0.45 + aurora * 0.45).toFixed(2)})`;
+    ctx.fillRect(sx + 2, sy + 2, 3, 3);
+    ctx.fillRect(sx + ts - 5, sy + 2, 3, 3);
+
+    // Shimmering gold & aurora star sparkles dancing over the rustling patch
+    const sparkleColors = ['#fef08a', '#67e8f9', '#ffffff', '#e879f9'];
+    for (let i = 0; i < 4; i++) {
+      const phase = nowMs * 0.0065 + i * 1.65;
+      const rx = Math.round(sx + 7 + ((i * 7 + Math.sin(phase) * 4) % 18));
+      const ry = Math.round(sy + 20 - Math.abs(Math.cos(phase * 1.15)) * 15);
+      ctx.fillStyle = sparkleColors[i];
+      ctx.fillRect(rx - 1, ry, 3, 1);
+      ctx.fillRect(rx, ry - 1, 1, 3);
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(rx, ry, 1, 1);
     }
     ctx.restore();
   }
@@ -1684,6 +1825,49 @@ export class OverworldEngine {
       ctx.globalAlpha = glow;
       ctx.fillStyle = '#e0f2fe';
       ctx.fillRect(sx + 15, sy + 3, 2, 8);
+    } else if (landmark.id === 'landmark_starlight_forge') {
+      ctx.fillStyle = 'rgba(15, 23, 42, 0.28)';
+      ctx.beginPath();
+      ctx.ellipse(sx + 16, sy + 27, 10, 4, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#334155';
+      ctx.fillRect(sx + 8, sy + 21, 16, 6);
+      ctx.fillStyle = '#4338ca';
+      ctx.fillRect(sx + 11, sy + 10, 10, 12);
+      ctx.fillStyle = '#fbbf24';
+      ctx.fillRect(sx + 13, sy + 6, 6, 11);
+      ctx.globalAlpha = glow;
+      ctx.fillStyle = '#fef08a';
+      ctx.fillRect(sx + 15, sy + 3, 2, 8);
+      ctx.fillStyle = '#67e8f9';
+      ctx.fillRect(sx + 10, sy + 13, 2, 2);
+      ctx.fillRect(sx + 20, sy + 11, 2, 2);
+    } else if (landmark.id === 'landmark_eclipse_monolith') {
+      ctx.fillStyle = 'rgba(15, 23, 42, 0.32)';
+      ctx.beginPath();
+      ctx.ellipse(sx + 16, sy + 27, 10, 4, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#312e81';
+      ctx.fillRect(sx + 9, sy + 19, 14, 8);
+      ctx.fillStyle = '#581c87';
+      ctx.fillRect(sx + 11, sy + 9, 10, 12);
+      ctx.fillStyle = '#c084fc';
+      ctx.fillRect(sx + 13, sy + 6, 6, 6);
+      ctx.globalAlpha = glow;
+      ctx.fillStyle = '#fde047';
+      ctx.fillRect(sx + 15, sy + 11, 2, 5);
+      ctx.fillStyle = '#e879f9';
+      ctx.fillRect(sx + 14, sy + 7, 3, 2);
+    } else {
+      ctx.fillStyle = 'rgba(15, 23, 42, 0.25)';
+      ctx.beginPath();
+      ctx.ellipse(sx + 16, sy + 27, 9, 3.5, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#64748b';
+      ctx.fillRect(sx + 11, sy + 10, 10, 16);
+      ctx.globalAlpha = glow;
+      ctx.fillStyle = '#fde047';
+      ctx.fillRect(sx + 14, sy + 12, 4, 4);
     }
     ctx.restore();
   }
@@ -1736,17 +1920,34 @@ export class OverworldEngine {
     const questReady = Boolean(quest && !questDone && quest.check?.(profile));
     const unvisited = !(profile?.npcsTalked || []).includes(npc.id);
 
-    if (questReady || (unvisited && !questDone)) {
-      const floatY = y - 8 + Math.sin(nowMs * 0.008) * (questReady ? 2.4 : 1.3);
+    if (questReady) {
+      const floatY = Math.round(y - 10 + Math.sin(nowMs * 0.008) * 2.4);
+      const pulse = 0.45 + 0.35 * Math.sin(nowMs * 0.009);
       ctx.save();
-      ctx.fillStyle = questReady ? '#facc15' : '#fef08a';
-      ctx.fillRect(sx + 11, Math.round(floatY), 10, 9);
+      ctx.fillStyle = `rgba(250, 204, 21, ${pulse.toFixed(2)})`;
+      ctx.fillRect(sx + 8, floatY - 1, 16, 13);
+      ctx.fillStyle = '#facc15';
+      ctx.fillRect(sx + 9, floatY, 14, 11);
       ctx.strokeStyle = '#78350f';
       ctx.lineWidth = 1;
-      ctx.strokeRect(sx + 11, Math.round(floatY), 10, 9);
+      ctx.strokeRect(sx + 9, floatY, 14, 11);
       ctx.fillStyle = '#78350f';
-      ctx.fillRect(sx + 15, Math.round(floatY) + 2, 2, 4);
-      ctx.fillRect(sx + 15, Math.round(floatY) + 7, 2, 1);
+      ctx.font = 'bold 9px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('★', sx + 16, floatY + 6);
+      ctx.restore();
+    } else if (unvisited && !questDone) {
+      const floatY = Math.round(y - 8 + Math.sin(nowMs * 0.008) * 1.3);
+      ctx.save();
+      ctx.fillStyle = '#fef08a';
+      ctx.fillRect(sx + 11, floatY, 10, 9);
+      ctx.strokeStyle = '#78350f';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(sx + 11, floatY, 10, 9);
+      ctx.fillStyle = '#78350f';
+      ctx.fillRect(sx + 15, floatY + 2, 2, 4);
+      ctx.fillRect(sx + 15, floatY + 7, 2, 1);
       ctx.restore();
     }
   }
@@ -1896,6 +2097,56 @@ export class OverworldEngine {
       }
       return;
     }
+    if (look.accessory === 'goggles') {
+      ctx.fillStyle = look.accentDark || '#334155';
+      ctx.fillRect(sx + 8, y + 4, 16, 3);
+      if (dir === 'down') {
+        ctx.fillStyle = '#475569';
+        ctx.fillRect(sx + 10, y + 3, 5, 4);
+        ctx.fillRect(sx + 17, y + 3, 5, 4);
+        ctx.fillStyle = '#38bdf8';
+        ctx.fillRect(sx + 11, y + 4, 3, 2);
+        ctx.fillRect(sx + 18, y + 4, 3, 2);
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(sx + 11, y + 4, 1, 1);
+        ctx.fillRect(sx + 18, y + 4, 1, 1);
+      } else if (dir === 'left') {
+        ctx.fillStyle = '#475569';
+        ctx.fillRect(sx + 9, y + 3, 6, 4);
+        ctx.fillStyle = '#38bdf8';
+        ctx.fillRect(sx + 10, y + 4, 4, 2);
+      } else if (dir === 'right') {
+        ctx.fillStyle = '#475569';
+        ctx.fillRect(sx + 17, y + 3, 6, 4);
+        ctx.fillStyle = '#38bdf8';
+        ctx.fillRect(sx + 18, y + 4, 4, 2);
+      } else {
+        ctx.fillStyle = '#fbbf24';
+        ctx.fillRect(sx + 14, y + 4, 4, 3);
+      }
+      return;
+    }
+    if (look.accessory === 'halo') {
+      const haloBob = Math.sin(nowMs * 0.006) * 0.9;
+      const hy = y - 1 + haloBob;
+      ctx.save();
+      ctx.strokeStyle = 'rgba(250, 204, 21, 0.38)';
+      ctx.lineWidth = 2.8;
+      ctx.beginPath();
+      ctx.ellipse(sx + 16, hy, 7.5, 2.4, 0, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.strokeStyle = '#fef08a';
+      ctx.lineWidth = 1.4;
+      ctx.beginPath();
+      ctx.ellipse(sx + 16, hy, 7.5, 2.4, 0, 0, Math.PI * 2);
+      ctx.stroke();
+      const glintX = Math.round(sx + 16 + Math.cos(nowMs * 0.004) * 6.5);
+      const glintY = Math.round(hy + Math.sin(nowMs * 0.004) * 2);
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(glintX, glintY, 2, 2);
+      ctx.restore();
+      return;
+    }
 
     // Default Adventure Cap
     ctx.fillStyle = look.outfitPrimary;
@@ -1914,13 +2165,78 @@ export class OverworldEngine {
     }
   }
 
+  _drawPlayerAuraBase(ctx, sx, sy, nowMs, look) {
+    if (!look.aura || look.aura === 'none') return;
+    const pulse = 0.25 + 0.16 * Math.sin(nowMs * 0.006);
+    ctx.save();
+    ctx.strokeStyle = look.aura === 'hearts'
+      ? `rgba(244, 114, 182, ${pulse.toFixed(2)})`
+      : look.aura === 'lightning'
+        ? `rgba(56, 189, 248, ${pulse.toFixed(2)})`
+        : `rgba(250, 204, 21, ${pulse.toFixed(2)})`;
+    ctx.lineWidth = 1.6;
+    ctx.beginPath();
+    ctx.ellipse(sx + 16, sy + 28, 12, 5.2, 0, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  _drawPlayerAuraParticles(ctx, sx, y, nowMs, look) {
+    if (!look.aura || look.aura === 'none') return;
+    ctx.save();
+    if (look.aura === 'stars') {
+      for (let i = 0; i < 4; i++) {
+        const angle = nowMs * 0.003 + i * (Math.PI / 2);
+        const rx = Math.round(sx + 16 + Math.cos(angle) * 12);
+        const ry = Math.round(y + 14 + Math.sin(angle * 1.2) * 8);
+        ctx.globalAlpha = 0.65 + 0.35 * Math.sin(nowMs * 0.008 + i);
+        ctx.fillStyle = i % 2 === 0 ? '#fde047' : '#c084fc';
+        ctx.fillRect(rx - 1, ry, 3, 1);
+        ctx.fillRect(rx, ry - 1, 1, 3);
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(rx, ry, 1, 1);
+      }
+    } else if (look.aura === 'hearts') {
+      for (let i = 0; i < 3; i++) {
+        const phase = ((nowMs * 0.00095 + i * 0.33) % 1 + 1) % 1;
+        const hx = Math.round(sx + 14 + Math.sin(phase * Math.PI * 2 + i * 2.1) * 9);
+        const hy = Math.round(y + 22 - phase * 22);
+        ctx.globalAlpha = Math.sin(phase * Math.PI) * 0.92;
+        ctx.fillStyle = i % 2 === 0 ? '#fb7185' : '#f472b6';
+        ctx.fillRect(hx, hy, 2, 2);
+        ctx.fillRect(hx + 3, hy, 2, 2);
+        ctx.fillRect(hx + 1, hy + 1, 3, 2);
+        ctx.fillRect(hx + 2, hy + 3, 1, 1);
+        ctx.fillStyle = '#fecdd3';
+        ctx.fillRect(hx, hy, 1, 1);
+      }
+    } else if (look.aura === 'lightning') {
+      for (let i = 0; i < 3; i++) {
+        const angle = nowMs * 0.0065 + i * ((Math.PI * 2) / 3);
+        const bx = Math.round(sx + 15 + Math.cos(angle) * 11);
+        const by = Math.round(y + 13 + Math.sin(angle * 1.4) * 7);
+        const flash = 0.55 + 0.45 * Math.sin(nowMs * 0.02 + i * 2.4);
+        ctx.globalAlpha = flash;
+        ctx.fillStyle = i % 2 === 0 ? '#fde047' : '#38bdf8';
+        ctx.fillRect(bx, by, 2, 3);
+        ctx.fillRect(bx - 1, by + 2, 3, 1);
+        ctx.fillRect(bx + 1, by + 3, 2, 3);
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(bx, by + 2, 1, 1);
+      }
+    }
+    ctx.restore();
+  }
+
   drawPlayer(ctx, sx, sy, trainerId, dir, nowMs, appearance = null) {
     const look = getResolvedTrainerLook(trainerId, appearance);
     const bob = this.moving ? Math.abs(Math.sin(this.moveProgress * Math.PI)) * 3 : Math.sin(nowMs * 0.004) * 0.6;
     const stepShift = this.moving ? (this.walkFrame === 0 ? 2 : -2) : 0;
     const capeSway = Math.round(Math.sin(nowMs * 0.008 + (this.moving ? this.moveProgress * Math.PI : 0)) * (this.moving ? 2 : 1));
 
-    // Ground shadow
+    // Ground aura ring + shadow
+    this._drawPlayerAuraBase(ctx, sx, sy, nowMs, look);
+
     ctx.fillStyle = 'rgba(0, 0, 0, 0.28)';
     ctx.beginPath();
     ctx.ellipse(sx + 16, sy + 28, 9, 4, 0, 0, Math.PI * 2);
@@ -1977,6 +2293,9 @@ export class OverworldEngine {
 
     // Trainer Headgear / Accessory
     this._drawPlayerAccessory(ctx, sx, y, dir, nowMs, look);
+
+    // Floating 60fps Trainer Aura particles
+    this._drawPlayerAuraParticles(ctx, sx, y, nowMs, look);
   }
 
   _getFollowerSpriteEntry(species, useBack, shiny) {
@@ -2107,6 +2426,25 @@ export class OverworldEngine {
     const safeDir = DIR_VEC[dir] ? dir : 'down';
     const useBack = safeDir === 'up';
     const shiny = Boolean(lead.isShiny);
+    const upgradeTier = Math.max(0, Math.min(5, Number(lead.upgradeTier) || 0));
+
+    // Subtle Star Rank / Shiny ground glow ring
+    if (upgradeTier > 0 || shiny) {
+      const pulse = 0.3 + 0.18 * Math.sin(nowMs * 0.006);
+      ctx.save();
+      ctx.strokeStyle = shiny
+        ? `rgba(250, 204, 21, ${(pulse + 0.15).toFixed(2)})`
+        : upgradeTier >= 4
+          ? `rgba(250, 204, 21, ${pulse.toFixed(2)})`
+          : upgradeTier >= 2
+            ? `rgba(192, 132, 252, ${pulse.toFixed(2)})`
+            : `rgba(103, 232, 249, ${pulse.toFixed(2)})`;
+      ctx.lineWidth = upgradeTier >= 4 || shiny ? 1.6 : 1.2;
+      ctx.beginPath();
+      ctx.ellipse(sx + 16, sy + 28, 10, 4.4, 0, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    }
 
     // Soft ground shadow ellipse
     ctx.fillStyle = 'rgba(0, 0, 0, 0.26)';
@@ -2140,13 +2478,28 @@ export class OverworldEngine {
       ctx.restore();
     }
 
+    if (upgradeTier > 0) {
+      const moteCount = upgradeTier >= 3 ? 2 : 1;
+      for (let i = 0; i < moteCount; i++) {
+        const phase = ((nowMs * 0.0011 + i * 0.5) % 1 + 1) % 1;
+        const mx = Math.round(sx + 10 + i * 12 + Math.sin(phase * Math.PI * 2) * 2);
+        const my = Math.round(y + 21 - phase * 15);
+        ctx.save();
+        ctx.globalAlpha = Math.sin(phase * Math.PI) * 0.85;
+        ctx.fillStyle = upgradeTier >= 4 ? '#fef08a' : '#67e8f9';
+        ctx.fillRect(mx, my, 2, 2);
+        ctx.restore();
+      }
+    }
+
     if (shiny) {
       for (let i = 0; i < 2; i++) {
         const angle = nowMs * 0.005 + i * Math.PI;
         const ox = Math.round(sx + 16 + Math.cos(angle) * 11);
         const oy = Math.round(y + 15 + Math.sin(angle) * 8);
         ctx.fillStyle = i === 0 ? '#fde047' : '#ffffff';
-        ctx.fillRect(ox, oy, 2, 2);
+        ctx.fillRect(ox - 1, oy, 3, 1);
+        ctx.fillRect(ox, oy - 1, 1, 3);
       }
     }
   }
