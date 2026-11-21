@@ -1,5 +1,5 @@
-const SHELL_CACHE = 'starlight-shell-v5';
-const ASSET_CACHE = 'starlight-assets-v5';
+const SHELL_CACHE = 'starlight-shell-v6';
+const ASSET_CACHE = 'starlight-assets-v6';
 const KEEP_CACHES = new Set([SHELL_CACHE, ASSET_CACHE]);
 
 const CORE_SHELL_URLS = [

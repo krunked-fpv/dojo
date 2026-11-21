@@ -137,9 +137,16 @@ export class InputController {
   }
 
   bindKeyboard() {
+    const isEditableElement = (el) => {
+      if (!el) return false;
+      const tag = (el.tagName || '').toUpperCase();
+      return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || Boolean(el.isContentEditable);
+    };
+
     window.addEventListener('keydown', (e) => {
-      const tag = e.target?.tagName;
-      const inInput = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || Boolean(e.target?.isContentEditable);
+      const targetTag = (e.target?.tagName || '').toUpperCase();
+      const activeEl = typeof document !== 'undefined' ? document.activeElement : null;
+      const inInput = isEditableElement(e.target) || isEditableElement(activeEl);
       if (inInput) return;
 
       if (e.ctrlKey || e.metaKey || e.altKey) return;
@@ -168,7 +175,7 @@ export class InputController {
         return;
       }
 
-      if (e.code === 'Space' || e.code === 'KeyZ' || ((e.code === 'Enter' || e.code === 'NumpadEnter') && tag !== 'BUTTON')) {
+      if (e.code === 'Space' || e.code === 'KeyZ' || ((e.code === 'Enter' || e.code === 'NumpadEnter') && targetTag !== 'BUTTON')) {
         if (e.code === 'Space') e.preventDefault();
         this.emit('action');
       } else if (e.code === 'Escape' || e.code === 'Backspace' || e.code === 'KeyX') {
@@ -177,6 +184,17 @@ export class InputController {
         this.emit('pokedex');
       }
     });
+
+    if (typeof document !== 'undefined') {
+      document.addEventListener('focusin', (e) => {
+        if (isEditableElement(e.target)) {
+          this.heldKeys.clear();
+          const pointerActiveDirs = new Set(this.pointerDirs.values());
+          this.dirStack = this.dirStack.filter((d) => pointerActiveDirs.has(d));
+          this.syncDpadVisuals();
+        }
+      });
+    }
 
     window.addEventListener('keyup', (e) => {
       const keyId = e.code || e.key;
