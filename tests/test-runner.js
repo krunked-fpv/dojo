@@ -66,6 +66,8 @@ import {
   rollWildPokemon,
 } from '../js/pokemon.js';
 import {
+  MAX_CHEER_CHARGES,
+  STEPS_PER_CHEER_CHARGE,
   STORAGE_KEY,
   StorageManager,
   isSpeciesCaught,
@@ -2576,8 +2578,13 @@ function buildTestSuites() {
               store.selectTrainer('violet');
               store.chooseStarter(1);
               const profile = store.getActiveProfile();
-              assertEqual(profile.bag.starShards, 4, 'fresh profile starts with 4 starShards');
+              assertEqual(profile.bag.starShards, 0, 'fresh profile starts with 0 starShards');
+              assertEqual(profile.bag.cheerCharges, 0, 'fresh profile starts with 0 cheerCharges');
               assertEqual(store.hasAnyReadyEvolution(profile), false, 'fresh Lv.5 Bulbasaur has no ready evolution');
+
+              // Earn 4 Star Shards before upgrading lead Bulbasaur & Box Spheal
+              store.addStarShards(4);
+              assertEqual(profile.bag.starShards, 4, 'earned 4 starShards via addStarShards');
 
               // Fill team to 6 and place 7th mon in Reserve Box
               for (const id of [10, 16, 25, 43, 133]) {
@@ -3173,12 +3180,32 @@ function buildTestSuites() {
 
               const starter = profile.team[0];
               assertEqual(starter.bond, 20, 'starter starts at bond 20');
-              for (let step = 1; step <= 4; step++) {
+              assertEqual(profile.bag.cheerCharges, 0, 'fresh profile starts with 0 cheerCharges');
+              const brokeCheer = store.cheerPokemon(starter.uid);
+              assertEqual(brokeCheer.cheered, false, 'cheerPokemon rejects when cheerCharges === 0');
+              assertEqual(brokeCheer.reason, 'insufficient_cheers', 'reason === insufficient_cheers');
+              assertEqual(starter.bond, 20, 'bond unchanged when cheerCharges === 0');
+
+              // Earn 3 Cheer Hearts via battle victories, cheer 3 times, then walk 25 steps for 4th Cheer Heart
+              store.recordBattleWin();
+              store.recordBattleWin();
+              store.recordBattleWin();
+              assertEqual(profile.bag.cheerCharges, 3, '3 battle wins grant 3 cheerCharges (max cap)');
+              for (let step = 1; step <= 3; step++) {
                 const cheerRes = store.cheerPokemon(starter.uid);
                 assertEqual(cheerRes.cheered, true, `cheer #${step} succeeds`);
                 assertEqual(cheerRes.bond, 20 + step * 10, `bond incremented to ${20 + step * 10}`);
               }
-              assertEqual(starter.bond, 60, '4 cheers bring bond 20 -> 60');
+              let stepCheerHit = false;
+              for (let s = 1; s <= 25; s++) {
+                const stepOut = store.updatePosition(8, 15, 'down', true);
+                if (stepOut.stepCheerEarned) stepCheerHit = true;
+              }
+              assertEqual(stepCheerHit, true, '25 walked steps grant +1 Cheer Heart');
+              const cheer4 = store.cheerPokemon(starter.uid);
+              assertEqual(cheer4.cheered, true, 'cheer #4 succeeds');
+              assertEqual(cheer4.bond, 60, 'bond incremented to 60');
+              assertEqual(starter.bond, 60, '4 earned cheers bring bond 20 -> 60');
               assert(profile.badges.includes('harmony'), 'harmony badge unlocked on cheering to bond 60');
 
               const kirlia = createPokemon(281, 16, 'cave');
@@ -3610,14 +3637,27 @@ function buildTestSuites() {
                 assertEqual(SPECIES[spId]?.biome, 'grove', `Grove filtered card #${spId} belongs to grove biome`);
               }
 
-              // Team .cheer-btn UI raises Bond & unlocks harmony badge
+              // Team .cheer-btn UI locks at 0 charges, then raises Bond & unlocks harmony badge once earned
               app.openPokedex('team');
-              const cheerBtn = document.querySelector('.team-card .cheer-btn');
-              assert(Boolean(cheerBtn), 'Team card renders .cheer-btn');
-              for (let i = 0; i < 4; i++) {
-                document.querySelector('.team-card .cheer-btn')?.click();
+              const lockedCheerBtn = document.querySelector('.team-card .cheer-btn');
+              assert(Boolean(lockedCheerBtn), 'Team card renders .cheer-btn');
+              assertEqual(lockedCheerBtn.disabled, true, 'Team .cheer-btn disabled when cheerCharges === 0');
+              assert(lockedCheerBtn.textContent.includes('🔒'), 'Locked .cheer-btn displays 🔒');
+              lockedCheerBtn.click();
+              assertEqual(liveProfile.team[0].bond, 20, 'clicking disabled .cheer-btn does not raise bond');
+              assertEqual(document.querySelector('.evo-celebration-banner'), null, 'clicking disabled .cheer-btn shows no celebration banner');
+
+              storage.addCheerCharges(3);
+              app.pokedex.render();
+              for (let i = 0; i < 3; i++) {
+                const btn = document.querySelector('.team-card .cheer-btn');
+                assertEqual(btn?.disabled, false, `Team .cheer-btn enabled for earned cheer #${i + 1}`);
+                btn?.click();
               }
-              assertEqual(liveProfile.team[0].bond, 60, '4 UI cheer clicks raise bond 20 -> 60');
+              storage.recordBattleWin();
+              app.pokedex.render();
+              document.querySelector('.team-card .cheer-btn')?.click();
+              assertEqual(liveProfile.team[0].bond, 60, '4 earned UI cheer clicks raise bond 20 -> 60');
               assert(Boolean(document.querySelector('.evo-celebration-banner')), 'Cheer renders celebration banner');
               assert(
                 (document.querySelector('.team-card .bond-badge')?.textContent || '').includes('Trusted Buddy'),
@@ -4610,7 +4650,7 @@ function buildTestSuites() {
 
             // 1. SW & index.html cache/count sanity
             const swText = await (await fetch('./sw.js')).text();
-            assert(swText.includes('starlight-shell-v10') && swText.includes('starlight-assets-v10'), 'sw.js bumped to v10 caches');
+            assert(swText.includes('starlight-shell-v11') && swText.includes('starlight-assets-v11'), 'sw.js bumped to v11 caches');
 
             // 2. v1/v2 save migration with new biomes & solid tiles (30, 33, 36)
             const findFirstTile = (tileId) => {
@@ -5695,9 +5735,9 @@ function buildTestSuites() {
             const app = window.__starlightApp;
             assert(Boolean(app), 'GameApp mounted');
 
-            // 1. SW v10 & index.html static labels
+            // 1. SW v11 & index.html static labels
             const swText = await (await fetch('./sw.js')).text();
-            assert(swText.includes('starlight-shell-v10') && swText.includes('starlight-assets-v10'), 'sw.js uses v10 caches');
+            assert(swText.includes('starlight-shell-v11') && swText.includes('starlight-assets-v11'), 'sw.js uses v11 caches');
             const idxText = await (await fetch('./index.html')).text();
             assert(idxText.includes('1/1025') && idxText.includes('0/28') && idxText.includes('0/20'), 'index.html reflects 1025 Dex, 28 Badges & 20 Shrines');
 
@@ -6890,13 +6930,13 @@ function buildTestSuites() {
       ],
     },
     {
-      name: '38. Sprint 8 Ergonomics & Release Gate: Gen Filter, Cry Buttons, v10 SW, Migration & Zero-Overlap',
+      name: '38. Sprint 8 Ergonomics & Release Gate: Gen Filter, Cry Buttons, v11 SW, Migration & Zero-Overlap',
       tests: [
         {
-          name: 'sw.js v10 (18 SVGs + minigame), index.html, README, 18-biome welcome & v1/v2 solid tiles 51/54/57/60 migration hold',
+          name: 'sw.js v11 (18 SVGs + minigame), index.html, README, 18-biome welcome & v1/v2 solid tiles 51/54/57/60 migration hold',
           async fn() {
             const swText = await (await fetch('./sw.js')).text();
-            assert(swText.includes('starlight-shell-v10') && swText.includes('starlight-assets-v10'), 'sw.js uses v10 caches');
+            assert(swText.includes('starlight-shell-v11') && swText.includes('starlight-assets-v11'), 'sw.js uses v11 caches');
             assert(swText.includes('./js/minigame.js'), 'sw.js precaches ./js/minigame.js');
             assert(swText.includes('./assets/fallback/pokeball.svg'), 'sw.js precaches pokeball.svg');
             for (const typeId of Object.keys(TYPES)) {
@@ -6908,8 +6948,8 @@ function buildTestSuites() {
 
             const readmeText = await (await fetch('./README.md')).text();
             assert(
-              readmeText.includes('1,025') && readmeText.includes('18') && readmeText.includes('20') && readmeText.includes('28') && readmeText.includes('starlight-shell-v10'),
-              'README reflects Sprint 10 release details',
+              readmeText.includes('1,025') && readmeText.includes('18') && readmeText.includes('20') && readmeText.includes('28') && readmeText.includes('starlight-shell-v11'),
+              'README reflects Sprint 11 release details',
             );
 
             // Solid tiles 51, 54, 57, 60 rescue & v1/v2 migration
@@ -7941,11 +7981,17 @@ function buildTestSuites() {
               assertEqual(mg.activateDash(), true, 'activateDash() succeeds');
               assertGreater(mg.dashTimer, 0, 'dashTimer active');
 
+              const zeroRewards = mg.computeRewards(0, 1);
+              assertEqual(zeroRewards.starShards, 0, 'computeRewards(0, 1) grants 0 starShards');
+              assertEqual(zeroRewards.potions, 0, 'computeRewards(0, 1) grants 0 potions');
+              assertEqual(Boolean(zeroRewards.cheerCharges), false, 'computeRewards(0, 1) grants 0 cheerCharges');
+
               mg.score = 520;
               mg.wave = 5;
               mg.starsCollected = 18;
               const runOut = mg.endRun();
-              assert(Boolean(runOut && runOut.rewards.starShards >= 1), 'endRun returns rewards');
+              assert(Boolean(runOut && runOut.rewards.starShards >= 1), 'endRun returns rewards at 520 pts');
+              assertEqual(runOut.rewards.cheerCharges, 1, '520 pts awards +1 cheerCharge');
               assertEqual(mg.getDiagnostics().rafActive, false, 'endRun stops RAF');
               assertEqual(oz.arcade.highScore, 520, 'highScore persisted');
               assertEqual(oz.arcade.bestWave, 5, 'bestWave persisted');
@@ -8157,7 +8203,8 @@ function buildTestSuites() {
 
               // 11. Pokédex (Gen/Type/Ability/Cry) + Power-Up + Evolution + Buddy Cheer
               profile.team.push(createPokemon(1, 10, 'forest')); // Bulbasaur ready to evolve
-              profile.bag.starShards = Math.max(profile.bag.starShards || 0, 12);
+              storage.addStarShards(12);
+              storage.addCheerCharges(1);
               app.openPokedex('dex');
               document.getElementById('dex-gen-select').value = 'gen1';
               document.getElementById('dex-gen-select').dispatchEvent(new Event('change', { bubbles: true }));
@@ -8191,9 +8238,15 @@ function buildTestSuites() {
               app.handleWorldInteract({ type: 'arcade', key: SECRET_ARCADE_SPOT.key, data: SECRET_ARCADE_SPOT });
               assertEqual(app.minigame.isOpen(), true, 'Knock 3 unlocks and opens Starlight Sky-Hop Mini-Game');
               assertEqual(document.getElementById('hud-btn-arcade').hidden, false, '#hud-btn-arcade visible after unlock');
+              const s42Zero = app.minigame.computeRewards(0, 1);
+              assertEqual(s42Zero.starShards, 0, 'Sky-Hop computeRewards(0, 1) returns 0 starShards');
+              assertEqual(s42Zero.potions, 0, 'Sky-Hop computeRewards(0, 1) returns 0 potions');
               app.minigame.activateDash();
-              app.minigame.score = 260;
-              app.minigame.endRun();
+              app.minigame.score = 520;
+              app.minigame.wave = 5;
+              const s42End = app.minigame.endRun();
+              assertGreater(s42End.rewards.starShards, 0, 'Sky-Hop 520 pts awards starShards');
+              assertEqual(s42End.rewards.cheerCharges, 1, 'Sky-Hop 520 pts awards +1 cheerCharge');
               document.getElementById('minigame-close-btn').click();
               assertEqual(app.minigame.isOpen(), false, 'Closing mini-game hides modal');
 
@@ -8884,21 +8937,21 @@ function buildTestSuites() {
       ],
     },
     {
-      name: '44. Sprint 10 PWA v10, Sky-Hop Pause/Offline & Accessibility Reconciliation',
+      name: '44. Sprint 10 PWA v11, Sky-Hop Pause/Offline & Accessibility Reconciliation',
       tests: [
         {
-          name: 'manifest.json 1,025 copy, sw.js v10 precache parity, Sky-Hop Pause/Space replay/Orb fallback, Pokédex scrollTop reset & dialog a11y',
+          name: 'manifest.json 1,025 copy, sw.js v11 precache parity, Sky-Hop Pause/Space replay/Orb fallback, Pokédex scrollTop reset & dialog a11y',
           async fn() {
             const app = window.__starlightApp;
             assert(Boolean(app), 'GameApp mounted');
 
-            // 1. manifest.json & sw.js v10 precache parity
+            // 1. manifest.json & sw.js v11 precache parity
             const manifest = await (await fetch('./manifest.json')).json();
             assert(!manifest.description.includes('110 '), 'manifest description removed stale "110 " count');
             assert(manifest.description.includes('1,025'), 'manifest description mentions 1,025');
 
             const swText = await (await fetch('./sw.js')).text();
-            assert(swText.includes('starlight-shell-v10') && swText.includes('starlight-assets-v10'), 'sw.js uses v10 cache names');
+            assert(swText.includes('starlight-shell-v11') && swText.includes('starlight-assets-v11'), 'sw.js uses v11 cache names');
             const urlsMatch = swText.match(/const CORE_SHELL_URLS\s*=\s*\[([\s\S]*?)\];/);
             assert(Boolean(urlsMatch), 'CORE_SHELL_URLS parsed from sw.js');
             const shellUrls = [...urlsMatch[1].matchAll(/['"]([^'"]+)['"]/g)].map((m) => m[1]);
@@ -9162,6 +9215,617 @@ function buildTestSuites() {
                 }
               }
               iframe.remove();
+              if (prevRawSave === null) window.localStorage.removeItem(STORAGE_KEY);
+              else window.localStorage.setItem(STORAGE_KEY, prevRawSave);
+              storage.state = storage.load();
+              app.applyTrainerTheme(storage.getActiveTrainerId() || 'violet');
+              app.refreshHud();
+              app.syncControlVisibility();
+              app.syncOverworldPause();
+            }
+          },
+        },
+      ],
+    },
+    {
+      name: '45. Sprint 11 Economy Integrity & Buddy Cheer Anti-Spam Gate',
+      tests: [
+        {
+          name: 'Fresh profiles (Violet & Ozias) start with 0 Star Shards & 0 Cheer Hearts, and locked Pokédex buttons mutate nothing',
+          fn() {
+            const app = window.__starlightApp;
+            assert(Boolean(app), 'GameApp mounted');
+            assertEqual(MAX_CHEER_CHARGES, 3, 'MAX_CHEER_CHARGES === 3');
+            assertEqual(STEPS_PER_CHEER_CHARGE, 25, 'STEPS_PER_CHEER_CHARGE === 25');
+
+            const prevRawSave = window.localStorage.getItem(STORAGE_KEY);
+            const wasBootHidden = app.bootScreenEl.hidden;
+            const wasStarterHidden = app.starterScreenEl.hidden;
+            const wasShellHidden = app.gameShellEl.hidden;
+            const wasOverworldActive = app.overworld.active;
+
+            try {
+              for (const [trainerId, starterId] of [['violet', 1], ['ozias', 4]]) {
+                const key = `starlight_pokemon_test_s45_fresh_${trainerId}`;
+                window.localStorage.removeItem(key);
+                const store = new StorageManager(key);
+                store.selectTrainer(trainerId);
+                store.chooseStarter(starterId);
+                const prof = store.getActiveProfile();
+                assertEqual(prof.bag.starShards, 0, `${trainerId}: fresh starShards === 0`);
+                assertEqual(prof.bag.cheerCharges, 0, `${trainerId}: fresh cheerCharges === 0`);
+                assertEqual(prof.cheerStepProgress, 0, `${trainerId}: fresh cheerStepProgress === 0`);
+                assertEqual(prof.stats.cheers, 0, `${trainerId}: fresh stats.cheers === 0`);
+                window.localStorage.removeItem(key);
+              }
+
+              window.localStorage.removeItem(STORAGE_KEY);
+              storage.state = storage.load();
+              storage.selectTrainer('violet');
+              storage.chooseStarter(1);
+              app.enterOverworld(false);
+              app.closeDialogue();
+
+              const liveProf = storage.getActiveProfile();
+              const celLayer = document.getElementById('celebration-layer');
+              app.clearCelebration?.();
+              app.openPokedex('team');
+
+              const summaryText = document.querySelector('.dex-summary-bar')?.textContent || '';
+              assert(summaryText.includes('Shards: 0'), `summary bar shows Shards: 0, got "${summaryText}"`);
+              assert(summaryText.includes('Cheers: 0/3'), `summary bar shows Cheers: 0/3, got "${summaryText}"`);
+
+              const upBtn = document.querySelector('.team-card .upgrade-btn');
+              const cheerBtn = document.querySelector('.team-card .cheer-btn');
+              assert(Boolean(upBtn), 'Team card renders .upgrade-btn');
+              assert(Boolean(cheerBtn), 'Team card renders .cheer-btn');
+              assertEqual(upBtn.disabled, true, '.upgrade-btn is disabled at 0 shards');
+              assertEqual(upBtn.getAttribute('aria-disabled'), 'true', '.upgrade-btn aria-disabled="true"');
+              assertEqual(upBtn.textContent, '🔒 Power Up (0/2 ✨)', '.upgrade-btn locked label matches');
+              assertEqual(cheerBtn.disabled, true, '.cheer-btn is disabled at 0 cheers');
+              assertEqual(cheerBtn.getAttribute('aria-disabled'), 'true', '.cheer-btn aria-disabled="true"');
+              assertEqual(cheerBtn.textContent, '🔒 Cheer (0/3 💖 • 25👣)', '.cheer-btn locked label matches');
+
+              upBtn.click();
+              cheerBtn.click();
+              app.pokedex.triggerBuddyCheer(liveProf.team[0]);
+              app.pokedex.triggerPokemonUpgrade(liveProf.team[0]);
+
+              assertEqual(liveProf.team[0].bond, 20, 'locked cheer click mutates 0 Bond');
+              assertEqual(liveProf.team[0].upgradeTier, 0, 'locked upgrade click mutates 0 upgradeTier');
+              assertEqual(liveProf.bag.starShards, 0, 'locked clicks mutate 0 starShards');
+              assertEqual(liveProf.bag.cheerCharges, 0, 'locked clicks mutate 0 cheerCharges');
+              assertEqual(liveProf.stats.cheers, 0, 'locked clicks mutate 0 stats.cheers');
+              assertEqual(liveProf.badges.length, 0, 'locked clicks unlock 0 badges');
+              assertEqual(document.querySelector('.evo-celebration-banner'), null, 'locked clicks render 0 celebration banners');
+              assertEqual(celLayer.hidden, true, 'locked clicks keep #celebration-layer hidden');
+              app.pokedex.close();
+            } finally {
+              app.pokedex.close();
+              app.clearCelebration?.();
+              if (prevRawSave === null) window.localStorage.removeItem(STORAGE_KEY);
+              else window.localStorage.setItem(STORAGE_KEY, prevRawSave);
+              storage.state = storage.load();
+              app.applyTrainerTheme(storage.getActiveTrainerId() || 'violet');
+              app.bootScreenEl.hidden = wasBootHidden;
+              app.starterScreenEl.hidden = wasStarterHidden;
+              app.gameShellEl.hidden = wasShellHidden;
+              app.overworld.setActive(wasOverworldActive);
+              if (!wasOverworldActive) app.audio?.stopBGM?.();
+              if (!wasBootHidden) app.showBootScreen();
+              else app.refreshHud();
+            }
+          },
+        },
+        {
+          name: 'Earned Cheer Charge loop: 25 steps, battle win, wild catch (+1 total), Sky-Hop 120+ pts & strict cap at MAX_CHEER_CHARGES = 3',
+          async fn() {
+            const app = window.__starlightApp;
+            assert(Boolean(app), 'GameApp mounted');
+
+            const TEST_KEY = 'starlight_pokemon_test_s45_earn_v1';
+            const noopAudio = {
+              muted: true,
+              unlock() {},
+              playMenuBlip() {},
+              playBattleStart() {},
+              playAttackHit() {},
+              playHealChime() {},
+              playBallThrow() {},
+              playBallWobble() {},
+              playCatchSuccess() {},
+              playVictoryFanfare() {},
+              playBuddyCheer() {},
+              playBuddyEndure() {},
+              playBadgeFanfare() {},
+              playRunEscape() {},
+              playPokemonCry() {},
+              startBattleBGM() {},
+              startRivalBGM() {},
+              startShrineBGM() {},
+              stopBGM() {},
+              restoreOverworldBGM() {},
+            };
+
+            const origRand = Math.random;
+            let engine = null;
+            let mg = null;
+
+            const prevRawSave = window.localStorage.getItem(STORAGE_KEY);
+            const wasBootHidden = app.bootScreenEl.hidden;
+            const wasStarterHidden = app.starterScreenEl.hidden;
+            const wasShellHidden = app.gameShellEl.hidden;
+            const wasOverworldActive = app.overworld.active;
+            const origPlayBuddyCheer = app.audio.playBuddyCheer.bind(app.audio);
+
+            try {
+              window.localStorage.removeItem(TEST_KEY);
+              const store = new StorageManager(TEST_KEY);
+              store.updateSettings({ battlePace: 'fast' });
+              store.selectTrainer('violet');
+              store.chooseStarter(1);
+              const prof = store.getActiveProfile();
+
+              // 1. 25 walked steps -> +1 💖 (steps 1..24 do not grant)
+              for (let s = 1; s < STEPS_PER_CHEER_CHARGE; s++) {
+                const res = store.updatePosition(8, 15, 'down', true);
+                assertEqual(res.stepCheerEarned, false, `step ${s}/25 does not grant Cheer`);
+                assertEqual(res.stepProgress, s, `step ${s}/25 stepProgress === ${s}`);
+              }
+              const step25 = store.updatePosition(8, 15, 'down', true);
+              assertEqual(step25.stepCheerEarned, true, 'step 25/25 grants +1 💖 Cheer Heart');
+              assertEqual(step25.cheerCharges, 1, 'cheerCharges === 1 after 25 steps');
+              assertEqual(step25.stepProgress, 0, 'stepProgress resets to 0');
+
+              // 2. Battle victory -> +1 💖 (1 -> 2)
+              store.recordBattleWin();
+              assertEqual(prof.bag.cheerCharges, 2, 'recordBattleWin grants +1 💖 (1 -> 2)');
+
+              // 3. Wild catch -> strictly +1 💖 total (reset to 0 first to prove no double +2 with recordBattleWin)
+              prof.bag.cheerCharges = 0;
+              store.save();
+              engine = new BattleEngine({
+                storage: store,
+                audio: noopAudio,
+                onBattleEnd() {},
+                onBadgesUnlocked() {},
+                onHudRefresh() {},
+              });
+              const wildEnemy = createPokemon(16, 4, 'forest');
+              wildEnemy.hp = 1;
+              const startCatchP = engine.start({ enemy: wildEnemy, biomeId: 'forest' });
+              const timer = setInterval(() => engine.finishTypewriter(), 10);
+              try {
+                await startCatchP;
+                Math.random = () => 0.0;
+                await engine.handleThrowBall('pokeball');
+              } finally {
+                clearInterval(timer);
+                Math.random = origRand;
+              }
+              assertEqual(prof.bag.cheerCharges, 1, 'wild catch grants strictly +1 💖 total (0 -> 1, no double-count)');
+              const catchText = document.getElementById('battle-log')?.textContent || '';
+              assert(catchText.includes('Cheer Heart'), `catch text announces Cheer Heart, got "${catchText}"`);
+              engine.destroy();
+              engine = null;
+
+              // 4. Sky-Hop score >= 120 grants +1 💖 (1 -> 2)
+              mg = new StarlightMinigame({ storage: store, audio: noopAudio });
+              mg.score = 120;
+              mg.wave = 2;
+              const skyOut = mg.endRun();
+              assertEqual(skyOut.rewards.cheerCharges, 1, 'Sky-Hop 120 pts awards +1 💖 Cheer Heart');
+              assertEqual(prof.bag.cheerCharges, 2, 'Sky-Hop 120 pts raises cheerCharges 1 -> 2');
+              mg.destroy();
+              mg = null;
+
+              // 5. Strict cap at MAX_CHEER_CHARGES = 3
+              store.recordBattleWin();
+              assertEqual(prof.bag.cheerCharges, 3, 'reached MAX_CHEER_CHARGES = 3');
+              store.recordBattleWin();
+              assertEqual(prof.bag.cheerCharges, 3, 'extra recordBattleWin capped at 3');
+              store.addCheerCharges(5);
+              assertEqual(prof.bag.cheerCharges, 3, 'addCheerCharges(5) capped at 3');
+              for (let s = 1; s <= 30; s++) {
+                const stepCap = store.updatePosition(8, 15, 'down', true);
+                assertEqual(stepCap.stepCheerEarned, false, 'walked steps at 3/3 cap grant 0 extra');
+                assertEqual(stepCap.stepProgress, 0, 'stepProgress stays 0 while at 3/3 cap');
+              }
+              assertEqual(prof.bag.cheerCharges, 3, 'cheerCharges remains 3');
+
+              // 6. Live GameApp onStepSaved step-25 feedback
+              window.localStorage.removeItem(STORAGE_KEY);
+              storage.state = storage.load();
+              storage.selectTrainer('violet');
+              storage.chooseStarter(1);
+              app.enterOverworld(false);
+              app.closeDialogue();
+              let cheerAudioCalls = 0;
+              app.audio.playBuddyCheer = () => {
+                cheerAudioCalls += 1;
+              };
+              for (let s = 1; s <= 25; s++) {
+                app.overworld.onStepSaved(8, 15, 'down', true);
+              }
+              assertEqual(storage.getActiveProfile().bag.cheerCharges, 1, 'live app 25 steps grant +1 💖');
+              assertEqual(cheerAudioCalls, 1, 'live app step 25 triggers playBuddyCheer feedback');
+            } finally {
+              Math.random = origRand;
+              app.audio.playBuddyCheer = origPlayBuddyCheer;
+              engine?.destroy();
+              mg?.destroy();
+              window.localStorage.removeItem(TEST_KEY);
+              if (prevRawSave === null) window.localStorage.removeItem(STORAGE_KEY);
+              else window.localStorage.setItem(STORAGE_KEY, prevRawSave);
+              storage.state = storage.load();
+              app.applyTrainerTheme(storage.getActiveTrainerId() || 'violet');
+              app.bootScreenEl.hidden = wasBootHidden;
+              app.starterScreenEl.hidden = wasStarterHidden;
+              app.gameShellEl.hidden = wasShellHidden;
+              app.overworld.setActive(wasOverworldActive);
+              if (!wasOverworldActive) app.audio?.stopBGM?.();
+              if (!wasBootHidden) app.showBootScreen();
+              else app.refreshHud();
+            }
+          },
+        },
+        {
+          name: 'Max-Bond guard: cheering to Bond 100/100 renders .bond-max-pill (🌟 MAX BOND) and rejects max_bond without consuming a charge',
+          fn() {
+            const app = window.__starlightApp;
+            assert(Boolean(app), 'GameApp mounted');
+
+            const prevRawSave = window.localStorage.getItem(STORAGE_KEY);
+            const wasBootHidden = app.bootScreenEl.hidden;
+            const wasStarterHidden = app.starterScreenEl.hidden;
+            const wasShellHidden = app.gameShellEl.hidden;
+            const wasOverworldActive = app.overworld.active;
+
+            try {
+              window.localStorage.removeItem(STORAGE_KEY);
+              storage.state = storage.load();
+              storage.selectTrainer('violet');
+              const starter = storage.chooseStarter(1);
+              const prof = storage.getActiveProfile();
+              app.enterOverworld(false);
+              app.closeDialogue();
+
+              // 8 cheers from Bond 20 -> 100 in earned batches (3 + 3 + 2)
+              storage.addCheerCharges(3);
+              for (let i = 0; i < 3; i++) {
+                const r = storage.cheerPokemon(starter.uid);
+                assertEqual(r.cheered, true, `cheer batch 1 #${i + 1} succeeded`);
+                assertEqual(r.remainingCheers, 2 - i, 'remainingCheers decrements cleanly');
+              }
+              storage.addCheerCharges(3);
+              for (let i = 0; i < 3; i++) {
+                const r = storage.cheerPokemon(starter.uid);
+                assertEqual(r.cheered, true, `cheer batch 2 #${i + 1} succeeded`);
+              }
+              storage.addCheerCharges(3);
+              for (let i = 0; i < 2; i++) {
+                const r = storage.cheerPokemon(starter.uid);
+                assertEqual(r.cheered, true, `cheer batch 3 #${i + 1} succeeded`);
+              }
+
+              assertEqual(starter.bond, 100, 'starter reached Bond 100/100');
+              assertEqual(prof.stats.cheers, 8, 'stats.cheers === 8');
+              assertEqual(prof.bag.cheerCharges, 1, '1 remaining earned charge left over');
+
+              // Attempt cheer at Bond 100 -> rejected with max_bond, charge preserved
+              const maxRes = storage.cheerPokemon(starter.uid);
+              assertEqual(maxRes.cheered, false, 'cheerPokemon at Bond 100 returns cheered === false');
+              assertEqual(maxRes.reason, 'max_bond', 'reason === max_bond');
+              assertEqual(prof.bag.cheerCharges, 1, 'max_bond rejection does not consume cheerCharge');
+              assertEqual(prof.stats.cheers, 8, 'max_bond rejection does not increment stats.cheers');
+
+              // Pokédex Team renders .bond-max-pill (🌟 MAX BOND) and no .cheer-btn
+              app.openPokedex('team');
+              const maxPill = document.querySelector('.team-card .bond-max-pill');
+              assert(Boolean(maxPill), 'Team card at Bond 100 renders .bond-max-pill');
+              assertEqual(maxPill.textContent, '🌟 MAX BOND', '.bond-max-pill shows 🌟 MAX BOND');
+              assertEqual(document.querySelector('.team-card .cheer-btn'), null, 'Team card at Bond 100 renders no .cheer-btn');
+              app.pokedex.close();
+            } finally {
+              app.pokedex.close();
+              app.clearCelebration?.();
+              if (prevRawSave === null) window.localStorage.removeItem(STORAGE_KEY);
+              else window.localStorage.setItem(STORAGE_KEY, prevRawSave);
+              storage.state = storage.load();
+              app.applyTrainerTheme(storage.getActiveTrainerId() || 'violet');
+              app.bootScreenEl.hidden = wasBootHidden;
+              app.starterScreenEl.hidden = wasStarterHidden;
+              app.gameShellEl.hidden = wasShellHidden;
+              app.overworld.setActive(wasOverworldActive);
+              if (!wasOverworldActive) app.audio?.stopBGM?.();
+              if (!wasBootHidden) app.showBootScreen();
+              else app.refreshHud();
+            }
+          },
+        },
+        {
+          name: 'Full economy validation (Infinity/NaN clamp, unowned/broke upgrade, evo/potion/battle anti-bypass, Sky-Hop <60 vs >=60, Guide/Team 6-viewport responsive check)',
+          async fn() {
+            const app = window.__starlightApp;
+            assert(Boolean(app), 'GameApp mounted');
+
+            const TEST_KEY = 'starlight_pokemon_test_s45_economy_v1';
+            const noopAudio = {
+              muted: true,
+              unlock() {},
+              playMenuBlip() {},
+              playBattleStart() {},
+              playAttackHit() {},
+              playHealChime() {},
+              playBallThrow() {},
+              playBallWobble() {},
+              playCatchSuccess() {},
+              playVictoryFanfare() {},
+              playBuddyCheer() {},
+              playBuddyEndure() {},
+              playBadgeFanfare() {},
+              playRunEscape() {},
+              playPokemonCry() {},
+              playArcadeUnlockFanfare() {},
+              startBattleBGM() {},
+              startRivalBGM() {},
+              startShrineBGM() {},
+              stopBGM() {},
+              restoreOverworldBGM() {},
+            };
+
+            const origRand = Math.random;
+            let engine = null;
+            let mg = null;
+            const prevRawSave = window.localStorage.getItem(STORAGE_KEY);
+
+            try {
+              window.localStorage.removeItem(TEST_KEY);
+              const store = new StorageManager(TEST_KEY);
+              store.updateSettings({ battlePace: 'fast' });
+              store.selectTrainer('violet');
+              const starter = store.chooseStarter(1); // Bulbasaur Lv.5
+              const prof = store.getActiveProfile();
+
+              // 1. Infinity / NaN / -5 / boolean injection rejection
+              store.addStarShards(Infinity);
+              store.addStarShards(-Infinity);
+              store.addStarShards(NaN);
+              store.addStarShards(-5);
+              store.addStarShards(true);
+              assertEqual(prof.bag.starShards, 0, 'Infinity/NaN/-5/boolean addStarShards rejected');
+
+              store.addCheerCharges(Infinity);
+              store.addCheerCharges(NaN);
+              store.addCheerCharges(-5);
+              assertEqual(prof.bag.cheerCharges, 0, 'Infinity/NaN/-5 addCheerCharges rejected');
+
+              store.addGem('thunder_gem', Infinity);
+              store.addGem('thunder_gem', NaN);
+              store.addGem('thunder_gem', -5);
+              assertEqual(prof.bag.gems.thunder_gem, 0, 'Infinity/NaN/-5 addGem rejected');
+
+              store.addRewards({
+                potions: Infinity,
+                greatBalls: -5,
+                starBalls: NaN,
+                starShards: Infinity,
+                cheerCharges: NaN,
+                gems: { sun_gem: Infinity, thunder_gem: -5 },
+              });
+              assertEqual(prof.bag.potions, 5, 'bad addRewards leaves potions unchanged');
+              assertEqual(prof.bag.greatBalls, 3, 'bad addRewards leaves greatBalls unchanged');
+              assertEqual(prof.bag.starBalls, 1, 'bad addRewards leaves starBalls unchanged');
+              assertEqual(prof.bag.starShards, 0, 'bad addRewards leaves starShards 0');
+              assertEqual(prof.bag.cheerCharges, 0, 'bad addRewards leaves cheerCharges 0');
+              assertEqual(prof.bag.gems.sun_gem, 0, 'bad addRewards leaves sun_gem 0');
+
+              const repaired = validateAndRepairProfile({
+                trainerId: 'violet',
+                cheerStepProgress: Infinity,
+                bag: { potions: Infinity, greatBalls: -5, starBalls: NaN, starShards: Infinity, cheerCharges: Infinity, gems: { sun_gem: NaN } },
+              }, 'violet');
+              assertEqual(repaired.cheerStepProgress, 0, 'validateAndRepairProfile clamps cheerStepProgress Infinity -> 0');
+              assertEqual(repaired.bag.starShards, 0, 'validateAndRepairProfile clamps starShards Infinity -> 0');
+              assertEqual(repaired.bag.cheerCharges, 0, 'validateAndRepairProfile clamps cheerCharges Infinity -> 0');
+              assertEqual(repaired.bag.potions, 0, 'validateAndRepairProfile clamps potions Infinity -> 0');
+
+              // 2. upgradePokemon unowned & insufficient shards
+              const unowned = createPokemon(4, 5);
+              const unownedUp = store.upgradePokemon(unowned);
+              assertEqual(unownedUp.upgraded, false, 'upgradePokemon rejects unowned Pokemon instance');
+              assertEqual(unownedUp.reason, 'not_found', 'unowned upgrade reason === not_found');
+              assertEqual(unowned.upgradeTier, 0, 'unowned Pokemon upgradeTier unchanged');
+
+              const brokeUp = store.upgradePokemon(starter.uid);
+              assertEqual(brokeUp.upgraded, false, 'upgradePokemon rejects 0 shards');
+              assertEqual(brokeUp.reason, 'insufficient_shards', 'broke upgrade reason === insufficient_shards');
+
+              // 3. evolvePokemon rejections (under-level, gemless, omitted itemKey, wrong gem)
+              assertEqual(store.evolvePokemon(starter.uid, 2), null, 'rejects under-level Lv.5 Bulbasaur -> Ivysaur');
+              const pika = createPokemon(25, 12);
+              store.recordCaught(pika);
+              assertEqual(store.evolvePokemon(pika.uid, 26, 'thunder_gem'), null, 'rejects gemless thunder_gem evo');
+              assertEqual(store.evolvePokemon(pika.uid, 26), null, 'rejects item evo when itemKey omitted');
+              store.addGem('sun_gem', 1);
+              assertEqual(store.evolvePokemon(pika.uid, 26, 'sun_gem'), null, 'rejects wrong gem sun_gem for Pikachu');
+              assertEqual(prof.bag.gems.sun_gem, 1, 'wrong gem not consumed');
+
+              // 4. healPokemonWithPotion & useItem allowlist
+              const fullHealRes = store.healPokemonWithPotion(starter.uid);
+              assertEqual(fullHealRes.healed, false, 'healPokemonWithPotion rejects full HP');
+              assertEqual(fullHealRes.reason, 'full_hp', 'reason === full_hp');
+              assertEqual(prof.bag.potions, 5, 'full_hp does not consume potion');
+
+              starter.hp = 5;
+              prof.bag.potions = 0;
+              const emptyHealRes = store.healPokemonWithPotion(starter.uid);
+              assertEqual(emptyHealRes.healed, false, 'healPokemonWithPotion rejects 0 potions');
+              assertEqual(emptyHealRes.reason, 'insufficient_potions', 'reason === insufficient_potions');
+
+              prof.bag.potions = 2;
+              const okHealRes = store.healPokemonWithPotion(starter.uid);
+              assertEqual(okHealRes.healed, true, 'healPokemonWithPotion succeeds with damaged mon & 2 potions');
+              assertEqual(okHealRes.remainingPotions, 1, 'potion decremented 2 -> 1');
+              assertGreater(starter.hp, 5, 'HP restored');
+
+              assertEqual(store.useItem('starShards'), false, 'useItem rejects starShards');
+              assertEqual(store.useItem('__proto__'), false, 'useItem rejects __proto__');
+
+              // 5. Sky-Hop < 60 vs 60 vs 120+ & Game Over UI message
+              mg = new StarlightMinigame({ storage: store, audio: noopAudio });
+              for (const low of [0, 59, -5, NaN, Infinity]) {
+                const r = mg.computeRewards(low, 5);
+                assertEqual(r.starShards, 0, `Sky-Hop computeRewards(${low}) starShards === 0`);
+                assertEqual(r.potions, 0, `Sky-Hop computeRewards(${low}) potions === 0`);
+                assertEqual(Boolean(r.cheerCharges), false, `Sky-Hop computeRewards(${low}) cheerCharges === 0`);
+              }
+              const r60 = mg.computeRewards(60, 1);
+              assertEqual(r60.starShards, 1, 'Sky-Hop 60 pts awards 1 starShard');
+              assertEqual(r60.potions, 1, 'Sky-Hop 60 pts awards 1 potion');
+              assertEqual(Boolean(r60.cheerCharges), false, 'Sky-Hop 60 pts awards 0 cheerCharges');
+              const r120 = mg.computeRewards(120, 1);
+              assertEqual(r120.starShards, 2, 'Sky-Hop 120 pts awards 2 starShards');
+              assertEqual(r120.potions, 1, 'Sky-Hop 120 pts awards 1 potion');
+              assertEqual(r120.cheerCharges, 1, 'Sky-Hop 120 pts awards +1 cheerCharge');
+
+              prof.bag.starShards = 0;
+              prof.bag.cheerCharges = 0;
+              mg.open();
+              mg.score = 45;
+              mg.wave = 1;
+              mg.endRun();
+              assertEqual(prof.bag.starShards, 0, 'Sky-Hop 45 pts awards 0 starShards');
+              assertEqual(prof.bag.cheerCharges, 0, 'Sky-Hop 45 pts awards 0 cheerCharges');
+              assert(
+                (document.getElementById('minigame-results-card')?.textContent || '').includes('Score 60+ pts to win Star Shards & prizes!'),
+                'Sky-Hop <60 Game Over shows retry tip',
+              );
+              mg.close();
+              mg.destroy();
+              mg = null;
+
+              // 6. Battle anti-bypass (0 potions / full HP / 0 balls / Run & Faint award 0 Shards & 0 Cheers)
+              prof.bag.potions = 0;
+              prof.bag.greatBalls = 0;
+              prof.bag.starBalls = 0;
+              prof.bag.starShards = 0;
+              prof.bag.cheerCharges = 0;
+              starter.healFull();
+
+              engine = new BattleEngine({
+                storage: store,
+                audio: noopAudio,
+                onBattleEnd() {},
+                onBadgesUnlocked() {},
+                onHudRefresh() {},
+              });
+              const wildRun = createPokemon(16, 4, 'forest');
+              const startRunP = engine.start({ enemy: wildRun, biomeId: 'forest' });
+              let timer = setInterval(() => engine.finishTypewriter(), 10);
+              try {
+                await startRunP;
+                await engine.handleUsePotion();
+                await engine.handleThrowBall('great');
+                await engine.handleThrowBall('star');
+                assertEqual(engine.active, true, '0-potion & 0-ball bypass attempts leave turn unspent');
+                Math.random = () => 0.0;
+                await engine.handleRun();
+              } finally {
+                clearInterval(timer);
+                Math.random = origRand;
+              }
+              assertEqual(prof.bag.starShards, 0, 'escaping awards 0 starShards');
+              assertEqual(prof.bag.cheerCharges, 0, 'escaping awards 0 cheerCharges');
+
+              const wildFaint = createPokemon(16, 4, 'forest');
+              const startFaintP = engine.start({ enemy: wildFaint, biomeId: 'forest' });
+              timer = setInterval(() => engine.finishTypewriter(), 10);
+              try {
+                await startFaintP;
+                starter.hp = 0;
+                await engine.handlePlayerFainted(engine.sessionId);
+              } finally {
+                clearInterval(timer);
+              }
+              assertEqual(prof.bag.starShards, 0, 'fainting awards 0 starShards');
+              assertEqual(prof.bag.cheerCharges, 0, 'fainting awards 0 cheerCharges');
+              engine.destroy();
+              engine = null;
+
+              // 7. Team & Guide responsive check across all 6 viewports
+              const iframe = document.createElement('iframe');
+              iframe.src = './';
+              iframe.title = 'Sprint 11 Economy Responsive Check';
+              iframe.style.cssText = 'position:fixed;left:-12000px;top:0;width:390px;height:844px;border:0;opacity:0.01;pointer-events:none;';
+              document.body.appendChild(iframe);
+              let iframeApp = null;
+              try {
+                await new Promise((resolve, reject) => {
+                  const t = setTimeout(() => reject(new Error('Sprint 11 iframe timeout')), 15000);
+                  iframe.addEventListener('load', () => { clearTimeout(t); resolve(); }, { once: true });
+                });
+                const iWin = iframe.contentWindow;
+                const iDoc = iframe.contentDocument;
+                const dl = performance.now() + 5000;
+                while (!iWin.__starlightApp && performance.now() < dl) {
+                  await new Promise((r) => setTimeout(r, 25));
+                }
+                iframeApp = iWin.__starlightApp;
+                iframeApp.audio?.setMuted?.(true);
+                iWin.localStorage.removeItem(STORAGE_KEY);
+                iframeApp.pokedex.storage.state = iframeApp.pokedex.storage.load();
+                iframeApp.showBootScreen();
+                iDoc.getElementById('trainer-card-violet').click();
+                iDoc.querySelector('.starter-pick-btn').click();
+                iframeApp.closeDialogue();
+
+                for (const [label, w, h] of [
+                  ['Android 390x844', 390, 844],
+                  ['Android 412x915', 412, 915],
+                  ['Short Landscape 667x375', 667, 375],
+                  ['Tablet Portrait 768x1024', 768, 1024],
+                  ['Tablet Landscape 1024x768', 1024, 768],
+                  ['Chromebook 1280x720', 1280, 720],
+                ]) {
+                  iframe.style.width = `${w}px`;
+                  iframe.style.height = `${h}px`;
+                  iWin.dispatchEvent(new iWin.Event('resize'));
+                  for (const tab of ['team', 'guide']) {
+                    iframeApp.openPokedex(tab);
+                    await new Promise((r) => iWin.requestAnimationFrame(() => iWin.requestAnimationFrame(r)));
+                    const body = iDoc.getElementById('pokedex-body');
+                    assert(
+                      body.scrollWidth <= body.clientWidth + 2,
+                      `${label} (${tab}): #pokedex-body overflow (${body.scrollWidth} > ${body.clientWidth})`,
+                    );
+                    if (tab === 'guide') {
+                      const econCard = iDoc.querySelector('.guide-economy-card');
+                      assert(Boolean(econCard), `${label}: .guide-economy-card rendered`);
+                      assert(
+                        econCard.getBoundingClientRect().right <= body.getBoundingClientRect().right + 2,
+                        `${label}: .guide-economy-card fits inside #pokedex-body`,
+                      );
+                    }
+                    iframeApp.pokedex.close();
+                  }
+                }
+              } finally {
+                if (iframeApp) {
+                  try {
+                    iframeApp.overworld?.setActive?.(false);
+                    await iframeApp.audio?.destroy?.();
+                  } catch {
+                    // Ignore teardown
+                  }
+                }
+                iframe.remove();
+              }
+            } finally {
+              Math.random = origRand;
+              engine?.destroy();
+              mg?.destroy();
+              window.localStorage.removeItem(TEST_KEY);
               if (prevRawSave === null) window.localStorage.removeItem(STORAGE_KEY);
               else window.localStorage.setItem(STORAGE_KEY, prevRawSave);
               storage.state = storage.load();

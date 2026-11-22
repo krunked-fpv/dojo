@@ -4,7 +4,7 @@
  *
  * Default mode is strict (exits 1 if any check fails).
  * Pass `--pre-merge` only when dry-running on a pre-reconciliation branch
- * before sprint10/ergonomics merges its manifest.json 1,025 copy & sw.js v10 bump.
+ * before sprint11/ergonomics merges its sw.js v11 cache bump.
  */
 
 import { execFileSync } from 'node:child_process';
@@ -192,11 +192,6 @@ function checkManifestAndIcons(reporter) {
   const has1025Copy = !desc.includes('110 ') && desc.includes('1,025');
   if (has1025Copy) {
     reporter.pass('manifest.json 1,025 description', 'does not contain "110 " and includes "1,025"');
-  } else if (PRE_MERGE) {
-    reporter.warn(
-      'manifest.json 1,025 description (--pre-merge)',
-      'pending sprint10/ergonomics merge onto sprint10/ci-staging',
-    );
   } else {
     reporter.fail('manifest.json 1,025 description', `description="${desc}"`);
   }
@@ -255,32 +250,32 @@ function checkServiceWorkerAndReadme(reporter) {
   const swText = fs.readFileSync(path.join(ROOT_DIR, 'sw.js'), 'utf8');
   const readmeText = fs.readFileSync(path.join(ROOT_DIR, 'README.md'), 'utf8');
 
-  const hasSwV10 = swText.includes('starlight-shell-v10') && swText.includes('starlight-assets-v10');
-  if (hasSwV10) {
-    reporter.pass('sw.js v10 cache constants', 'starlight-shell-v10 & starlight-assets-v10');
+  const hasSwV11 = swText.includes('starlight-shell-v11') && swText.includes('starlight-assets-v11');
+  if (hasSwV11) {
+    reporter.pass('sw.js v11 cache constants', 'starlight-shell-v11 & starlight-assets-v11');
   } else if (PRE_MERGE) {
-    const hasV9 = swText.includes('starlight-shell-v9') && swText.includes('starlight-assets-v9');
-    if (hasV9) {
+    const hasV10 = swText.includes('starlight-shell-v10') && swText.includes('starlight-assets-v10');
+    if (hasV10) {
       reporter.warn(
-        'sw.js v10 cache constants (--pre-merge)',
-        'currently v9; v10 lands when sprint10/ergonomics merges on sprint10/ci-staging',
+        'sw.js v11 cache constants (--pre-merge)',
+        'currently v10; v11 lands when sprint11/ergonomics merges on sprint11/ci-staging',
       );
     } else {
-      reporter.fail('sw.js cache constants', 'neither v10 nor v9 found');
+      reporter.fail('sw.js cache constants', 'neither v11 nor v10 found');
     }
   } else {
-    reporter.fail('sw.js v10 cache constants', 'missing starlight-shell-v10 or starlight-assets-v10');
+    reporter.fail('sw.js v11 cache constants', 'missing starlight-shell-v11 or starlight-assets-v11');
   }
 
-  if (readmeText.includes('starlight-shell-v10')) {
-    reporter.pass('README.md starlight-shell-v10 reference');
-  } else if (PRE_MERGE && readmeText.includes('starlight-shell-v9')) {
+  if (readmeText.includes('starlight-shell-v11')) {
+    reporter.pass('README.md starlight-shell-v11 reference');
+  } else if (PRE_MERGE && readmeText.includes('starlight-shell-v10')) {
     reporter.warn(
-      'README.md starlight-shell-v10 reference (--pre-merge)',
-      'currently v9; v10 lands when sprint10/ergonomics merges on sprint10/ci-staging',
+      'README.md starlight-shell-v11 reference (--pre-merge)',
+      'currently v10; v11 lands when sprint11/ergonomics merges on sprint11/ci-staging',
     );
   } else {
-    reporter.fail('README.md starlight-shell-v10 reference', 'missing starlight-shell-v10');
+    reporter.fail('README.md starlight-shell-v11 reference', 'missing starlight-shell-v11');
   }
 
   const coreUrls = extractCoreShellUrls(swText);
@@ -497,6 +492,135 @@ async function checkGameModules(reporter) {
   );
 }
 
+async function checkEconomyAndCheerInvariants(reporter) {
+  const storageMod = await import(pathToFileURL(path.join(ROOT_DIR, 'js/storage.js')).href);
+  const pokemonMod = await import(pathToFileURL(path.join(ROOT_DIR, 'js/pokemon.js')).href);
+  const minigameMod = await import(pathToFileURL(path.join(ROOT_DIR, 'js/minigame.js')).href);
+
+  const failures = [];
+  const check = (cond, msg) => {
+    if (!cond) failures.push(msg);
+  };
+
+  check(storageMod.MAX_CHEER_CHARGES === 3, `MAX_CHEER_CHARGES=${storageMod.MAX_CHEER_CHARGES} !== 3`);
+  check(storageMod.STEPS_PER_CHEER_CHARGE === 25, `STEPS_PER_CHEER_CHARGE=${storageMod.STEPS_PER_CHEER_CHARGE} !== 25`);
+
+  const store = new storageMod.StorageManager('__ci_static_economy_gate__');
+  store.resetAllProgress();
+  store.selectTrainer('violet');
+  const starter = store.chooseStarter(1); // Bulbasaur Lv.5
+  const profile = store.getActiveProfile();
+
+  check(profile?.bag?.starShards === 0, `fresh starShards=${profile?.bag?.starShards} !== 0`);
+  check(profile?.bag?.cheerCharges === 0, `fresh cheerCharges=${profile?.bag?.cheerCharges} !== 0`);
+  check(profile?.cheerStepProgress === 0, `fresh cheerStepProgress=${profile?.cheerStepProgress} !== 0`);
+  check(profile?.stats?.cheers === 0, `fresh stats.cheers=${profile?.stats?.cheers} !== 0`);
+
+  // Non-finite / negative / boolean currency rejection
+  store.addStarShards(Infinity);
+  store.addStarShards(-Infinity);
+  store.addStarShards(NaN);
+  store.addStarShards(-5);
+  store.addStarShards(true);
+  check(profile.bag.starShards === 0, `non-finite addStarShards mutated shards=${profile.bag.starShards}`);
+
+  store.addRewards({
+    potions: Infinity,
+    greatBalls: NaN,
+    starBalls: -3,
+    starShards: Infinity,
+    cheerCharges: Infinity,
+    gems: { sun_gem: Infinity, thunder_gem: NaN },
+  });
+  check(profile.bag.potions === 5, `non-finite addRewards mutated potions=${profile.bag.potions}`);
+  check(profile.bag.starShards === 0, `non-finite addRewards mutated shards=${profile.bag.starShards}`);
+  check(profile.bag.cheerCharges === 0, `non-finite addRewards mutated cheers=${profile.bag.cheerCharges}`);
+  check(profile.bag.gems.sun_gem === 0 && profile.bag.gems.thunder_gem === 0, 'non-finite addRewards mutated gems');
+
+  const repaired = storageMod.validateAndRepairProfile({
+    trainerId: 'violet',
+    bag: { potions: Infinity, greatBalls: -2, starBalls: NaN, starShards: Infinity, cheerCharges: Infinity, gems: { sun_gem: Infinity } },
+    cheerStepProgress: Infinity,
+  }, 'violet');
+  check(
+    repaired.bag.potions === 0
+      && repaired.bag.greatBalls === 0
+      && repaired.bag.starBalls === 0
+      && repaired.bag.starShards === 0
+      && repaired.bag.cheerCharges === 0
+      && repaired.bag.gems.sun_gem === 0
+      && repaired.cheerStepProgress === 0,
+    'validateAndRepairProfile failed to clamp Infinity/NaN/negatives to 0',
+  );
+
+  // cheerPokemon zero-charge & max-bond guards
+  const zeroCheerRes = store.cheerPokemon(starter.uid);
+  check(
+    zeroCheerRes?.cheered === false && zeroCheerRes?.reason === 'insufficient_cheers',
+    `expected insufficient_cheers, got ${JSON.stringify(zeroCheerRes)}`,
+  );
+  check(starter.bond === 20, `zero-charge cheer mutated bond to ${starter.bond}`);
+
+  store.addCheerCharges(2);
+  starter.bond = 100;
+  const maxBondRes = store.cheerPokemon(starter.uid);
+  check(
+    maxBondRes?.cheered === false && maxBondRes?.reason === 'max_bond' && profile.bag.cheerCharges === 2,
+    `max_bond guard failed (${JSON.stringify(maxBondRes)}, cheers=${profile.bag.cheerCharges})`,
+  );
+
+  // upgradePokemon unowned & insufficient shards guards
+  const unowned = pokemonMod.createPokemon(4, 5);
+  const unownedUp = store.upgradePokemon(unowned);
+  check(unownedUp?.upgraded === false && unownedUp?.reason === 'not_found', 'upgradePokemon accepted unowned mon');
+  const brokeUp = store.upgradePokemon(starter.uid);
+  check(brokeUp?.upgraded === false && brokeUp?.reason === 'insufficient_shards', 'upgradePokemon accepted 0 shards');
+
+  // evolvePokemon invalid, under-level, and gemless guards
+  const underLevelEvo = store.evolvePokemon(starter.uid, 2);
+  const wrongTargetEvo = store.evolvePokemon(starter.uid, 25);
+  const pika = pokemonMod.createPokemon(25, 10);
+  store.recordCaught(pika);
+  const gemlessItemEvo = store.evolvePokemon(pika.uid, 26, 'thunder_gem');
+  const omittedItemEvo = store.evolvePokemon(pika.uid, 26);
+  const wrongGemEvo = store.evolvePokemon(pika.uid, 26, 'sun_gem');
+  check(
+    underLevelEvo === null
+      && wrongTargetEvo === null
+      && gemlessItemEvo === null
+      && omittedItemEvo === null
+      && wrongGemEvo === null,
+    'evolvePokemon failed to reject invalid/gemless/under-level evolutions',
+  );
+
+  // StarlightMinigame.computeRewards <60 & non-finite guard
+  const mg = new minigameMod.StarlightMinigame({ storage: store, audio: null });
+  for (const badScore of [0, 59, -10, NaN, Infinity]) {
+    const r = mg.computeRewards(badScore, 5);
+    check(
+      r.starShards === 0 && r.potions === 0 && !r.greatBalls && !r.starBalls && !r.cheerCharges && !r.gems,
+      `computeRewards(${badScore}) leaked rewards: ${JSON.stringify(r)}`,
+    );
+  }
+  const r60 = mg.computeRewards(60, 1);
+  const r120 = mg.computeRewards(120, 1);
+  check(r60.starShards === 1 && r60.potions === 1 && !r60.cheerCharges, `computeRewards(60) unexpected: ${JSON.stringify(r60)}`);
+  check(r120.starShards === 2 && r120.potions === 1 && r120.cheerCharges === 1, `computeRewards(120) unexpected: ${JSON.stringify(r120)}`);
+
+  // pokedex.js zero unguarded gainBond cheer fallbacks
+  const pokedexText = fs.readFileSync(path.join(ROOT_DIR, 'js/pokedex.js'), 'utf8');
+  const hasUnguardedGainBond = /\.gainBond\s*\(/.test(pokedexText);
+  check(!hasUnguardedGainBond, 'js/pokedex.js contains unguarded gainBond call');
+
+  reporter.assert(
+    failures.length === 0,
+    'Economy & Buddy Cheer invariants',
+    failures.length === 0
+      ? 'MAX_CHEER_CHARGES=3, STEPS_PER_CHEER_CHARGE=25, 0-start bag, Infinity/NaN rejected, Cheer/Evo/Minigame guards enforced, 0 gainBond fallbacks in pokedex.js'
+      : failures.join(' | '),
+  );
+}
+
 async function main() {
   console.log(`=== Pokémon: Starlight Island — Static CI Gate (${PRE_MERGE ? 'pre-merge' : 'strict'}) ===`);
   const reporter = createReporter();
@@ -507,6 +631,7 @@ async function main() {
   checkServiceWorkerAndReadme(reporter);
   checkIndexHtml(reporter);
   await checkGameModules(reporter);
+  await checkEconomyAndCheerInvariants(reporter);
 
   const { passed, failed, total, warnings } = reporter.summary();
   console.log(`=== Static Gate Result: ${passed}/${total} passed, ${failed} failed, ${warnings} warnings ===`);
