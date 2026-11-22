@@ -253,7 +253,11 @@
 /* --- Secret Starlight Sky-Hop Mini-Game (#minigame-modal) --- */
 .minigame-backdrop {
   z-index: 62;
-  padding: clamp(6px, 1.5vw, 14px);
+  padding:
+    calc(clamp(6px, 1.5vw, 14px) + env(safe-area-inset-top, 0px))
+    calc(clamp(6px, 1.5vw, 14px) + env(safe-area-inset-right, 0px))
+    calc(clamp(6px, 1.5vw, 14px) + env(safe-area-inset-bottom, 0px))
+    calc(clamp(6px, 1.5vw, 14px) + env(safe-area-inset-left, 0px));
 }
 
 .minigame-card {
@@ -269,6 +273,31 @@
 
 .minigame-header {
   background: linear-gradient(90deg, #0f172a, #1e1b4b);
+}
+
+.minigame-header-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.minigame-pause-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.92rem;
+}
+
+.minigame-pause-btn.is-paused {
+  border-color: #fde047;
+  background: linear-gradient(135deg, #0284c7, #7c3aed);
+  box-shadow: 0 0 12px rgba(250, 204, 21, 0.55);
+}
+
+.minigame-pause-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
 }
 
 .minigame-title-wrap {
@@ -341,7 +370,11 @@
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 10px 14px calc(10px + env(safe-area-inset-bottom, 0px));
+  padding:
+    10px
+    calc(14px + env(safe-area-inset-right, 0px))
+    calc(10px + env(safe-area-inset-bottom, 0px))
+    calc(14px + env(safe-area-inset-left, 0px));
   background: #0f172a;
   border-top: 1px solid rgba(255, 255, 255, 0.12);
   touch-action: manipulation;
@@ -476,7 +509,11 @@
     padding: 2px 7px;
   }
   .minigame-controls {
-    padding: 8px 10px;
+    padding:
+      8px
+      calc(10px + env(safe-area-inset-right, 0px))
+      calc(8px + env(safe-area-inset-bottom, 0px))
+      calc(10px + env(safe-area-inset-left, 0px));
     gap: 8px;
   }
   .minigame-controls-hint {
@@ -490,10 +527,15 @@
 
 @media (max-height: 540px) {
   .minigame-card {
+    height: 98%;
     max-height: 98%;
   }
   .minigame-header {
     padding: 5px 10px;
+  }
+  .minigame-header .close-btn {
+    width: 30px;
+    height: 30px;
   }
   .minigame-header .modal-title {
     font-size: 0.92rem;
@@ -516,7 +558,11 @@
     max-height: 100%;
   }
   .minigame-controls {
-    padding: 5px 10px calc(5px + env(safe-area-inset-bottom, 0px));
+    padding:
+      5px
+      calc(10px + env(safe-area-inset-right, 0px))
+      calc(5px + env(safe-area-inset-bottom, 0px))
+      calc(10px + env(safe-area-inset-left, 0px));
   }
   .minigame-dash-btn {
     padding: 6px 14px;
@@ -532,6 +578,26 @@
 }
 
 /* Keep 6-button Battle Actions in 2 compact rows across Chromebook & tablet viewports */
+.battle-deck {
+  padding-bottom: calc(11px + env(safe-area-inset-bottom, 0px));
+}
+
+@media (min-width: 640px) {
+  .battle-deck {
+    padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+  }
+}
+
+@media (max-width: 560px) {
+  .battle-deck {
+    padding:
+      7px
+      calc(9px + env(safe-area-inset-right, 0px))
+      calc(8px + env(safe-area-inset-bottom, 0px))
+      calc(9px + env(safe-area-inset-left, 0px));
+  }
+}
+
 #battle-actions.battle-actions {
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 5px;
@@ -553,7 +619,11 @@
 
 @media (max-height: 640px) {
   .battle-deck {
-    padding: 7px 10px 8px;
+    padding:
+      7px
+      calc(10px + env(safe-area-inset-right, 0px))
+      calc(8px + env(safe-area-inset-bottom, 0px))
+      calc(10px + env(safe-area-inset-left, 0px));
     gap: 6px;
   }
   .battle-log {
@@ -571,7 +641,11 @@
     min-height: 120px;
   }
   .battle-deck {
-    padding: 5px 8px 6px;
+    padding:
+      5px
+      calc(8px + env(safe-area-inset-right, 0px))
+      calc(6px + env(safe-area-inset-bottom, 0px))
+      calc(8px + env(safe-area-inset-left, 0px));
     gap: 6px;
   }
   .battle-deck-left {

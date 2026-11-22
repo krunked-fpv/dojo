@@ -1193,6 +1193,7 @@ export class PokedexUI {
       }
 
       renderDetailOnly();
+      grid.scrollTop = 0;
     };
 
     for (const pill of pillButtons) {

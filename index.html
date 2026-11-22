@@ -241,14 +241,17 @@
     </div>
 
     <!-- Secret Mini-Game Modal: Starlight Sky-Hop Arcade -->
-    <div id="minigame-modal" class="modal-backdrop minigame-backdrop" hidden>
-      <div class="modal-card minigame-card" role="dialog" aria-modal="true" aria-label="Starlight Sky-Hop Arcade">
+    <div id="minigame-modal" class="modal-backdrop minigame-backdrop" role="dialog" aria-modal="true" aria-label="Starlight Sky-Hop Arcade" hidden>
+      <div class="modal-card minigame-card">
         <div class="modal-header minigame-header">
           <div class="minigame-title-wrap">
             <h2 class="modal-title">🕹️ Starlight Sky-Hop Arcade</h2>
             <span id="minigame-partner-pill" class="minigame-partner-pill">⚡ Partner Flight</span>
           </div>
-          <button id="minigame-close-btn" type="button" class="close-btn" aria-label="Close Arcade">✕</button>
+          <div class="minigame-header-actions">
+            <button id="minigame-pause-btn" type="button" class="close-btn minigame-pause-btn" aria-label="Pause Arcade" aria-pressed="false">⏸️</button>
+            <button id="minigame-close-btn" type="button" class="close-btn" aria-label="Close Arcade">✕</button>
+          </div>
         </div>
 
         <div class="minigame-hud">
@@ -278,8 +281,8 @@
     </div>
 
     <!-- Pokédex / Team / Badges Modal -->
-    <div id="pokedex-modal" class="modal-backdrop" hidden>
-      <div class="modal-card modal-wide" role="dialog" aria-modal="true" aria-label="Pokédex and Team Hub">
+    <div id="pokedex-modal" class="modal-backdrop" role="dialog" aria-modal="true" aria-label="Pokédex and Team Hub" hidden>
+      <div class="modal-card modal-wide">
         <div class="modal-header">
           <div class="modal-tabs">
             <button id="pokedex-tab-dex" type="button" class="tab-btn is-active">📖 Pokédex</button>
@@ -295,8 +298,8 @@
     </div>
 
     <!-- Settings & Parent Reset Modal -->
-    <div id="settings-modal" class="modal-backdrop" hidden>
-      <div class="modal-card modal-settings" role="dialog" aria-modal="true" aria-label="Game Settings">
+    <div id="settings-modal" class="modal-backdrop" role="dialog" aria-modal="true" aria-label="Game Settings" hidden>
+      <div class="modal-card modal-settings">
         <div class="modal-header">
           <h2 class="modal-title">⚙️ Game Settings</h2>
           <button id="settings-close-btn" type="button" class="close-btn" aria-label="Close">✕</button>

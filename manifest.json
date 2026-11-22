@@ -1,7 +1,7 @@
 {
   "name": "Pokémon: Starlight Island — Violet & Ozias Edition",
   "short_name": "Starlight",
-  "description": "Explore Starlight Island with Violet & Ozias—befriend, battle, and evolve 110 Pokémon in a cozy retro handheld RPG!",
+  "description": "Explore Starlight Island with Violet & Ozias—befriend, battle, and evolve all 1,025 Pokémon across 18 biomes in a cozy retro handheld RPG!",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
