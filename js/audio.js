@@ -1101,7 +1101,7 @@ export class AudioEngine {
       this.unlocked = false;
       this._wakeBufferPlayed = false;
       this._unlockPromise = null;
-      if (this.schedulerTimer !== null) {
+      if (this.schedulerTimer !== null || this.activeBgmNodes.size > 0) {
         this.bgmGeneration += 1;
         this.stopScheduler();
         this._haltActiveBgmNodes();
@@ -1156,7 +1156,7 @@ export class AudioEngine {
   _queuePendingVoice(kind, opts) {
     const nowMs = typeof performance !== 'undefined' ? performance.now() : Date.now();
     this._pendingVoices = this._pendingVoices.filter((entry) => nowMs - entry.createdAt <= 400);
-    while (this._pendingVoices.length >= 8) {
+    while (this._pendingVoices.length >= 24) {
       this._pendingVoices.shift();
     }
     this._pendingVoices.push({ kind, opts, createdAt: nowMs });
@@ -1380,6 +1380,13 @@ export class AudioEngine {
       } catch {
         // Ignore
       }
+      if (entry.extra) {
+        try {
+          entry.extra.disconnect();
+        } catch {
+          // Ignore
+        }
+      }
     }
     this.activeBgmNodes.clear();
 
@@ -1424,8 +1431,8 @@ export class AudioEngine {
     return this.muted;
   }
 
-  _trackBgmNode(source, gainNode) {
-    const entry = { source, gain: gainNode };
+  _trackBgmNode(source, gainNode, extraNode = null) {
+    const entry = { source, gain: gainNode, extra: extraNode };
     this.activeBgmNodes.add(entry);
     source.onended = () => {
       this.activeBgmNodes.delete(entry);
@@ -1433,6 +1440,13 @@ export class AudioEngine {
         source.disconnect();
       } catch {
         // Ignore
+      }
+      if (extraNode) {
+        try {
+          extraNode.disconnect();
+        } catch {
+          // Ignore
+        }
       }
       try {
         gainNode.disconnect();
@@ -1489,12 +1503,22 @@ export class AudioEngine {
       return null;
     }
 
-    const dur = Math.max(0.025, duration);
-    const start = startTime !== null ? startTime : ctx.currentTime + Math.max(0, delay);
-    const atk = Math.min(dur * 0.45, Math.max(0.002, attack));
-    const decEnd = Math.min(dur * 0.82, atk + Math.max(0.008, decay));
-    const peakGain = Math.max(0.001, gain);
-    const sustainGain = Math.max(0.0001, peakGain * Math.max(0.04, Math.min(0.95, sustain)));
+    const rawDur = Number(duration);
+    const dur = Math.max(0.025, Number.isFinite(rawDur) ? rawDur : 0.14);
+    const rawDelay = Number(delay);
+    const safeDelay = Number.isFinite(rawDelay) ? Math.max(0, rawDelay) : 0;
+    const start = startTime !== null && Number.isFinite(Number(startTime))
+      ? Number(startTime)
+      : ctx.currentTime + safeDelay;
+    const rawAtk = Number(attack);
+    const atk = Math.min(dur * 0.45, Math.max(0.002, Number.isFinite(rawAtk) ? rawAtk : 0.006));
+    const rawDec = Number(decay);
+    const decEnd = Math.min(dur * 0.82, atk + Math.max(0.008, Number.isFinite(rawDec) ? rawDec : 0.045));
+    const rawGain = Number(gain);
+    const peakGain = Math.max(0.001, Number.isFinite(rawGain) ? rawGain : 0.12);
+    const rawSustain = Number(sustain);
+    const safeSustain = Number.isFinite(rawSustain) ? rawSustain : 0.36;
+    const sustainGain = Math.max(0.0001, peakGain * Math.max(0.04, Math.min(0.95, safeSustain)));
 
     const osc = ctx.createOscillator();
     const env = ctx.createGain();
@@ -1507,13 +1531,14 @@ export class AudioEngine {
       osc.type = wave === 'pulse12' || wave === 'pulse25' ? 'square' : wave;
     }
 
-    const startHz = Math.max(20, freq);
+    const safeFreq = Number.isFinite(Number(freq)) ? Number(freq) : 440;
+    const startHz = Math.max(20, safeFreq);
     osc.frequency.setValueAtTime(startHz, start);
-    if (midFreq !== null) {
-      osc.frequency.exponentialRampToValueAtTime(Math.max(20, midFreq), start + dur * 0.45);
+    if (midFreq !== null && Number.isFinite(Number(midFreq))) {
+      osc.frequency.exponentialRampToValueAtTime(Math.max(20, Number(midFreq)), start + dur * 0.45);
     }
-    if (endFreq !== null && endFreq !== freq) {
-      osc.frequency.exponentialRampToValueAtTime(Math.max(20, endFreq), start + dur);
+    if (endFreq !== null && Number.isFinite(Number(endFreq)) && Number(endFreq) !== safeFreq) {
+      osc.frequency.exponentialRampToValueAtTime(Math.max(20, Number(endFreq)), start + dur);
     }
 
     env.gain.setValueAtTime(0.0001, start);
@@ -1594,31 +1619,41 @@ export class AudioEngine {
     }
     if (!this.noiseBuffer) return null;
 
-    const dur = Math.max(0.02, duration);
-    const start = startTime !== null ? startTime : ctx.currentTime + Math.max(0, delay);
-    const atk = Math.min(dur * 0.35, Math.max(0.002, attack));
+    const rawDur = Number(duration);
+    const dur = Math.max(0.02, Number.isFinite(rawDur) ? rawDur : 0.14);
+    const rawDelay = Number(delay);
+    const safeDelay = Number.isFinite(rawDelay) ? Math.max(0, rawDelay) : 0;
+    const start = startTime !== null && Number.isFinite(Number(startTime))
+      ? Number(startTime)
+      : ctx.currentTime + safeDelay;
+    const rawAtk = Number(attack);
+    const atk = Math.min(dur * 0.35, Math.max(0.002, Number.isFinite(rawAtk) ? rawAtk : 0.003));
+    const safeStartFreq = Number.isFinite(Number(startFreq)) ? Math.max(30, Number(startFreq)) : 820;
+    const safeEndFreq = Number.isFinite(Number(endFreq)) ? Math.max(30, Number(endFreq)) : 180;
+    const safeGain = Number.isFinite(Number(gain)) ? Math.max(0.001, Number(gain)) : 0.18;
+    const safeQ = Number.isFinite(Number(q)) ? Math.max(0.1, Number(q)) : 0.9;
 
     const src = ctx.createBufferSource();
     src.buffer = this.noiseBuffer;
 
     const filter = ctx.createBiquadFilter();
     filter.type = filterType;
-    filter.Q.value = q;
-    filter.frequency.setValueAtTime(Math.max(30, startFreq), start);
-    if (endFreq !== startFreq) {
-      filter.frequency.exponentialRampToValueAtTime(Math.max(30, endFreq), start + dur);
+    filter.Q.value = safeQ;
+    filter.frequency.setValueAtTime(safeStartFreq, start);
+    if (safeEndFreq !== safeStartFreq) {
+      filter.frequency.exponentialRampToValueAtTime(safeEndFreq, start + dur);
     }
 
     const env = ctx.createGain();
     env.gain.setValueAtTime(0.0001, start);
-    env.gain.linearRampToValueAtTime(Math.max(0.001, gain), start + atk);
+    env.gain.linearRampToValueAtTime(safeGain, start + atk);
     env.gain.exponentialRampToValueAtTime(0.0001, start + dur);
 
     src.connect(filter);
     filter.connect(env);
     env.connect(dest);
     if (trackBgm) {
-      this._trackBgmNode(src, env);
+      this._trackBgmNode(src, env, filter);
     } else {
       src.onended = () => {
         try {
@@ -3851,6 +3886,102 @@ export class AudioEngine {
       q: 0.7,
       attack: 0.002,
     });
+  }
+
+  /**
+   * Procedural Starlight Warp Teleport cue (`'depart' | 'arrive' | 'full'`).
+   * Schedules purely via Web Audio (`triggerVoice` + `playNoise`) with zero timers or leaked nodes.
+   */
+  playWarpTeleport(options = {}) {
+    const rawPhase = options && typeof options === 'object' ? options.phase : undefined;
+    const normPhase = typeof rawPhase === 'string' ? rawPhase.trim().toLowerCase() : '';
+    const phase = normPhase === 'depart' || normPhase === 'arrive' || normPhase === 'full'
+      ? normPhase
+      : 'full';
+
+    if (this.muted) {
+      return { played: false, muted: true, phase };
+    }
+
+    let firstVoice = null;
+    const captureFirst = (voice) => {
+      if (!firstVoice && voice) {
+        firstVoice = voice;
+      }
+    };
+
+    if (phase === 'depart' || phase === 'full') {
+      // Shimmering ascending Starlight arpeggio + gentle upward bandpass whoosh
+      const departArp = [E4, G4, B4, D5, Fs5, A5, B5];
+      departArp.forEach((freq, i) => {
+        const isPulse = i % 2 === 0;
+        captureFirst(this.triggerVoice({
+          freq,
+          endFreq: freq * 1.018,
+          wave: isPulse ? 'pulse12' : 'sine',
+          duration: 0.095 + i * 0.006,
+          attack: 0.003,
+          decay: 0.028,
+          sustain: 0.42,
+          gain: isPulse ? 0.068 : 0.074,
+          delay: i * 0.025,
+        }));
+      });
+
+      this.playNoise({
+        duration: 0.2,
+        gain: 0.085,
+        filterType: 'bandpass',
+        startFreq: 360,
+        endFreq: 1650,
+        q: 1.5,
+        attack: 0.012,
+        delay: 0,
+      });
+    }
+
+    if (phase === 'arrive' || phase === 'full') {
+      // Warm landing celestial chord chime + soft sparkle high-bell harmonic
+      const arriveDelay = phase === 'full' ? 0.18 : 0;
+      const arriveChord = [
+        { freq: G4, wave: 'triangle', duration: 0.28, gain: 0.084, offset: 0 },
+        { freq: B4, wave: 'sine', duration: 0.28, gain: 0.072, offset: 0.014 },
+        { freq: D5, wave: 'triangle', duration: 0.3, gain: 0.068, offset: 0.028 },
+        { freq: G5, wave: 'sine', duration: 0.34, gain: 0.08, offset: 0.042 },
+      ];
+      arriveChord.forEach(({ freq, wave, duration, gain, offset }) => {
+        captureFirst(this.triggerVoice({
+          freq,
+          endFreq: freq * 1.008,
+          wave,
+          duration,
+          attack: 0.005,
+          decay: 0.065,
+          sustain: 0.54,
+          gain,
+          delay: arriveDelay + offset,
+        }));
+      });
+
+      // Soft sparkle high-bell harmonic (zero ear-piercing harshness)
+      this.triggerVoice({
+        freq: D6,
+        endFreq: D6 * 1.012,
+        wave: 'sine',
+        duration: 0.26,
+        attack: 0.004,
+        decay: 0.06,
+        sustain: 0.42,
+        gain: 0.048,
+        delay: arriveDelay + 0.065,
+      });
+    }
+
+    return {
+      played: Boolean(firstVoice),
+      muted: false,
+      phase,
+    };
   }
 
   _playSprint6MoveSfx(moveId) {
