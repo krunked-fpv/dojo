@@ -8,6 +8,7 @@ import {
   LANDMARKS,
   NPCS,
   RIVAL_TRAINERS,
+  SECRET_ARCADE_SPOT,
   SHRINES,
   SIGNPOSTS,
   TILE,
@@ -16,6 +17,7 @@ import {
   WORLD_ROWS,
   findNearestSafePosition,
   getBiomeAt,
+  getTileDepthInfo,
   isTileWalkableAt,
 } from './world-data.js';
 
@@ -208,6 +210,25 @@ const DIR_VEC = {
   down: { dx: 0, dy: 1 },
   left: { dx: -1, dy: 0 },
   right: { dx: 1, dy: 0 },
+};
+
+const CARDINAL_STEPS = [
+  ['up', 0, -1],
+  ['down', 0, 1],
+  ['left', -1, 0],
+  ['right', 1, 0],
+];
+
+const DISCOVERY_NODE_KINDS = ['shimmer', 'starfall', 'mystery_cry'];
+
+const CELEBRATION_PALETTES = {
+  gold: ['#fde047', '#facc15', '#fef08a', '#fb923c', '#ffffff'],
+  starlight: ['#67e8f9', '#c084fc', '#fde047', '#f472b6', '#ffffff'],
+  cosmic: ['#67e8f9', '#c084fc', '#fde047', '#f472b6', '#ffffff'],
+  emerald: ['#4ade80', '#fde047', '#38bdf8', '#a7f3d0', '#ffffff'],
+  quest: ['#4ade80', '#fde047', '#38bdf8', '#a7f3d0', '#ffffff'],
+  heal: ['#f472b6', '#fbcfe8', '#67e8f9', '#fde047', '#ffffff'],
+  pink: ['#f472b6', '#fbcfe8', '#67e8f9', '#fde047', '#ffffff'],
 };
 
 function hash2d(x, y) {
@@ -471,6 +492,7 @@ export class OverworldEngine {
     getProfile,
     onStepSaved,
     onWildEncounter,
+    onDiscoveryNode = null,
     onInteract,
     onHealSpot,
     onBiomeChange,
@@ -485,6 +507,7 @@ export class OverworldEngine {
     this.getProfile = getProfile;
     this.onStepSaved = onStepSaved;
     this.onWildEncounter = onWildEncounter;
+    this.onDiscoveryNode = onDiscoveryNode;
     this.onInteract = onInteract;
     this.onHealSpot = onHealSpot;
     this.onBiomeChange = onBiomeChange;
@@ -505,6 +528,15 @@ export class OverworldEngine {
     this.encounterTileStreak = 0;
     this.currentBiomeId = null;
     this.lastHintKey = null;
+
+    this.autoPath = [];
+    this.autoInteractTarget = null;
+    this.touchDestination = null;
+    this.touchSteerActive = false;
+    this.touchSteerDir = null;
+    this._pointerState = null;
+    this._holdTimer = null;
+    this._lastNodeKind = null;
 
     this.followerTrainerId = null;
     this.followerUid = null;
@@ -541,6 +573,8 @@ export class OverworldEngine {
       this._resizeObserver = new ResizeObserver(() => this.syncViewportSize());
       this._resizeObserver.observe(this.canvas.parentElement);
     }
+
+    this._bindCanvasPointerEvents();
   }
 
   syncViewportSize() {
@@ -706,8 +740,421 @@ export class OverworldEngine {
     };
   }
 
+  _bindCanvasPointerEvents() {
+    if (!this.canvas || typeof this.canvas.addEventListener !== 'function') return;
+    this._onPointerDown = (e) => this._handlePointerDown(e);
+    this._onPointerMove = (e) => this._handlePointerMove(e);
+    this._onPointerUp = (e) => this._handlePointerUp(e);
+    this._onPointerCancel = (e) => this._handlePointerCancel(e);
+    this._onContextMenu = (e) => {
+      if (this.active) e.preventDefault?.();
+    };
+
+    this.canvas.addEventListener('pointerdown', this._onPointerDown);
+    this.canvas.addEventListener('pointermove', this._onPointerMove);
+    this.canvas.addEventListener('pointerup', this._onPointerUp);
+    this.canvas.addEventListener('pointercancel', this._onPointerCancel);
+    this.canvas.addEventListener('lostpointercapture', this._onPointerCancel);
+    this.canvas.addEventListener('contextmenu', this._onContextMenu);
+  }
+
+  destroy() {
+    this.clearTouchNavigation();
+    this._resizeObserver?.disconnect?.();
+    if (!this.canvas || typeof this.canvas.removeEventListener !== 'function') return;
+    if (this._onPointerDown) this.canvas.removeEventListener('pointerdown', this._onPointerDown);
+    if (this._onPointerMove) this.canvas.removeEventListener('pointermove', this._onPointerMove);
+    if (this._onPointerUp) this.canvas.removeEventListener('pointerup', this._onPointerUp);
+    if (this._onPointerCancel) {
+      this.canvas.removeEventListener('pointercancel', this._onPointerCancel);
+      this.canvas.removeEventListener('lostpointercapture', this._onPointerCancel);
+    }
+    if (this._onContextMenu) this.canvas.removeEventListener('contextmenu', this._onContextMenu);
+  }
+
+  _clearHoldTimer() {
+    if (this._holdTimer !== null) {
+      clearTimeout(this._holdTimer);
+      this._holdTimer = null;
+    }
+  }
+
+  _clearPointerSteering() {
+    this._clearHoldTimer();
+    this._pointerState = null;
+    this.touchSteerActive = false;
+    this.touchSteerDir = null;
+  }
+
+  clearTouchNavigation() {
+    this._clearPointerSteering();
+    this.autoPath = [];
+    this.autoInteractTarget = null;
+    this.touchDestination = null;
+  }
+
+  getTouchNavigationState() {
+    return {
+      autoPathLength: this.autoPath.length,
+      autoPath: [...this.autoPath],
+      touchDestination: this.touchDestination ? { ...this.touchDestination } : null,
+      autoInteractTarget: this.autoInteractTarget ? { ...this.autoInteractTarget } : null,
+      touchSteerActive: this.touchSteerActive,
+      touchSteerDir: this.touchSteerDir,
+    };
+  }
+
+  _getCameraPosition(profile) {
+    const baseX = profile?.pos?.x ?? (GAME_META.spawn?.x ?? 8);
+    const baseY = profile?.pos?.y ?? (GAME_META.spawn?.y ?? 15);
+    const px = this.moving
+      ? this.moveStartX + (this.moveTargetX - this.moveStartX) * this.moveProgress
+      : baseX;
+    const py = this.moving
+      ? this.moveStartY + (this.moveTargetY - this.moveStartY) * this.moveProgress
+      : baseY;
+
+    const maxCamX = Math.max(0, WORLD_COLS * this.tileSize - this.viewW);
+    const maxCamY = Math.max(0, WORLD_ROWS * this.tileSize - this.viewH);
+    const camX = Math.max(0, Math.min(maxCamX, Math.round(px * this.tileSize - this.viewW / 2 + 16)));
+    const camY = Math.max(0, Math.min(maxCamY, Math.round(py * this.tileSize - this.viewH / 2 + 16)));
+    return { px, py, camX, camY };
+  }
+
+  screenToWorldTile(clientX, clientY) {
+    const rect = this.canvas?.getBoundingClientRect?.() || { left: 0, top: 0, width: 0, height: 0 };
+    let canvasX = this.viewW / 2;
+    let canvasY = this.viewH / 2;
+
+    if (rect.width > 0 && rect.height > 0) {
+      const safeClientX = Number.isFinite(Number(clientX)) ? Number(clientX) : rect.left + rect.width / 2;
+      const safeClientY = Number.isFinite(Number(clientY)) ? Number(clientY) : rect.top + rect.height / 2;
+      const scale = Math.max(rect.width / this.viewW, rect.height / this.viewH);
+      const offsetX = (rect.width - this.viewW * scale) / 2;
+      const offsetY = (rect.height - this.viewH * scale) / 2;
+      canvasX = (safeClientX - rect.left - offsetX) / scale;
+      canvasY = (safeClientY - rect.top - offsetY) / scale;
+    }
+
+    const profile = this.getProfile?.();
+    const { camX, camY } = this._getCameraPosition(profile);
+    const maxWorldX = WORLD_COLS * this.tileSize - 0.001;
+    const maxWorldY = WORLD_ROWS * this.tileSize - 0.001;
+    const worldX = Math.max(0, Math.min(maxWorldX, camX + canvasX));
+    const worldY = Math.max(0, Math.min(maxWorldY, camY + canvasY));
+    const tileX = Math.max(0, Math.min(WORLD_COLS - 1, Math.floor(worldX / this.tileSize)));
+    const tileY = Math.max(0, Math.min(WORLD_ROWS - 1, Math.floor(worldY / this.tileSize)));
+
+    return { tileX, tileY, worldX, worldY, canvasX, canvasY };
+  }
+
+  _computeTouchSteerDir(clientX, clientY) {
+    const profile = this.getProfile?.();
+    if (!profile) return null;
+    const { canvasX, canvasY } = this.screenToWorldTile(clientX, clientY);
+    const { px, py, camX, camY } = this._getCameraPosition(profile);
+    const playerScreenX = px * this.tileSize - camX + this.tileSize / 2;
+    const playerScreenY = py * this.tileSize - camY + this.tileSize / 2;
+    const dx = canvasX - playerScreenX;
+    const dy = canvasY - playerScreenY;
+    if (Math.hypot(dx, dy) < 6) return null;
+
+    const horizDir = dx >= 0 ? 'right' : 'left';
+    const vertDir = dy >= 0 ? 'down' : 'up';
+    const useHoriz = Math.abs(dx) >= Math.abs(dy);
+    const primaryDir = useHoriz ? horizDir : vertDir;
+    const secondaryDir = useHoriz ? vertDir : horizDir;
+    const perpDelta = useHoriz ? Math.abs(dy) : Math.abs(dx);
+
+    const curX = profile.pos.x;
+    const curY = profile.pos.y;
+    const pVec = DIR_VEC[primaryDir];
+    if (this.isTileWalkable(curX + pVec.dx, curY + pVec.dy)) {
+      return primaryDir;
+    }
+
+    const sVec = DIR_VEC[secondaryDir];
+    if (perpDelta >= 10 && this.isTileWalkable(curX + sVec.dx, curY + sVec.dy)) {
+      return secondaryDir;
+    }
+
+    return primaryDir;
+  }
+
+  _enterTouchSteer() {
+    if (!this._pointerState) return;
+    this._pointerState.dragging = true;
+    this.autoPath = [];
+    this.autoInteractTarget = null;
+    this.touchDestination = null;
+    this.touchSteerActive = true;
+    this.touchSteerDir = this._computeTouchSteerDir(
+      this._pointerState.clientX,
+      this._pointerState.clientY,
+    );
+  }
+
+  _handlePointerDown(e) {
+    if (e.button === 2 || (e.pointerType === 'mouse' && e.button !== undefined && e.button !== 0)) {
+      return;
+    }
+    if (!this.active || this.paused) return;
+    e.preventDefault?.();
+
+    const pointerId = e.pointerId ?? 0;
+    if (this._pointerState && this._pointerState.pointerId !== pointerId) return;
+
+    try {
+      this.canvas?.setPointerCapture?.(pointerId);
+    } catch {
+      // Synthetic pointer events in unit tests may not have an active browser pointer ID.
+    }
+
+    this._clearHoldTimer();
+    const downTime = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    this._pointerState = {
+      pointerId,
+      downTime,
+      startX: e.clientX,
+      startY: e.clientY,
+      clientX: e.clientX,
+      clientY: e.clientY,
+      dragging: false,
+    };
+
+    this._holdTimer = setTimeout(() => {
+      this._holdTimer = null;
+      if (!this._pointerState || this._pointerState.pointerId !== pointerId || !this.active || this.paused) {
+        return;
+      }
+      this._enterTouchSteer();
+    }, 150);
+  }
+
+  _handlePointerMove(e) {
+    const pointerId = e.pointerId ?? 0;
+    if (!this._pointerState || this._pointerState.pointerId !== pointerId) return;
+    this._pointerState.clientX = e.clientX;
+    this._pointerState.clientY = e.clientY;
+
+    if (!this.active || this.paused) {
+      this._clearPointerSteering();
+      return;
+    }
+
+    const dist = Math.hypot(e.clientX - this._pointerState.startX, e.clientY - this._pointerState.startY);
+    if (!this._pointerState.dragging && dist >= 14) {
+      this._clearHoldTimer();
+      this._enterTouchSteer();
+    } else if (this.touchSteerActive) {
+      this.touchSteerDir = this._computeTouchSteerDir(e.clientX, e.clientY);
+    }
+  }
+
+  _handlePointerUp(e) {
+    const pointerId = e.pointerId ?? 0;
+    if (!this._pointerState || this._pointerState.pointerId !== pointerId) return;
+    const state = this._pointerState;
+    this._clearPointerSteering();
+
+    try {
+      if (this.canvas?.hasPointerCapture?.(pointerId)) {
+        this.canvas.releasePointerCapture(pointerId);
+      }
+    } catch {
+      // Ignore synthetic capture cleanup errors.
+    }
+
+    const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    const elapsed = now - state.downTime;
+    const dist = Math.hypot(e.clientX - state.startX, e.clientY - state.startY);
+    if (this.active && !this.paused && !state.dragging && elapsed < 260 && dist < 14) {
+      const { tileX, tileY } = this.screenToWorldTile(e.clientX, e.clientY);
+      this.walkToTile(tileX, tileY);
+    }
+  }
+
+  _handlePointerCancel(e) {
+    const pointerId = e?.pointerId;
+    if (this._pointerState && pointerId !== undefined && this._pointerState.pointerId !== pointerId) return;
+    this._clearPointerSteering();
+  }
+
+  _directionBetween(fx, fy, tx, ty) {
+    const dx = tx - fx;
+    const dy = ty - fy;
+    if (dx === 0 && dy === 0) return null;
+    if (Math.abs(dx) >= Math.abs(dy)) return dx > 0 ? 'right' : 'left';
+    return dy > 0 ? 'down' : 'up';
+  }
+
+  _faceTile(tx, ty) {
+    const profile = this.getProfile?.();
+    if (!profile) return;
+    const dir = this._directionBetween(profile.pos.x, profile.pos.y, tx, ty);
+    if (!dir) return;
+    if (profile.pos.dir !== dir) {
+      profile.pos.dir = dir;
+      this.onStepSaved?.(profile.pos.x, profile.pos.y, dir, false);
+    }
+    this.refreshInteractHint();
+  }
+
+  walkToTile(tileX, tileY) {
+    if (!this.active || this.paused) return false;
+    const profile = this.getProfile?.();
+    if (!profile) return false;
+    if (
+      tileX === null || tileX === undefined || tileX === '' ||
+      tileY === null || tileY === undefined || tileY === '' ||
+      !Number.isFinite(Number(tileX)) || !Number.isFinite(Number(tileY))
+    ) {
+      return false;
+    }
+    const tx = Math.trunc(Number(tileX));
+    const ty = Math.trunc(Number(tileY));
+    if (tx < 0 || ty < 0 || tx >= WORLD_COLS || ty >= WORLD_ROWS) {
+      return false;
+    }
+
+    this.touchSteerActive = false;
+    this.touchSteerDir = null;
+    this.autoPath = [];
+    this.autoInteractTarget = null;
+    this.touchDestination = null;
+
+    const px = profile.pos.x;
+    const py = profile.pos.y;
+    const interactive = this.getInteractiveAtTile(tx, ty);
+
+    if (!this.moving && interactive) {
+      if (interactive.type === 'heal' && tx === px && ty === py) {
+        this.refreshInteractHint();
+        if (!this.triggerInteract()) {
+          this.onHealSpot?.();
+        }
+        return true;
+      }
+      if (Math.abs(tx - px) + Math.abs(ty - py) === 1) {
+        this._faceTile(tx, ty);
+        return this.triggerInteract();
+      }
+    }
+
+    const startX = this.moving ? this.moveTargetX : px;
+    const startY = this.moving ? this.moveTargetY : py;
+
+    if (this.moving && interactive) {
+      if (
+        (interactive.type === 'heal' && tx === startX && ty === startY) ||
+        Math.abs(tx - startX) + Math.abs(ty - startY) === 1
+      ) {
+        this.autoInteractTarget = { x: tx, y: ty };
+        this.touchDestination = {
+          x: startX,
+          y: startY,
+          isInteract: true,
+          createdAt: typeof performance !== 'undefined' ? performance.now() : Date.now(),
+        };
+        return true;
+      }
+    }
+
+    if (!interactive && tx === startX && ty === startY) {
+      return false;
+    }
+
+    const targetIsWalkable = !interactive && this.isTileWalkable(tx, ty);
+    const maxVisited = 1400;
+    const startIdx = startY * WORLD_COLS + startX;
+    const visited = new Set([startIdx]);
+    const parent = new Map();
+    const queue = [[startX, startY]];
+
+    let goalX = null;
+    let goalY = null;
+    let bestFallback = null;
+
+    for (let head = 0; head < queue.length; head++) {
+      const [cx, cy] = queue[head];
+      if (interactive) {
+        if (Math.abs(cx - tx) + Math.abs(cy - ty) === 1) {
+          goalX = cx;
+          goalY = cy;
+          break;
+        }
+      } else if (targetIsWalkable) {
+        if (cx === tx && cy === ty) {
+          goalX = cx;
+          goalY = cy;
+          break;
+        }
+      } else if (!(cx === startX && cy === startY)) {
+        const tapDist = Math.abs(cx - tx) + Math.abs(cy - ty);
+        if (tapDist >= 1 && tapDist <= 3) {
+          if (!bestFallback || tapDist < bestFallback.tapDist) {
+            bestFallback = { x: cx, y: cy, tapDist };
+            if (tapDist === 1) {
+              goalX = cx;
+              goalY = cy;
+              break;
+            }
+          }
+        }
+      }
+
+      if (visited.size >= maxVisited) continue;
+
+      for (const [dirName, dx, dy] of CARDINAL_STEPS) {
+        const nx = cx + dx;
+        const ny = cy + dy;
+        if (nx < 0 || ny < 0 || nx >= WORLD_COLS || ny >= WORLD_ROWS) continue;
+        const nIdx = ny * WORLD_COLS + nx;
+        if (visited.has(nIdx) || !this.isTileWalkable(nx, ny)) continue;
+        visited.add(nIdx);
+        parent.set(nIdx, { prevIdx: cy * WORLD_COLS + cx, dir: dirName });
+        queue.push([nx, ny]);
+        if (visited.size >= maxVisited) break;
+      }
+    }
+
+    if (goalX === null && bestFallback) {
+      goalX = bestFallback.x;
+      goalY = bestFallback.y;
+    }
+
+    if (goalX === null || goalY === null) {
+      return false;
+    }
+
+    const steps = [];
+    let curIdx = goalY * WORLD_COLS + goalX;
+    while (curIdx !== startIdx) {
+      const entry = parent.get(curIdx);
+      if (!entry) break;
+      steps.push(entry.dir);
+      curIdx = entry.prevIdx;
+    }
+    steps.reverse();
+
+    if (steps.length === 0 && !this.moving && !interactive) {
+      return false;
+    }
+
+    this.autoPath = steps;
+    this.autoInteractTarget = interactive ? { x: tx, y: ty } : null;
+    this.touchDestination = {
+      x: goalX,
+      y: goalY,
+      isInteract: Boolean(this.autoInteractTarget),
+      createdAt: typeof performance !== 'undefined' ? performance.now() : Date.now(),
+    };
+    return true;
+  }
+
   syncFromProfile() {
     this.syncViewportSize();
+    this.clearTouchNavigation();
     const profile = this.getProfile();
     if (!profile) return;
 
@@ -767,6 +1214,7 @@ export class OverworldEngine {
     if (active) {
       this.syncFromProfile();
     } else {
+      this.clearTouchNavigation();
       this.moving = false;
       this.followerMoving = false;
       this.followerInitialized = false;
@@ -775,10 +1223,25 @@ export class OverworldEngine {
 
   setPaused(paused) {
     this.paused = paused;
+    if (paused) {
+      this.clearTouchNavigation();
+    }
   }
 
   isTileWalkable(x, y) {
     return isTileWalkableAt(x, y);
+  }
+
+  _pickNextDiscoveryNodeKind() {
+    let pool = DISCOVERY_NODE_KINDS.filter(
+      (k) => k !== this._lastNodeKind && !this.rarePatches.some((p) => p.kind === k),
+    );
+    if (pool.length === 0) {
+      pool = DISCOVERY_NODE_KINDS.filter((k) => k !== this._lastNodeKind);
+    }
+    const kind = pool[Math.floor(Math.random() * pool.length)] || DISCOVERY_NODE_KINDS[0];
+    this._lastNodeKind = kind;
+    return kind;
   }
 
   refreshRarePatches(profile, dt = 0) {
@@ -822,10 +1285,12 @@ export class OverworldEngine {
       for (let i = 0; i < slots; i++) {
         const pickIdx = Math.floor(Math.random() * candidates.length);
         const [chosen] = candidates.splice(pickIdx, 1);
+        const kind = this._pickNextDiscoveryNodeKind();
         this.rarePatches.push({
           x: chosen.x,
           y: chosen.y,
           biomeId: chosen.biomeId,
+          kind,
           ttl: 18 + Math.random() * 6,
         });
       }
@@ -835,45 +1300,40 @@ export class OverworldEngine {
     }
   }
 
-  getInteractiveTarget() {
-    const profile = this.getProfile();
-    if (!profile) return null;
-    const { x, y, dir } = profile.pos;
-
-    if (WORLD_MAP[y]?.[x] === TILE.HEAL) {
-      return { type: 'heal', key: `${x},${y}`, label: '💖 Heal Team', data: null };
-    }
-
-    const vec = DIR_VEC[dir] || DIR_VEC.down;
-    const tx = x + vec.dx;
-    const ty = y + vec.dy;
+  getInteractiveAtTile(tx, ty) {
+    if (!Number.isInteger(tx) || !Number.isInteger(ty)) return null;
     if (tx < 0 || ty < 0 || tx >= WORLD_COLS || ty >= WORLD_ROWS) return null;
-
-    const tile = WORLD_MAP[ty][tx];
+    const profile = this.getProfile?.();
+    const tile = WORLD_MAP[ty]?.[tx];
     const key = `${tx},${ty}`;
+
     if (tile === TILE.SIGN && SIGNPOSTS[key]) {
-      return { type: 'sign', key, label: '💬 Read Sign', data: SIGNPOSTS[key] };
+      return { type: 'sign', key, x: tx, y: ty, label: '💬 Read Sign', data: SIGNPOSTS[key] };
     }
     if (tile === TILE.SHRINE && SHRINES[key]) {
-      return { type: 'shrine', key, label: `⚔️ ${SHRINES[key].name}`, data: SHRINES[key] };
+      return { type: 'shrine', key, x: tx, y: ty, label: `⚔️ ${SHRINES[key].name}`, data: SHRINES[key] };
     }
     if (tile === TILE.CHEST && CHESTS[key]) {
-      const opened = profile.chestsOpened.includes(CHESTS[key].id);
+      const opened = Boolean(profile?.chestsOpened?.includes(CHESTS[key].id));
       return {
         type: 'chest',
         key,
+        x: tx,
+        y: ty,
         label: opened ? '📦 Empty Chest' : '💎 Open Chest',
         data: CHESTS[key],
         opened,
       };
     }
     if (tile === TILE.HEAL) {
-      return { type: 'heal', key, label: '💖 Healing Fountain', data: null };
+      return { type: 'heal', key, x: tx, y: ty, label: '💖 Healing Fountain', data: null };
     }
     if (NPCS[key]) {
       return {
         type: 'npc',
         key,
+        x: tx,
+        y: ty,
         label: `💬 Talk: ${NPCS[key].name}`,
         data: NPCS[key],
       };
@@ -883,6 +1343,8 @@ export class OverworldEngine {
       return {
         type: 'rival',
         key,
+        x: tx,
+        y: ty,
         label: `⚔️ Battle ${rival.name}`,
         data: rival,
       };
@@ -891,11 +1353,36 @@ export class OverworldEngine {
       return {
         type: 'landmark',
         key,
+        x: tx,
+        y: ty,
         label: `${LANDMARKS[key].icon} ${LANDMARKS[key].name}`,
         data: LANDMARKS[key],
       };
     }
+    if (SECRET_ARCADE_SPOT && SECRET_ARCADE_SPOT.x === tx && SECRET_ARCADE_SPOT.y === ty) {
+      return {
+        type: 'arcade',
+        key,
+        x: tx,
+        y: ty,
+        label: `${SECRET_ARCADE_SPOT.icon} ${SECRET_ARCADE_SPOT.name}`,
+        data: SECRET_ARCADE_SPOT,
+      };
+    }
     return null;
+  }
+
+  getInteractiveTarget() {
+    const profile = this.getProfile();
+    if (!profile) return null;
+    const { x, y, dir } = profile.pos;
+
+    if (WORLD_MAP[y]?.[x] === TILE.HEAL) {
+      return { type: 'heal', key: `${x},${y}`, x, y, label: '💖 Heal Team', data: null };
+    }
+
+    const vec = DIR_VEC[dir] || DIR_VEC.down;
+    return this.getInteractiveAtTile(x + vec.dx, y + vec.dy);
   }
 
   refreshInteractHint() {
@@ -934,6 +1421,31 @@ export class OverworldEngine {
         size: 2 + Math.random() * 2.5,
       });
     }
+  }
+
+  triggerCelebrationBurst(tileX, tileY, preset = 'gold') {
+    const profile = this.getProfile?.();
+    const tx = Number.isFinite(Number(tileX)) ? Number(tileX) : (profile?.pos?.x ?? 8);
+    const ty = Number.isFinite(Number(tileY)) ? Number(tileY) : (profile?.pos?.y ?? 15);
+    const palette = CELEBRATION_PALETTES[preset] || CELEBRATION_PALETTES.gold;
+    const cx = tx * this.tileSize + 16;
+    const cy = ty * this.tileSize + 16;
+    const count = 26;
+    for (let i = 0; i < count; i++) {
+      const angle = (Math.PI * 2 * i) / count + (Math.random() - 0.5) * 0.32;
+      const speed = 26 + Math.random() * 44;
+      this.particles.push({
+        x: cx + (Math.random() - 0.5) * 10,
+        y: cy + (Math.random() - 0.5) * 8,
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed - 22,
+        life: 0,
+        maxLife: 0.6 + Math.random() * 0.4,
+        color: palette[i % palette.length],
+        size: 2.2 + Math.random() * 2.4,
+      });
+    }
+    return count;
   }
 
   spawnStepRipple(tx, ty) {
@@ -984,6 +1496,14 @@ export class OverworldEngine {
     const profile = this.getProfile();
     if (!profile) return;
 
+    if (heldDir) {
+      this.autoPath = [];
+      this.autoInteractTarget = null;
+      this.touchDestination = null;
+      this.touchSteerActive = false;
+      this.touchSteerDir = null;
+    }
+
     this.refreshRarePatches(profile, dt);
 
     if (this.moving) {
@@ -1004,11 +1524,49 @@ export class OverworldEngine {
         }
         this.onStepSaved?.(profile.pos.x, profile.pos.y, profile.pos.dir, true);
         this.handleTileArrival(profile.pos.x, profile.pos.y);
+
+        if (this.active && !this.paused && this.autoPath.length === 0) {
+          if (this.autoInteractTarget) {
+            const interactAt = this.autoInteractTarget;
+            this.autoInteractTarget = null;
+            this.touchDestination = null;
+            this._faceTile(interactAt.x, interactAt.y);
+            this.triggerInteract();
+          } else if (
+            this.touchDestination &&
+            this.touchDestination.x === profile.pos.x &&
+            this.touchDestination.y === profile.pos.y
+          ) {
+            this.touchDestination = null;
+          }
+        }
       }
     }
 
-    if (!this.moving && !this.paused && this.active && heldDir) {
-      this.tryStartMove(heldDir);
+    if (!this.moving && !this.paused && this.active) {
+      if (heldDir) {
+        this.tryStartMove(heldDir);
+      } else if (this.touchSteerActive) {
+        if (this._pointerState) {
+          this.touchSteerDir = this._computeTouchSteerDir(
+            this._pointerState.clientX,
+            this._pointerState.clientY,
+          );
+        }
+        if (this.touchSteerDir) {
+          this.tryStartMove(this.touchSteerDir);
+        }
+      } else if (this.autoPath.length > 0) {
+        const stepDir = this.autoPath.shift();
+        const vec = DIR_VEC[stepDir];
+        if (vec && this.isTileWalkable(profile.pos.x + vec.dx, profile.pos.y + vec.dy)) {
+          this.tryStartMove(stepDir);
+        } else {
+          this.autoPath = [];
+          this.autoInteractTarget = null;
+          this.touchDestination = null;
+        }
+      }
     }
   }
 
@@ -1089,15 +1647,30 @@ export class OverworldEngine {
     const encounterBiome = ENCOUNTER_TILE_BIOME[tile];
     if (encounterBiome) {
       this.rustleTile = { x, y, timer: 0.25 };
+      const { depthTier } = getTileDepthInfo(x, y);
 
       const rareIdx = this.rarePatches.findIndex((p) => p.x === x && p.y === y);
       if (rareIdx !== -1) {
-        this.rarePatches.splice(rareIdx, 1);
-        this.spawnParticles(x, y, '#facc15', 14, true);
-        this.spawnParticles(x, y, '#ffffff', 8, true);
+        const [patch] = this.rarePatches.splice(rareIdx, 1);
+        const nodeKind = patch?.kind || 'shimmer';
+        if (nodeKind === 'starfall') {
+          this.spawnParticles(x, y, '#67e8f9', 14, true);
+          this.spawnParticles(x, y, '#f472b6', 8, true);
+        } else if (nodeKind === 'mystery_cry') {
+          this.spawnParticles(x, y, '#c084fc', 14, true);
+          this.spawnParticles(x, y, '#fde047', 8, true);
+        } else {
+          this.spawnParticles(x, y, '#facc15', 14, true);
+          this.spawnParticles(x, y, '#ffffff', 8, true);
+        }
         this.stepsSinceBattle = 0;
         this.encounterTileStreak = 0;
-        this.onWildEncounter?.(encounterBiome, { isRarePatch: true });
+        this.clearTouchNavigation();
+        if (nodeKind === 'starfall' && typeof this.onDiscoveryNode === 'function') {
+          this.onDiscoveryNode({ kind: 'starfall', biomeId: encounterBiome, x, y, depthTier });
+        } else {
+          this.onWildEncounter?.(encounterBiome, { isRarePatch: true, nodeKind, depthTier });
+        }
         return;
       }
 
@@ -1126,7 +1699,8 @@ export class OverworldEngine {
         if (guaranteed || Math.random() < 0.21) {
           this.stepsSinceBattle = 0;
           this.encounterTileStreak = 0;
-          this.onWildEncounter?.(encounterBiome, { isRarePatch: false });
+          this.clearTouchNavigation();
+          this.onWildEncounter?.(encounterBiome, { isRarePatch: false, depthTier });
         }
       }
     } else {
@@ -1151,17 +1725,7 @@ export class OverworldEngine {
       this.syncFollower();
     }
 
-    const px = this.moving
-      ? this.moveStartX + (this.moveTargetX - this.moveStartX) * this.moveProgress
-      : profile.pos.x;
-    const py = this.moving
-      ? this.moveStartY + (this.moveTargetY - this.moveStartY) * this.moveProgress
-      : profile.pos.y;
-
-    const maxCamX = Math.max(0, WORLD_COLS * this.tileSize - this.viewW);
-    const maxCamY = Math.max(0, WORLD_ROWS * this.tileSize - this.viewH);
-    const camX = Math.max(0, Math.min(maxCamX, Math.round(px * this.tileSize - this.viewW / 2 + 16)));
-    const camY = Math.max(0, Math.min(maxCamY, Math.round(py * this.tileSize - this.viewH / 2 + 16)));
+    const { px, py, camX, camY } = this._getCameraPosition(profile);
 
     ctx.fillStyle = '#0f172a';
     ctx.fillRect(0, 0, this.viewW, this.viewH);
@@ -1180,10 +1744,13 @@ export class OverworldEngine {
     // Subtle shallow-water & snow step ripples
     this.drawStepRipples(ctx, camX, camY);
 
-    // Draw glowing rare-spawn patches on encounter tiles
+    // Draw touch-destination ring & path breadcrumbs on the ground layer
+    this.drawTouchWayfinding(ctx, camX, camY, px, py, nowMs, profile, false);
+
+    // Draw glowing rare-spawn / discovery nodes on encounter tiles
     for (const patch of this.rarePatches) {
       if (patch.x < startCol || patch.x > endCol || patch.y < startRow || patch.y > endRow) continue;
-      this.drawRarePatchOverlay(ctx, patch.x * this.tileSize - camX, patch.y * this.tileSize - camY, nowMs);
+      this.drawRarePatchOverlay(ctx, patch.x * this.tileSize - camX, patch.y * this.tileSize - camY, nowMs, patch.kind);
     }
 
     // Draw environmental landmarks
@@ -1191,6 +1758,23 @@ export class OverworldEngine {
       const [lx, ly] = key.split(',').map(Number);
       if (lx < startCol || lx > endCol || ly < startRow || ly > endRow) continue;
       this.drawLandmark(ctx, lx * this.tileSize - camX, ly * this.tileSize - camY, landmark, nowMs);
+    }
+
+    // Draw Secret Starlight Sky-Hop Arcade Cabinet
+    if (
+      SECRET_ARCADE_SPOT &&
+      SECRET_ARCADE_SPOT.x >= startCol - 1 &&
+      SECRET_ARCADE_SPOT.x <= endCol + 1 &&
+      SECRET_ARCADE_SPOT.y >= startRow - 1 &&
+      SECRET_ARCADE_SPOT.y <= endRow + 1
+    ) {
+      this.drawSecretArcadeCabinet(
+        ctx,
+        SECRET_ARCADE_SPOT.x * this.tileSize - camX,
+        SECRET_ARCADE_SPOT.y * this.tileSize - camY,
+        nowMs,
+        profile,
+      );
     }
 
     // Subtle drifting atmosphere shadows over outdoor biome regions
@@ -1302,6 +1886,9 @@ export class OverworldEngine {
 
     // Draw biome-specific ambient weather motes & peak aurora shimmer
     this.drawBiomeWeather(ctx, biomeId, nowMs);
+
+    // Draw hold/drag-steering reticle & chevron on top overlay layer
+    this.drawTouchWayfinding(ctx, camX, camY, px, py, nowMs, profile, true);
 
     // Draw particles
     for (const p of this.particles) {
@@ -3017,11 +3604,84 @@ export class OverworldEngine {
     }
   }
 
-  drawRarePatchOverlay(ctx, sx, sy, nowMs) {
+  drawRarePatchOverlay(ctx, sx, sy, nowMs, kind = 'shimmer') {
     const ts = this.tileSize;
     const pulse = 0.55 + 0.45 * Math.sin(nowMs * 0.01);
     const aurora = 0.5 + 0.5 * Math.cos(nowMs * 0.007 + sx * 0.05);
     ctx.save();
+
+    if (kind === 'starfall') {
+      // Sparkling fallen meteor crystal node
+      ctx.fillStyle = `rgba(56, 189, 248, ${(0.12 + aurora * 0.14).toFixed(2)})`;
+      ctx.beginPath();
+      ctx.arc(sx + 16, sy + 16, 13, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.strokeStyle = `rgba(103, 232, 249, ${(0.6 + pulse * 0.35).toFixed(2)})`;
+      ctx.lineWidth = 1.8;
+      ctx.beginPath();
+      ctx.arc(sx + 16, sy + 16, 11 + pulse * 1.6, 0, Math.PI * 2);
+      ctx.stroke();
+
+      const bob = Math.sin(nowMs * 0.0065 + sx * 0.1) * 2.2;
+      ctx.fillStyle = '#0284c7';
+      ctx.beginPath();
+      ctx.moveTo(sx + 16, sy + 6 + bob);
+      ctx.lineTo(sx + 23, sy + 15 + bob);
+      ctx.lineTo(sx + 16, sy + 24 + bob);
+      ctx.lineTo(sx + 9, sy + 15 + bob);
+      ctx.closePath();
+      ctx.fill();
+
+      ctx.fillStyle = '#67e8f9';
+      ctx.beginPath();
+      ctx.moveTo(sx + 16, sy + 8 + bob);
+      ctx.lineTo(sx + 20, sy + 15 + bob);
+      ctx.lineTo(sx + 16, sy + 21 + bob);
+      ctx.lineTo(sx + 12, sy + 15 + bob);
+      ctx.closePath();
+      ctx.fill();
+
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(sx + 14, sy + 11 + bob, 2, 3);
+      ctx.fillStyle = '#f472b6';
+      ctx.fillRect(sx + 6, sy + 8, 3, 1);
+      ctx.fillRect(sx + 7, sy + 7, 1, 3);
+      ctx.fillRect(sx + 23, sy + 22, 3, 1);
+      ctx.fillRect(sx + 24, sy + 21, 1, 3);
+      ctx.restore();
+      return;
+    }
+
+    if (kind === 'mystery_cry') {
+      // Musical glowing rustle node
+      ctx.fillStyle = `rgba(192, 132, 252, ${(0.14 + aurora * 0.12).toFixed(2)})`;
+      ctx.fillRect(sx + 3, sy + 3, ts - 6, ts - 6);
+
+      ctx.strokeStyle = `rgba(232, 121, 249, ${(0.55 + pulse * 0.4).toFixed(2)})`;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.ellipse(sx + 16, sy + 17, 11 + pulse * 1.5, 9 + pulse * 1.2, 0, 0, Math.PI * 2);
+      ctx.stroke();
+
+      // Floating pixel music notes
+      const noteColors = ['#fde047', '#e879f9'];
+      for (let i = 0; i < 2; i++) {
+        const phase = nowMs * 0.0055 + i * 2.1;
+        const nx = Math.round(sx + 10 + i * 11 + Math.sin(phase) * 2);
+        const ny = Math.round(sy + 18 - ((phase % 2.4) / 2.4) * 11);
+        ctx.fillStyle = noteColors[i];
+        ctx.fillRect(nx, ny + 4, 4, 3);
+        ctx.fillRect(nx + 3, ny - 2, 2, 7);
+        ctx.fillRect(nx + 3, ny - 2, 5, 2);
+      }
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(sx + 7, sy + 22, 2, 2);
+      ctx.fillRect(sx + 23, sy + 9, 2, 2);
+      ctx.restore();
+      return;
+    }
+
     ctx.fillStyle = `rgba(103, 232, 249, ${(0.08 + aurora * 0.1).toFixed(2)})`;
     ctx.fillRect(sx + 3, sy + 3, ts - 6, ts - 6);
 
@@ -3046,6 +3706,197 @@ export class OverworldEngine {
       ctx.fillStyle = '#ffffff';
       ctx.fillRect(rx, ry, 1, 1);
     }
+    ctx.restore();
+  }
+
+  drawSecretArcadeCabinet(ctx, sx, sy, nowMs, profile) {
+    const unlocked = Boolean(
+      profile?.arcade?.unlocked ||
+      (profile?.badges?.length || 0) >= 1 ||
+      Object.keys(profile?.pokedex?.caught || {}).length >= 5,
+    );
+    const pulse = 0.55 + 0.45 * Math.sin(nowMs * 0.006);
+    ctx.save();
+
+    // Soft ambient arcade glow
+    ctx.fillStyle = unlocked
+      ? `rgba(103, 232, 249, ${(0.18 + pulse * 0.16).toFixed(2)})`
+      : `rgba(250, 204, 21, ${(0.14 + pulse * 0.12).toFixed(2)})`;
+    ctx.beginPath();
+    ctx.arc(sx + 16, sy + 18, 15, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Base shadow
+    ctx.fillStyle = 'rgba(15, 23, 42, 0.36)';
+    ctx.fillRect(sx + 6, sy + 27, 20, 4);
+
+    // Cabinet body
+    ctx.fillStyle = '#1e1b4b';
+    ctx.fillRect(sx + 7, sy + 5, 18, 24);
+    ctx.fillStyle = '#312e81';
+    ctx.fillRect(sx + 8, sy + 6, 16, 22);
+
+    // Top marquee header
+    ctx.fillStyle = '#facc15';
+    ctx.fillRect(sx + 7, sy + 5, 18, 5);
+    ctx.fillStyle = unlocked ? '#38bdf8' : '#fb923c';
+    ctx.fillRect(sx + 9, sy + 6, 14, 3);
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(sx + 11, sy + 7, 2, 1);
+    ctx.fillRect(sx + 15, sy + 7, 2, 1);
+    ctx.fillRect(sx + 19, sy + 7, 2, 1);
+
+    // CRT screen
+    ctx.fillStyle = '#0f172a';
+    ctx.fillRect(sx + 9, sy + 11, 14, 9);
+    ctx.fillStyle = unlocked ? '#0891b2' : '#4338ca';
+    ctx.fillRect(sx + 10, sy + 12, 12, 7);
+
+    // Animated starlight pixel sprite on cabinet screen
+    const hopY = Math.round(Math.sin(nowMs * 0.008) * 1.5);
+    ctx.fillStyle = '#fde047';
+    ctx.fillRect(sx + 13, sy + 14 + hopY, 3, 3);
+    ctx.fillStyle = unlocked ? '#f472b6' : '#fef08a';
+    ctx.fillRect(sx + 18, sy + 13 - hopY, 2, 2);
+
+    // Control deck with joystick & buttons
+    ctx.fillStyle = '#4338ca';
+    ctx.fillRect(sx + 8, sy + 20, 16, 3);
+    ctx.fillStyle = '#f43f5e';
+    ctx.fillRect(sx + 10, sy + 19, 2, 2);
+    ctx.fillStyle = '#4ade80';
+    ctx.fillRect(sx + 18, sy + 21, 2, 1);
+    ctx.fillStyle = '#fde047';
+    ctx.fillRect(sx + 21, sy + 21, 2, 1);
+
+    // Cabinet coin door trim
+    ctx.fillStyle = '#f59e0b';
+    ctx.fillRect(sx + 13, sy + 24, 6, 3);
+    ctx.fillStyle = '#fef08a';
+    ctx.fillRect(sx + 15, sy + 25, 2, 1);
+
+    // Floating star spark above cabinet
+    const sparkY = Math.round(sy + 1 - Math.abs(Math.sin(nowMs * 0.005)) * 2);
+    ctx.globalAlpha = 0.55 + pulse * 0.45;
+    ctx.fillStyle = unlocked ? '#67e8f9' : '#fde047';
+    ctx.fillRect(sx + 15, sparkY, 3, 1);
+    ctx.fillRect(sx + 16, sparkY - 1, 1, 3);
+
+    ctx.restore();
+  }
+
+  drawTouchWayfinding(ctx, camX, camY, px, py, nowMs, profile, overlayLayer = false) {
+    const ts = this.tileSize;
+    if (!overlayLayer) {
+      if (!this.touchDestination) return;
+      const pulse = 0.5 + 0.5 * Math.sin(nowMs * 0.009);
+      ctx.save();
+
+      // Breadcrumb dots along autoPath
+      if (this.autoPath.length > 0) {
+        let bx = this.moving ? this.moveTargetX : profile.pos.x;
+        let by = this.moving ? this.moveTargetY : profile.pos.y;
+        ctx.fillStyle = this.touchDestination.isInteract
+          ? 'rgba(250, 204, 21, 0.72)'
+          : 'rgba(103, 232, 249, 0.72)';
+        if (this.moving) {
+          ctx.beginPath();
+          ctx.arc(bx * ts + 16 - camX, by * ts + 16 - camY, 2.2, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        for (let i = 0; i < this.autoPath.length - 1; i++) {
+          const vec = DIR_VEC[this.autoPath[i]];
+          if (!vec) break;
+          bx += vec.dx;
+          by += vec.dy;
+          ctx.beginPath();
+          ctx.arc(bx * ts + 16 - camX, by * ts + 16 - camY, 2.2, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+
+      // Pulsing Starlight Destination Ring
+      const destX = this.touchDestination.x * ts + 16 - camX;
+      const destY = this.touchDestination.y * ts + 16 - camY;
+      const ringColor = this.touchDestination.isInteract ? '250, 204, 21' : '103, 232, 249';
+      ctx.strokeStyle = `rgba(${ringColor}, ${(0.58 + pulse * 0.38).toFixed(2)})`;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(destX, destY, 9 + pulse * 3, 0, Math.PI * 2);
+      ctx.stroke();
+
+      ctx.fillStyle = `rgba(${ringColor}, ${(0.16 + pulse * 0.12).toFixed(2)})`;
+      ctx.beginPath();
+      ctx.arc(destX, destY, 6 + pulse * 1.5, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Subtle golden focus corners on autoInteractTarget
+      if (this.autoInteractTarget) {
+        const ix = this.autoInteractTarget.x * ts - camX;
+        const iy = this.autoInteractTarget.y * ts - camY;
+        ctx.strokeStyle = `rgba(253, 224, 71, ${(0.65 + pulse * 0.35).toFixed(2)})`;
+        ctx.lineWidth = 2;
+        ctx.strokeRect(ix + 3, iy + 3, ts - 6, ts - 6);
+      }
+
+      ctx.restore();
+      return;
+    }
+
+    // Overlay layer: hold/drag-steering reticle & directional chevron
+    if (!this.touchSteerActive) return;
+    ctx.save();
+    const playerCx = px * ts + 16 - camX;
+    const playerCy = py * ts + 16 - camY;
+    const pulse = 0.55 + 0.45 * Math.sin(nowMs * 0.012);
+
+    if (this.touchSteerDir && DIR_VEC[this.touchSteerDir]) {
+      const vec = DIR_VEC[this.touchSteerDir];
+      const chevX = playerCx + vec.dx * 19;
+      const chevY = playerCy + vec.dy * 19;
+      ctx.fillStyle = `rgba(103, 232, 249, ${(0.65 + pulse * 0.3).toFixed(2)})`;
+      ctx.strokeStyle = '#0f172a';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      if (this.touchSteerDir === 'right') {
+        ctx.moveTo(chevX + 5, chevY);
+        ctx.lineTo(chevX - 3, chevY - 5);
+        ctx.lineTo(chevX - 3, chevY + 5);
+      } else if (this.touchSteerDir === 'left') {
+        ctx.moveTo(chevX - 5, chevY);
+        ctx.lineTo(chevX + 3, chevY - 5);
+        ctx.lineTo(chevX + 3, chevY + 5);
+      } else if (this.touchSteerDir === 'up') {
+        ctx.moveTo(chevX, chevY - 5);
+        ctx.lineTo(chevX - 5, chevY + 3);
+        ctx.lineTo(chevX + 5, chevY + 3);
+      } else {
+        ctx.moveTo(chevX, chevY + 5);
+        ctx.lineTo(chevX - 5, chevY - 3);
+        ctx.lineTo(chevX + 5, chevY - 3);
+      }
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+    }
+
+    if (this._pointerState) {
+      const { canvasX, canvasY } = this.screenToWorldTile(
+        this._pointerState.clientX,
+        this._pointerState.clientY,
+      );
+      ctx.strokeStyle = `rgba(253, 224, 71, ${(0.48 + pulse * 0.35).toFixed(2)})`;
+      ctx.lineWidth = 1.6;
+      ctx.beginPath();
+      ctx.arc(canvasX, canvasY, 11 + pulse * 2, 0, Math.PI * 2);
+      ctx.stroke();
+
+      ctx.fillStyle = 'rgba(103, 232, 249, 0.25)';
+      ctx.beginPath();
+      ctx.arc(canvasX, canvasY, 4, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
     ctx.restore();
   }
 
