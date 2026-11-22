@@ -3,6 +3,8 @@ import { GAME_META, SPECIES, TRAINERS, TYPES, getSpriteUrls } from './config.js'
 import * as PokemonMod from './pokemon.js';
 import { generateSilhouetteDataUri } from './pokemon.js';
 import {
+  BIOMES,
+  BIOME_MINIMAP_PALETTE,
   CHESTS,
   FIELD_QUESTS,
   LANDMARKS,
@@ -11,12 +13,14 @@ import {
   SECRET_ARCADE_SPOT,
   SHRINES,
   SIGNPOSTS,
+  SOLID_TILES,
   TILE,
   WORLD_COLS,
   WORLD_MAP,
   WORLD_ROWS,
   findNearestSafePosition,
   getBiomeAt,
+  getBiomeWarpPoint,
   getTileDepthInfo,
   isTileWalkableAt,
 } from './world-data.js';
@@ -275,6 +279,140 @@ const CELEBRATION_PALETTES = {
   heal: ['#f472b6', '#fbcfe8', '#67e8f9', '#fde047', '#ffffff'],
   pink: ['#f472b6', '#fbcfe8', '#67e8f9', '#fde047', '#ffffff'],
 };
+
+const WARP_SWIRL_COLORS = ['#67e8f9', '#38bdf8', '#c084fc', '#e879f9', '#fde047', '#ffffff'];
+const MINIMAP_SCALE = 2;
+const MINIMAP_WIDTH = WORLD_COLS * MINIMAP_SCALE;
+const MINIMAP_HEIGHT = WORLD_ROWS * MINIMAP_SCALE;
+
+const PATH_MINIMAP_TILES = new Set([
+  TILE.PATH,
+  TILE.BRIDGE,
+  TILE.CAVE_PATH,
+  TILE.VOLCANO_PATH,
+  TILE.SNOW_PATH,
+  TILE.RUNE_TRAIL,
+  TILE.GROVE_PATH,
+  TILE.DUNE_PATH,
+  TILE.MARSH_PATH,
+  TILE.SANCTUM_PATH,
+  TILE.CANYON_PATH,
+  TILE.REEF_PATH,
+  TILE.RUINS_PATH,
+  TILE.RIFT_PATH,
+  TILE.FAE_PATH,
+  TILE.ATOLL_PATH,
+  TILE.CROWN_PATH,
+  TILE.TERA_PATH,
+  TILE.HEAL,
+]);
+
+const SHRINE_COORDS = Object.entries(SHRINES).map(([key, shrine]) => {
+  const [x, y] = key.split(',').map(Number);
+  return { id: shrine.id, biome: shrine.biome, x, y };
+});
+
+const HEAL_COORDS = (() => {
+  const coords = [];
+  for (let y = 0; y < WORLD_ROWS; y++) {
+    for (let x = 0; x < WORLD_COLS; x++) {
+      if (WORLD_MAP[y]?.[x] === TILE.HEAL) {
+        coords.push({ x, y });
+      }
+    }
+  }
+  return coords;
+})();
+
+const BIOME_MINIMAP_SHAPES = (() => {
+  const shapes = {};
+  const grid = Array.from({ length: WORLD_ROWS }, (_, y) =>
+    Array.from({ length: WORLD_COLS }, (_, x) => getBiomeAt(x, y).id),
+  );
+
+  for (let y = 0; y < WORLD_ROWS; y++) {
+    let runId = grid[y][0];
+    let runStart = 0;
+    for (let x = 1; x <= WORLD_COLS; x++) {
+      const bId = x < WORLD_COLS ? grid[y][x] : null;
+      if (bId !== runId) {
+        if (!shapes[runId]) shapes[runId] = { spans: [], edges: [] };
+        const w = x - runStart;
+        const match = shapes[runId].spans.find(
+          (m) => m.x === runStart && m.w === w && m.y + m.h === y,
+        );
+        if (match) match.h += 1;
+        else shapes[runId].spans.push({ x: runStart, y, w, h: 1 });
+        runId = bId;
+        runStart = x;
+      }
+    }
+  }
+
+  for (const [bId, data] of Object.entries(shapes)) {
+    for (let y = 0; y < WORLD_ROWS; y++) {
+      for (const dy of [-1, 1]) {
+        const ey = (y + (dy > 0 ? 1 : 0)) * MINIMAP_SCALE;
+        let start = -1;
+        for (let x = 0; x <= WORLD_COLS; x++) {
+          const isEdge = x < WORLD_COLS
+            && grid[y][x] === bId
+            && (y + dy < 0 || y + dy >= WORLD_ROWS || grid[y + dy][x] !== bId);
+          if (isEdge && start === -1) start = x;
+          else if (!isEdge && start !== -1) {
+            data.edges.push([start * MINIMAP_SCALE, ey, x * MINIMAP_SCALE, ey]);
+            start = -1;
+          }
+        }
+      }
+    }
+    for (let x = 0; x < WORLD_COLS; x++) {
+      for (const dx of [-1, 1]) {
+        const ex = (x + (dx > 0 ? 1 : 0)) * MINIMAP_SCALE;
+        let start = -1;
+        for (let y = 0; y <= WORLD_ROWS; y++) {
+          const isEdge = y < WORLD_ROWS
+            && grid[y][x] === bId
+            && (x + dx < 0 || x + dx >= WORLD_COLS || grid[y][x + dx] !== bId);
+          if (isEdge && start === -1) start = y;
+          else if (!isEdge && start !== -1) {
+            data.edges.push([ex, start * MINIMAP_SCALE, ex, y * MINIMAP_SCALE]);
+            start = -1;
+          }
+        }
+      }
+    }
+  }
+
+  return shapes;
+})();
+
+const MINIMAP_WALL_COLOR_CACHE = new Map();
+
+function darkenHexColor(hex, factor = 0.46) {
+  const key = `${hex}:${factor}`;
+  if (MINIMAP_WALL_COLOR_CACHE.has(key)) return MINIMAP_WALL_COLOR_CACHE.get(key);
+  const clean = typeof hex === 'string' ? hex.replace('#', '') : '';
+  if (clean.length !== 6) return '#1e293b';
+  const r = Math.max(0, Math.min(255, Math.round(parseInt(clean.slice(0, 2), 16) * factor)));
+  const g = Math.max(0, Math.min(255, Math.round(parseInt(clean.slice(2, 4), 16) * factor)));
+  const b = Math.max(0, Math.min(255, Math.round(parseInt(clean.slice(4, 6), 16) * factor)));
+  const out = `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
+  MINIMAP_WALL_COLOR_CACHE.set(key, out);
+  return out;
+}
+
+function getMinimapTileColor(x, y, tile, biomeId) {
+  const pal = BIOME_MINIMAP_PALETTE[biomeId] || BIOME_MINIMAP_PALETTE.forest;
+  if (tile === TILE.WATER) return '#0284c7';
+  if (tile === TILE.LAVA) return '#dc2626';
+  if (tile === TILE.ROOF) return x < 9 ? '#a855f7' : '#ef4444';
+  if (tile === TILE.WALL) return '#e2e8f0';
+  if (PATH_MINIMAP_TILES.has(tile)) return pal.path;
+  if (ENCOUNTER_TILE_BIOME[tile]) return pal.encounter;
+  if (SOLID_TILES.has(tile)) return darkenHexColor(pal.base, 0.46);
+  return pal.base;
+}
 
 function hash2d(x, y) {
   const n = Math.sin(x * 127.1 + y * 311.7) * 43758.5453;
@@ -619,6 +757,13 @@ export class OverworldEngine {
     this.rustleTile = null;
     this.rarePatches = [];
     this.rarePatchSpawnCooldown = 1.0;
+    this._warpBeam = null;
+
+    this.minimapCanvas = null;
+    this.minimapCtx = null;
+    this._minimapBaseCanvas = null;
+    this._minimapRecommendedBiomeId = null;
+    this._minimapCamOut = { px: 0, py: 0, camX: 0, camY: 0 };
 
     this.ambientMotes = Array.from({ length: 26 }, (_, i) => ({
       seed: i * 1.73,
@@ -831,6 +976,10 @@ export class OverworldEngine {
   destroy() {
     this.clearTouchNavigation();
     this._resizeObserver?.disconnect?.();
+    this.minimapCanvas = null;
+    this.minimapCtx = null;
+    this._minimapBaseCanvas = null;
+    this._warpBeam = null;
     if (!this.canvas || typeof this.canvas.removeEventListener !== 'function') return;
     if (this._onPointerDown) this.canvas.removeEventListener('pointerdown', this._onPointerDown);
     if (this._onPointerMove) this.canvas.removeEventListener('pointermove', this._onPointerMove);
@@ -1325,8 +1474,12 @@ export class OverworldEngine {
     this.moveProgress = 0;
     this.stepsSinceBattle = 4;
     this.encounterTileStreak = 0;
+    this.rustleTile = null;
     this.particles = [];
     this.ripples = [];
+    if (this.followerTrainerId && this.followerTrainerId !== profile.trainerId) {
+      this.rarePatches = [];
+    }
     this.rarePatchSpawnCooldown = 0;
     this.refreshRarePatches(profile, 0);
 
@@ -1353,10 +1506,12 @@ export class OverworldEngine {
       this.followerUid = leadMeta.uid;
       this.followerSpeciesId = leadMeta.speciesId;
       this.followerShiny = leadMeta.isShiny;
+      this.followerUpgradeTier = leadMeta.upgradeTier;
     }
     this.syncFollower();
 
     this.onBiomeChange?.(biome, false);
+    this.lastHintKey = null;
     this.refreshInteractHint();
   }
 
@@ -1367,8 +1522,11 @@ export class OverworldEngine {
     } else {
       this.clearTouchNavigation();
       this.moving = false;
+      this.moveProgress = 0;
       this.followerMoving = false;
       this.followerInitialized = false;
+      this.rustleTile = null;
+      this._warpBeam = null;
     }
   }
 
@@ -1603,6 +1761,116 @@ export class OverworldEngine {
     return count;
   }
 
+  /**
+   * Spawn swirling starlight particles and activate the vertical warp beam overlay.
+   * @param {'depart'|'arrive'} phase
+   * @param {number|null} tileX
+   * @param {number|null} tileY
+   */
+  triggerWarpEffect(phase = 'depart', tileX = null, tileY = null) {
+    const profile = this.getProfile?.();
+    const x = tileX !== null && tileX !== undefined && tileX !== '' && Number.isFinite(Number(tileX))
+      ? Number(tileX)
+      : (profile?.pos?.x ?? 8);
+    const y = tileY !== null && tileY !== undefined && tileY !== '' && Number.isFinite(Number(tileY))
+      ? Number(tileY)
+      : (profile?.pos?.y ?? 15);
+    const safePhase = phase === 'arrive' ? 'arrive' : 'depart';
+    const cx = x * this.tileSize + 16;
+    const cy = y * this.tileSize + 16;
+    const count = safePhase === 'depart' ? 16 : 22;
+
+    for (let i = 0; i < count; i++) {
+      const angle = (Math.PI * 2 * i) / count + (Math.random() - 0.5) * 0.25;
+      const radius = safePhase === 'depart' ? 10 + Math.random() * 6 : 3 + Math.random() * 5;
+      const radialSpeed = safePhase === 'depart' ? -14 - Math.random() * 14 : 24 + Math.random() * 28;
+      const swirlSpeed = safePhase === 'depart' ? 32 : 24;
+      const tx = -Math.sin(angle);
+      const ty = Math.cos(angle);
+      this.particles.push({
+        x: cx + Math.cos(angle) * radius,
+        y: cy + Math.sin(angle) * radius * 0.65,
+        vx: Math.cos(angle) * radialSpeed + tx * swirlSpeed,
+        vy: Math.sin(angle) * radialSpeed * 0.6 + ty * swirlSpeed * 0.4 - (safePhase === 'depart' ? 36 : 24),
+        life: 0,
+        maxLife: (safePhase === 'depart' ? 0.34 : 0.48) + Math.random() * 0.16,
+        color: WARP_SWIRL_COLORS[i % WARP_SWIRL_COLORS.length],
+        size: 2 + Math.random() * 2.2,
+      });
+    }
+
+    this._warpBeam = {
+      phase: safePhase,
+      x,
+      y,
+      life: 0,
+      maxLife: safePhase === 'depart' ? 0.32 : 0.52,
+    };
+    return this._warpBeam;
+  }
+
+  /**
+   * Relocate trainer and companion cleanly to a guaranteed-walkable landing tile.
+   * @param {number} x
+   * @param {number} y
+   * @param {string} dir
+   * @param {{ announceBiome?: boolean }} options
+   */
+  warpToPosition(x, y, dir = 'down', { announceBiome = false } = {}) {
+    this.clearTouchNavigation();
+    this.moving = false;
+    this.moveProgress = 0;
+    this.followerMoving = false;
+    this.rustleTile = null;
+
+    const safe = findNearestSafePosition(x, y, dir);
+    const profile = this.getProfile?.();
+
+    if (profile) {
+      if (!profile.pos || typeof profile.pos !== 'object') {
+        profile.pos = { x: safe.x, y: safe.y, dir: safe.dir };
+      } else {
+        profile.pos.x = safe.x;
+        profile.pos.y = safe.y;
+        profile.pos.dir = safe.dir;
+      }
+      this.moveStartX = safe.x;
+      this.moveStartY = safe.y;
+      this.moveTargetX = safe.x;
+      this.moveTargetY = safe.y;
+      this.stepsSinceBattle = 3;
+      this.encounterTileStreak = 0;
+
+      this._placeFollowerBehind(safe.x, safe.y, safe.dir);
+      this.followerTrainerId = profile.trainerId;
+      const leadMeta = this._readLeadMeta(profile.team?.[0] || null);
+      this.followerUid = leadMeta.uid;
+      this.followerSpeciesId = leadMeta.speciesId;
+      this.followerShiny = leadMeta.isShiny;
+      this.followerUpgradeTier = leadMeta.upgradeTier;
+      this.syncFollower(false);
+
+      this.ripples = [];
+      this.rarePatches = [];
+      this.rarePatchSpawnCooldown = 0;
+      this.refreshRarePatches(profile, 0);
+    }
+
+    const biome = getBiomeAt(safe.x, safe.y);
+    this.currentBiomeId = biome.id;
+    this.lastHintKey = null;
+    this.refreshInteractHint();
+    this.triggerWarpEffect('arrive', safe.x, safe.y);
+    this.triggerCelebrationBurst(safe.x, safe.y, 'starlight');
+
+    if (announceBiome) {
+      this.onBiomeChange?.(biome, true);
+    }
+
+    this.render(typeof performance !== 'undefined' ? performance.now() : Date.now());
+    return { x: safe.x, y: safe.y, dir: safe.dir, biomeId: this.currentBiomeId };
+  }
+
   spawnStepRipple(tx, ty) {
     const tile = WORLD_MAP[ty]?.[tx];
     if (tile === TILE.SHALLOW_WATER || tile === TILE.REEF_WATER) {
@@ -1618,6 +1886,14 @@ export class OverworldEngine {
   }
 
   update(dt, heldDir) {
+    if (this._warpBeam) {
+      const safeDt = Number.isFinite(dt) && dt > 0 ? dt : 0;
+      this._warpBeam.life += safeDt;
+      if (this._warpBeam.life >= this._warpBeam.maxLife) {
+        this._warpBeam = null;
+      }
+    }
+
     for (let i = this.particles.length - 1; i >= 0; i--) {
       const p = this.particles[i];
       p.life += dt;
@@ -2083,6 +2359,9 @@ export class OverworldEngine {
     // Draw hold/drag-steering reticle & chevron on top overlay layer
     this.drawTouchWayfinding(ctx, camX, camY, px, py, nowMs, profile, true);
 
+    // Draw luminous Starlight Warp beam & rune ring
+    this._drawWarpBeam(ctx, camX, camY, nowMs);
+
     // Draw particles
     for (let i = 0; i < this.particles.length; i++) {
       const p = this.particles[i];
@@ -2094,6 +2373,293 @@ export class OverworldEngine {
       ctx.fill();
     }
     ctx.globalAlpha = 1;
+  }
+
+  _drawWarpBeam(ctx, camX, camY, nowMs = 0) {
+    if (!this._warpBeam) return;
+    const { phase, x, y, life, maxLife } = this._warpBeam;
+    const progress = Math.max(0, Math.min(1, life / (maxLife || 0.35)));
+    const ts = this.tileSize;
+    const cx = Math.round(x * ts + ts / 2 - camX);
+    const cy = Math.round(y * ts + ts / 2 - camY);
+    const isDepart = phase === 'depart';
+    const alpha = isDepart
+      ? Math.max(0.15, Math.sin(progress * Math.PI * 0.85 + 0.15))
+      : Math.max(0, 1 - progress * progress);
+
+    const pillarW = isDepart
+      ? Math.max(4, 22 * (1 - progress * 0.55))
+      : Math.max(6, 26 * (1 - progress * 0.72));
+    const coreW = Math.max(2, pillarW * 0.42);
+    const pillarTop = Math.max(0, cy - 150);
+    const pillarHeight = cy + 12 - pillarTop;
+    const ringRadius = isDepart
+      ? 20 * (1 - progress * 0.7) + 4
+      : 6 + progress * 22;
+
+    ctx.save();
+    ctx.globalAlpha = alpha * 0.34;
+    ctx.fillStyle = '#38bdf8';
+    ctx.fillRect(Math.round(cx - pillarW / 2), pillarTop, Math.round(pillarW), pillarHeight);
+
+    ctx.globalAlpha = alpha * 0.42;
+    ctx.fillStyle = '#c084fc';
+    ctx.fillRect(Math.round(cx - pillarW * 0.36), pillarTop, Math.round(pillarW * 0.72), pillarHeight);
+
+    ctx.globalAlpha = alpha * 0.78;
+    ctx.fillStyle = '#fef08a';
+    ctx.fillRect(Math.round(cx - coreW / 2), pillarTop, Math.round(coreW), pillarHeight);
+
+    ctx.globalAlpha = alpha * 0.9;
+    ctx.strokeStyle = isDepart ? '#67e8f9' : '#fde047';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    if (typeof ctx.ellipse === 'function') {
+      ctx.ellipse(cx, cy + 10, ringRadius, ringRadius * 0.42, 0, 0, Math.PI * 2);
+    } else {
+      ctx.arc(cx, cy + 10, ringRadius, 0, Math.PI * 2);
+    }
+    ctx.stroke();
+
+    ctx.globalAlpha = alpha * 0.75;
+    ctx.strokeStyle = '#c084fc';
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    if (typeof ctx.ellipse === 'function') {
+      ctx.ellipse(cx, cy + 10, Math.max(3, ringRadius * 0.68), Math.max(1.5, ringRadius * 0.28), 0, 0, Math.PI * 2);
+    } else {
+      ctx.arc(cx, cy + 10, Math.max(3, ringRadius * 0.68), 0, Math.PI * 2);
+    }
+    ctx.stroke();
+
+    const spin = progress * Math.PI * 2 + nowMs * 0.008;
+    for (let i = 0; i < 4; i++) {
+      const a = spin + (Math.PI / 2) * i;
+      const sx = Math.round(cx + Math.cos(a) * ringRadius);
+      const sy = Math.round(cy + 10 + Math.sin(a) * ringRadius * 0.42);
+      ctx.fillStyle = i % 2 === 0 ? '#ffffff' : '#fde047';
+      ctx.fillRect(sx - 1, sy - 1, 3, 3);
+    }
+    ctx.restore();
+  }
+
+  /**
+   * Bind the 200x168 minimap canvas and build the cached offscreen base map once.
+   * @param {HTMLCanvasElement|null} canvasEl
+   */
+  attachMinimapCanvas(canvasEl) {
+    if (!canvasEl) {
+      this.minimapCanvas = null;
+      this.minimapCtx = null;
+      return;
+    }
+    this.minimapCanvas = canvasEl;
+    if (canvasEl.width !== MINIMAP_WIDTH) canvasEl.width = MINIMAP_WIDTH;
+    if (canvasEl.height !== MINIMAP_HEIGHT) canvasEl.height = MINIMAP_HEIGHT;
+    this.minimapCtx = canvasEl.getContext?.('2d') || null;
+    if (!this._minimapBaseCanvas) {
+      this._minimapBaseCanvas = this._buildMinimapBaseCanvas();
+    }
+  }
+
+  _buildMinimapBaseCanvas() {
+    if (this._minimapBaseCanvas) return this._minimapBaseCanvas;
+    if (typeof document === 'undefined' || typeof document.createElement !== 'function') {
+      return null;
+    }
+    const offscreen = document.createElement('canvas');
+    offscreen.width = MINIMAP_WIDTH;
+    offscreen.height = MINIMAP_HEIGHT;
+    const mctx = offscreen.getContext?.('2d');
+    if (!mctx) return null;
+
+    mctx.imageSmoothingEnabled = false;
+    for (let y = 0; y < WORLD_ROWS; y++) {
+      for (let x = 0; x < WORLD_COLS; x++) {
+        const tile = WORLD_MAP[y][x];
+        const biomeId = getBiomeAt(x, y).id;
+        mctx.fillStyle = getMinimapTileColor(x, y, tile, biomeId);
+        mctx.fillRect(x * MINIMAP_SCALE, y * MINIMAP_SCALE, MINIMAP_SCALE, MINIMAP_SCALE);
+        if (tile === TILE.FLOWER) {
+          mctx.fillStyle = BIOME_MINIMAP_PALETTE[biomeId]?.accent || '#f472b6';
+          mctx.fillRect(x * MINIMAP_SCALE, y * MINIMAP_SCALE, 1, 1);
+        }
+      }
+    }
+
+    this._minimapBaseCanvas = offscreen;
+    return offscreen;
+  }
+
+  /**
+   * Render the live Starlight Universe minimap with landmarks, recommended zone, viewport box, and trainer pip.
+   * @param {number} nowMs
+   * @param {{ recommendedBiomeId?: string|null }} opts
+   */
+  renderMinimap(nowMs = 0, opts = {}) {
+    const recommendedBiomeId = opts?.recommendedBiomeId || null;
+    this._minimapRecommendedBiomeId = recommendedBiomeId;
+    if (!this.minimapCanvas || !this.minimapCtx) return;
+
+    const mctx = this.minimapCtx;
+    const t = Number.isFinite(Number(nowMs)) ? Number(nowMs) : 0;
+    if (!this._minimapBaseCanvas) {
+      this._minimapBaseCanvas = this._buildMinimapBaseCanvas();
+    }
+
+    mctx.save?.();
+    mctx.setTransform?.(1, 0, 0, 1, 0, 0);
+    mctx.imageSmoothingEnabled = false;
+    mctx.clearRect(0, 0, MINIMAP_WIDTH, MINIMAP_HEIGHT);
+
+    if (this._minimapBaseCanvas) {
+      mctx.drawImage(this._minimapBaseCanvas, 0, 0);
+    } else {
+      mctx.fillStyle = '#0f172a';
+      mctx.fillRect(0, 0, MINIMAP_WIDTH, MINIMAP_HEIGHT);
+    }
+
+    const pulse = 0.5 + 0.5 * Math.sin(t * 0.005);
+
+    // 1. Recommended farming biome highlight wash, perimeter border, and warp target star
+    if (recommendedBiomeId && BIOMES[recommendedBiomeId]) {
+      const shape = BIOME_MINIMAP_SHAPES[recommendedBiomeId];
+      if (shape) {
+        mctx.fillStyle = `rgba(250, 204, 21, ${(0.1 + pulse * 0.1).toFixed(3)})`;
+        for (let i = 0; i < shape.spans.length; i++) {
+          const s = shape.spans[i];
+          mctx.fillRect(s.x * MINIMAP_SCALE, s.y * MINIMAP_SCALE, s.w * MINIMAP_SCALE, s.h * MINIMAP_SCALE);
+        }
+        mctx.strokeStyle = `rgba(253, 224, 71, ${(0.64 + pulse * 0.34).toFixed(3)})`;
+        mctx.lineWidth = 1.5;
+        mctx.beginPath();
+        for (let i = 0; i < shape.edges.length; i++) {
+          const [ex1, ey1, ex2, ey2] = shape.edges[i];
+          const cx1 = ex1 <= 0 ? 0.75 : ex1 >= MINIMAP_WIDTH ? MINIMAP_WIDTH - 0.75 : ex1;
+          const cy1 = ey1 <= 0 ? 0.75 : ey1 >= MINIMAP_HEIGHT ? MINIMAP_HEIGHT - 0.75 : ey1;
+          const cx2 = ex2 <= 0 ? 0.75 : ex2 >= MINIMAP_WIDTH ? MINIMAP_WIDTH - 0.75 : ex2;
+          const cy2 = ey2 <= 0 ? 0.75 : ey2 >= MINIMAP_HEIGHT ? MINIMAP_HEIGHT - 0.75 : ey2;
+          mctx.moveTo(cx1, cy1);
+          mctx.lineTo(cx2, cy2);
+        }
+        mctx.stroke();
+      }
+
+      const warp = getBiomeWarpPoint(recommendedBiomeId);
+      const wx = warp.x * MINIMAP_SCALE + 1;
+      const wy = warp.y * MINIMAP_SCALE + 1;
+      mctx.fillStyle = '#0f172a';
+      mctx.fillRect(wx - 2, wy - 2, 5, 5);
+      mctx.fillStyle = '#fde047';
+      mctx.fillRect(wx - 2, wy, 5, 1);
+      mctx.fillRect(wx, wy - 2, 1, 5);
+      mctx.fillStyle = '#ffffff';
+      mctx.fillRect(wx, wy, 1, 1);
+    }
+
+    // 2. Key Landmarks: Starlight Village home marker, 15 Heal spots, 20 Shrines
+    const homeX = 8 * MINIMAP_SCALE + 1;
+    const homeY = 15 * MINIMAP_SCALE + 1;
+    mctx.fillStyle = '#0f172a';
+    mctx.fillRect(homeX - 2, homeY - 2, 5, 5);
+    mctx.fillStyle = '#fde047';
+    mctx.fillRect(homeX - 1, homeY - 1, 3, 3);
+    mctx.fillStyle = '#ffffff';
+    mctx.fillRect(homeX, homeY, 1, 1);
+
+    for (let i = 0; i < HEAL_COORDS.length; i++) {
+      const h = HEAL_COORDS[i];
+      const hx = h.x * MINIMAP_SCALE;
+      const hy = h.y * MINIMAP_SCALE;
+      mctx.fillStyle = '#f472b6';
+      mctx.fillRect(hx - 1, hy, 4, 2);
+      mctx.fillRect(hx, hy - 1, 2, 4);
+      mctx.fillStyle = '#ffffff';
+      mctx.fillRect(hx, hy, 2, 2);
+    }
+
+    const profile = this.getProfile?.();
+    const clearedSet = new Set(profile?.shrinesCleared || []);
+    for (let i = 0; i < SHRINE_COORDS.length; i++) {
+      const s = SHRINE_COORDS[i];
+      const sx = s.x * MINIMAP_SCALE;
+      const sy = s.y * MINIMAP_SCALE;
+      mctx.fillStyle = '#0f172a';
+      mctx.fillRect(sx - 1, sy - 1, 4, 4);
+      mctx.fillStyle = clearedSet.has(s.id) ? '#4ade80' : '#c084fc';
+      mctx.fillRect(sx, sy, 2, 2);
+    }
+
+    // 3. Subtle translucent camera viewport rectangle
+    if (profile) {
+      const cam = this._getCameraPosition(profile, this._minimapCamOut);
+      const ts = this.tileSize || 32;
+      const vx = (cam.camX / ts) * MINIMAP_SCALE;
+      const vy = (cam.camY / ts) * MINIMAP_SCALE;
+      const vw = (this.viewW / ts) * MINIMAP_SCALE;
+      const vh = (this.viewH / ts) * MINIMAP_SCALE;
+
+      mctx.fillStyle = 'rgba(248, 250, 252, 0.08)';
+      mctx.fillRect(vx, vy, vw, vh);
+      mctx.strokeStyle = 'rgba(248, 250, 252, 0.56)';
+      mctx.lineWidth = 1;
+      mctx.strokeRect(vx + 0.5, vy + 0.5, Math.max(1, vw - 1), Math.max(1, vh - 1));
+
+      // 4. Live pulsing trainer marker at (px * 2 + 1, py * 2 + 1)
+      const tx = cam.px * MINIMAP_SCALE + 1;
+      const ty = cam.py * MINIMAP_SCALE + 1;
+      const look = this._getResolvedTrainerLookCached(profile.trainerId || 'violet', profile.appearance);
+      const accent = look?.accent || '#c084fc';
+      const trainerPulse = 0.5 + 0.5 * Math.sin(t * 0.008);
+
+      mctx.globalAlpha = 0.28 + trainerPulse * 0.14;
+      mctx.fillStyle = accent;
+      mctx.beginPath();
+      mctx.arc(tx, ty, 3.4 + trainerPulse * 1.4, 0, Math.PI * 2);
+      mctx.fill();
+
+      mctx.globalAlpha = 0.65 + trainerPulse * 0.35;
+      mctx.strokeStyle = accent;
+      mctx.lineWidth = 1.25;
+      mctx.beginPath();
+      mctx.arc(tx, ty, 3.2 + trainerPulse * 1.8, 0, Math.PI * 2);
+      mctx.stroke();
+
+      mctx.globalAlpha = 1;
+      mctx.fillStyle = '#0f172a';
+      mctx.beginPath();
+      mctx.arc(tx, ty, 2.6, 0, Math.PI * 2);
+      mctx.fill();
+
+      mctx.fillStyle = '#ffffff';
+      mctx.beginPath();
+      mctx.arc(tx, ty, 1.7, 0, Math.PI * 2);
+      mctx.fill();
+
+      mctx.fillStyle = '#fde047';
+      mctx.fillRect(Math.round(tx - 0.5), Math.round(ty - 0.5), 1, 1);
+    }
+
+    mctx.restore?.();
+  }
+
+  /**
+   * Diagnostics snapshot for minimap HUD tests and telemetry.
+   */
+  getMinimapState() {
+    const profile = this.getProfile?.();
+    const px = Number.isFinite(profile?.pos?.x) ? profile.pos.x : 8;
+    const py = Number.isFinite(profile?.pos?.y) ? profile.pos.y : 15;
+    return {
+      attached: Boolean(this.minimapCanvas),
+      baseCached: Boolean(this._minimapBaseCanvas),
+      width: MINIMAP_WIDTH,
+      height: MINIMAP_HEIGHT,
+      recommendedBiomeId: this._minimapRecommendedBiomeId || null,
+      trainerPos: { x: px, y: py },
+      shrineCount: SHRINE_COORDS.length,
+      healSpotCount: HEAL_COORDS.length,
+    };
   }
 
   drawStepRipples(ctx, camX, camY) {
@@ -2978,7 +3544,7 @@ export class OverworldEngine {
 
       case TILE.SHRINE: {
         const shrine = SHRINE_BY_TILE_INDEX.get(ty * WORLD_COLS + tx);
-        const cleared = shrine && profile.shrinesCleared.includes(shrine.id);
+        const cleared = shrine && Boolean(profile?.shrinesCleared?.includes(shrine.id));
         ctx.fillStyle = '#475569';
         ctx.fillRect(sx + 4, sy + 18, 24, 12);
         ctx.fillStyle = '#94a3b8';
@@ -3075,7 +3641,7 @@ export class OverworldEngine {
 
       case TILE.CHEST: {
         const chest = CHEST_BY_TILE_INDEX.get(ty * WORLD_COLS + tx);
-        const opened = chest && profile.chestsOpened.includes(chest.id);
+        const opened = chest && Boolean(profile?.chestsOpened?.includes(chest.id));
         ctx.fillStyle = opened ? '#64748b' : '#b45309';
         ctx.fillRect(sx + 6, sy + 10, 20, 16);
         ctx.fillStyle = opened ? '#94a3b8' : '#f59e0b';

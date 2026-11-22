@@ -119,6 +119,19 @@
 
         <div id="biome-banner" class="biome-banner" hidden>🌲 Whispering Forest</div>
 
+        <aside id="minimap-hud" class="minimap-hud" aria-label="Starlight Universe Minimap" hidden>
+          <div class="minimap-header">
+            <span id="minimap-zone-label" class="minimap-zone-label">🏡 Starlight Village</span>
+          </div>
+          <div id="minimap-canvas-wrap" class="minimap-canvas-wrap" role="button" tabindex="0" title="Tap to open Island Guide" aria-label="Open Starlight Island Guide">
+            <canvas id="minimap-canvas" width="200" height="168" class="minimap-canvas"></canvas>
+          </div>
+          <button id="warp-zone-btn" type="button" class="warp-zone-btn" title="Warp to current-level farming zone (T)">
+            <span class="warp-zone-icon" aria-hidden="true">✨</span>
+            <span id="warp-zone-label" class="warp-zone-label">Warp • Lv.2–7</span>
+          </button>
+        </aside>
+
         <button id="interact-pill" type="button" class="interact-pill" hidden>💬 Read Sign</button>
 
         <div id="world-dialogue" class="world-dialogue" hidden>
@@ -131,6 +144,12 @@
           <div class="encounter-beam encounter-beam-bottom" aria-hidden="true"></div>
           <div class="encounter-burst" aria-hidden="true"></div>
           <div id="encounter-callout" class="encounter-callout">⚡ WILD ENCOUNTER!</div>
+        </div>
+
+        <div id="warp-transition" class="warp-transition" hidden aria-hidden="true">
+          <div class="warp-starfield"></div>
+          <div class="warp-beam-pillar"></div>
+          <div id="warp-callout" class="warp-callout">🌟 Starlight Warp!</div>
         </div>
 
         <!-- Battle Arena Overlay -->
