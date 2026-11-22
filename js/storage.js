@@ -22,7 +22,7 @@ import { Pokemon, createStarterPokemon, getBondTier } from './pokemon.js';
 
 export const STORAGE_KEY = 'starlight_pokemon_save_v1';
 
-const SOLID_TILE_IDS = new Set([3, 4, 8, 11, 12, 14, 16, 17, 18, 21, 25]);
+const SOLID_TILE_IDS = new Set([3, 4, 8, 11, 12, 14, 16, 17, 18, 21, 25, 30, 33, 36, 39, 42, 45, 48]);
 const VALID_DIRS = new Set(['up', 'down', 'left', 'right']);
 const VALID_PACES = new Set(['cinema', 'classic', 'fast']);
 

@@ -23,6 +23,10 @@ const BIOME_SCALING_OFFSETS = {
   desert: 1,
   marsh: 2,
   sanctum: 3,
+  canyon: 2,
+  reef: 3,
+  ruins: 3,
+  rift: 4,
 };
 
 function resolveAbilityId(monOrSpecies) {
@@ -80,12 +84,16 @@ export function evaluateEntryAbility(mon) {
   const stat = ['atk', 'def', 'spd'].includes(ability.stat) ? ability.stat : 'atk';
   const stages = Number.isFinite(Number(ability.stages)) ? Number(ability.stages) : 1;
   const statLabel = { atk: 'Attack', def: 'Defense', spd: 'Speed' }[stat] || stat.toUpperCase();
+  const grantShield = Boolean(ability.grantShield);
+  const shieldTurns = grantShield ? (Number(ability.shieldTurns) || 1) : 0;
   return {
     abilityId: ability.id,
     ability,
     stat,
     stages,
-    summary: `${statLabel} +${stages}`,
+    grantShield,
+    shieldTurns,
+    summary: grantShield ? `${statLabel} +${stages} & Shield!` : `${statLabel} +${stages}`,
   };
 }
 
@@ -93,17 +101,39 @@ export function evaluateTurnEndAbility(mon) {
   if (!mon || mon.isFainted) return null;
   const hp = Number(mon.hp);
   const maxHp = Number(mon.maxHp);
-  if (!Number.isFinite(hp) || !Number.isFinite(maxHp) || hp <= 0 || hp >= maxHp) {
+  if (!Number.isFinite(hp) || !Number.isFinite(maxHp) || hp <= 0 || maxHp <= 0) {
     return null;
   }
   const ability = getPokemonAbility(mon);
   if (!ability || ability.trigger !== 'turn_end') return null;
+
+  if (ability.id === 'thunder_steppe' || ability.boostStat) {
+    const boostStat = ['atk', 'def', 'spd'].includes(ability.boostStat) ? ability.boostStat : 'spd';
+    const boostStages = Number.isFinite(Number(ability.boostStages)) ? Number(ability.boostStages) : 1;
+    const currentStage = Number(mon.battleStages?.[boostStat]) || 0;
+    if (currentStage >= 2) return null;
+    const statLabel = { atk: 'Attack', def: 'Defense', spd: 'Speed' }[boostStat] || boostStat.toUpperCase();
+    return {
+      abilityId: ability.id,
+      ability,
+      heal: 0,
+      boostStat,
+      boostStages,
+      summary: `${statLabel} +${boostStages}!`,
+    };
+  }
+
+  if (hp >= maxHp) {
+    return null;
+  }
 
   const heal = Math.max(1, Math.round(maxHp * 0.08));
   return {
     abilityId: ability.id,
     ability,
     heal,
+    boostStat: null,
+    boostStages: 0,
     summary: `+${heal} HP`,
   };
 }
@@ -634,6 +664,30 @@ export function rollWildPokemon(biomeId, avgTeamLevelOrProfile = 5, options = {}
         appendRoamer(384, 4);
         appendRoamer(249, 4);
       }
+    } else if (biomeId === 'canyon') {
+      if (cleared.has('canyon_shrine')) {
+        appendRoamer(243, 5);
+        appendRoamer(244, 4);
+      }
+    } else if (biomeId === 'reef') {
+      if (cleared.has('reef_shrine')) {
+        appendRoamer(382, 5);
+        appendRoamer(245, 4);
+      }
+    } else if (biomeId === 'ruins') {
+      if (cleared.has('ruins_shrine')) {
+        appendRoamer(483, 5);
+        appendRoamer(486, 4);
+      }
+    } else if (biomeId === 'rift') {
+      if (cleared.has('rift_shrine')) {
+        appendRoamer(493, 4);
+        appendRoamer(150, 5);
+        appendRoamer(250, 4);
+        appendRoamer(643, 4);
+        appendRoamer(644, 4);
+        appendRoamer(649, 4);
+      }
     }
   }
 
@@ -818,12 +872,48 @@ const TYPE_BOOST_ABILITY_IDS = new Set([
   'mystic_prism',
   'shadow_cloak',
   'dragon_heart',
+  'aurora_cloak',
 ]);
 
-function evaluateOffensiveAbility(attacker, move) {
+export function evaluateOffensiveAbility(attacker, move) {
   const ability = getPokemonAbility(attacker);
-  if (!ability || ability.trigger !== 'attack' || !move?.type) return null;
-  if (move.type !== ability.type) return null;
+  if (!ability || ability.trigger !== 'attack' || !move) return null;
+
+  if (ability.id === 'champion_spirit') {
+    if (move.damageClass !== 'physical') return null;
+    const hp = Number(attacker?.hp);
+    const maxHp = Number(attacker?.maxHp);
+    const isPinch = Number.isFinite(hp) && Number.isFinite(maxHp) && maxHp > 0 && hp > 0 && hp <= maxHp * 0.5;
+    const mult = isPinch ? 1.3 : 1.2;
+    return {
+      abilityId: ability.id,
+      ability,
+      mult,
+      summary: isPinch ? 'Valor +30%' : 'Valor +20%',
+    };
+  }
+
+  if (!move.type || move.type !== ability.type) return null;
+
+  if (ability.id === 'nectar_siphon') {
+    return {
+      abilityId: ability.id,
+      ability,
+      mult: 1.15,
+      drainRatio: 0.2,
+      summary: 'Grass +15% & Drain!',
+    };
+  }
+
+  if (ability.id === 'rail_overload') {
+    return {
+      abilityId: ability.id,
+      ability,
+      mult: 1.2,
+      critBonus: 0.15,
+      summary: 'Electric +20%',
+    };
+  }
 
   let mult = 1;
   if (PINCH_ABILITY_IDS.has(ability.id)) {
@@ -846,7 +936,7 @@ function evaluateOffensiveAbility(attacker, move) {
   };
 }
 
-function evaluateDefensiveAbility(defender, move) {
+export function evaluateDefensiveAbility(defender, move, effectiveness = 1) {
   const ability = getPokemonAbility(defender);
   if (!ability || ability.trigger !== 'defense') return null;
 
@@ -856,6 +946,34 @@ function evaluateDefensiveAbility(defender, move) {
       ability,
       mult: 0.75,
       summary: '-25% Damage',
+    };
+  }
+
+  if (ability.id === 'magma_armor' && (move?.type === 'grass' || move?.type === 'ice' || move?.type === 'fire')) {
+    return {
+      abilityId: ability.id,
+      ability,
+      mult: 0.75,
+      summary: '-25% Damage',
+    };
+  }
+
+  if (ability.id === 'fossil_bastion' && Number(effectiveness) > 1) {
+    return {
+      abilityId: ability.id,
+      ability,
+      mult: 0.75,
+      summary: 'Relic -25%',
+    };
+  }
+
+  if (ability.id === 'phantom_mirage' && (move?.type === 'normal' || move?.type === 'psychic' || move?.type === 'rock')) {
+    return {
+      abilityId: ability.id,
+      ability,
+      mult: 0.75,
+      counterBoostStat: 'spd',
+      summary: '-25% & SPD +1!',
     };
   }
 
@@ -940,9 +1058,13 @@ export function calculateDamage(attacker, defender, move, options = {}) {
     };
   }
 
+  const applyAbilities = options?.applyAbilities === true;
+  let attackerAbilityTrigger = applyAbilities ? evaluateOffensiveAbility(attacker, move) : null;
+
   const stab = attacker?.type && move?.type && attacker.type === move.type ? 1.25 : 1;
   const effectiveness = getTypeEffectiveness(move?.type, defender?.type);
-  const critChance = 0.08 + getBondTier(attacker?.bond).critBonus;
+  const abilityCritBonus = Number(attackerAbilityTrigger?.critBonus) || 0;
+  const critChance = 0.08 + getBondTier(attacker?.bond).critBonus + abilityCritBonus;
   const isCrit = options.forceCrit !== undefined ? Boolean(options.forceCrit) : Math.random() < critChance;
   const critMult = isCrit ? 1.5 : 1;
   const variance = Number.isFinite(Number(options.fixedVariance))
@@ -960,21 +1082,27 @@ export function calculateDamage(attacker, defender, move, options = {}) {
   const basePower = (((2 * safeLv) / 5 + 2) * safePower * (safeAtk / safeDef)) / 18 + 2;
   const shieldMult = (Number(defender?.shieldTurns) || 0) > 0 ? 0.65 : 1;
 
-  const applyAbilities = options?.applyAbilities === true;
-  const attackerAbilityTrigger = applyAbilities ? evaluateOffensiveAbility(attacker, move) : null;
-  const defenderAbilityTrigger = applyAbilities ? evaluateDefensiveAbility(defender, move) : null;
+  const defenderAbilityTrigger = applyAbilities ? evaluateDefensiveAbility(defender, move, effectiveness) : null;
   const attackerAbMult = attackerAbilityTrigger ? attackerAbilityTrigger.mult : 1;
   const defenderAbMult = defenderAbilityTrigger ? defenderAbilityTrigger.mult : 1;
 
-  const damage = Math.max(
+  const rawDamage = Math.max(
     1,
     Math.round(basePower * stab * effectiveness * critMult * variance * shieldMult * attackerAbMult * defenderAbMult),
   );
+  const damage = Number.isFinite(rawDamage) ? rawDamage : 1;
+
+  if (attackerAbilityTrigger && attackerAbilityTrigger.drainRatio) {
+    attackerAbilityTrigger = {
+      ...attackerAbilityTrigger,
+      drainHeal: Math.max(1, Math.round(damage * attackerAbilityTrigger.drainRatio)),
+    };
+  }
 
   return {
     category: 'attack',
     heal: 0,
-    damage: Number.isFinite(damage) ? damage : 1,
+    damage,
     effectiveness,
     isCrit,
     missed: false,
