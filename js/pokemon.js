@@ -1,5 +1,6 @@
 import {
   ABILITIES,
+  ENCOUNTER_TRAITS,
   SPECIES,
   MOVES,
   TYPE_CHART,
@@ -11,6 +12,18 @@ import {
 } from './config.js';
 
 export const MAX_UPGRADE_TIER = 5;
+const MAX_RECENT_ENCOUNTERS = 8;
+const VALID_ENCOUNTER_TRAITS = new Set(['curious', 'treasure', 'spirited', 'apex']);
+
+let recentWildEncounters = [];
+
+export function resetEncounterHistory() {
+  recentWildEncounters = [];
+}
+
+function normalizeEncounterTrait(raw) {
+  return typeof raw === 'string' && VALID_ENCOUNTER_TRAITS.has(raw) ? raw : null;
+}
 
 const BIOME_SCALING_OFFSETS = {
   village: -2,
@@ -196,6 +209,7 @@ export class Pokemon {
     bond = 20,
     upgradeTier = 0,
     isElite = false,
+    encounterTrait = null,
   }) {
     const species = SPECIES[speciesId];
     if (!species) {
@@ -211,6 +225,7 @@ export class Pokemon {
     this.bond = normalizeBond(bond);
     this.upgradeTier = normalizeUpgradeTier(upgradeTier);
     this.isElite = Boolean(isElite);
+    this.encounterTrait = normalizeEncounterTrait(encounterTrait);
 
     this.maxHp = 20;
     this.atk = 10;
@@ -532,6 +547,7 @@ export class Pokemon {
       bond: this.bond,
       upgradeTier: this.upgradeTier,
       isElite: Boolean(this.isElite),
+      encounterTrait: this.encounterTrait,
       movePp: { ...this.movePp },
     };
   }
@@ -551,6 +567,7 @@ export function createPokemon(speciesId, level = 5, biome = 'wild', options = {}
     bond: options?.bond ?? 20,
     upgradeTier: options?.upgradeTier ?? 0,
     isElite: Boolean(options?.isElite),
+    encounterTrait: options?.encounterTrait ?? null,
   });
 }
 
@@ -625,6 +642,27 @@ export function getBiomeScaledRange(biomeId, profile = null) {
   };
 }
 
+function isCaughtInProfile(profile, speciesId) {
+  if (!profile || typeof profile !== 'object') return false;
+  const caughtMap = profile.pokedex?.caught;
+  if (!caughtMap) return false;
+  if (Array.isArray(caughtMap)) return caughtMap.includes(speciesId);
+  const val = caughtMap[speciesId];
+  return val === true || (Number.isFinite(Number(val)) && Number(val) > 0);
+}
+
+function sanitizeEncounterHistory(list) {
+  if (!Array.isArray(list)) return [];
+  const out = [];
+  for (const rawId of list) {
+    const numId = Number(rawId);
+    if (Number.isInteger(numId) && SPECIES[numId]) {
+      out.push(numId);
+    }
+  }
+  return out.slice(-MAX_RECENT_ENCOUNTERS);
+}
+
 export function rollWildPokemon(biomeId, avgTeamLevelOrProfile = 5, options = {}) {
   const biome = BIOMES[biomeId];
   if (!biome || !biome.encounters.length) return null;
@@ -633,6 +671,11 @@ export function rollWildPokemon(biomeId, avgTeamLevelOrProfile = 5, options = {}
   const profile = isProfile ? avgTeamLevelOrProfile : null;
   const badgesCount = Array.isArray(profile?.badges) ? profile.badges.length : 0;
   const isRarePatch = Boolean(options?.isRarePatch);
+  const disableAntiRepeat = options?.disableAntiRepeat === true;
+
+  const recentHistory = isProfile && Array.isArray(profile.recentEncounters)
+    ? sanitizeEncounterHistory(profile.recentEncounters)
+    : sanitizeEncounterHistory(recentWildEncounters);
 
   const weightedPool = biome.encounters.map((entry) => ({
     id: entry.id,
@@ -729,15 +772,60 @@ export function rollWildPokemon(biomeId, avgTeamLevelOrProfile = 5, options = {}
     }
   }
 
-  const totalWeight = weightedPool.reduce((sum, entry) => sum + entry.weight, 0);
-  let roll = Math.random() * totalWeight;
-  let pickedId = weightedPool[0].id;
   for (const entry of weightedPool) {
-    roll -= entry.weight;
-    if (roll <= 0) {
-      pickedId = entry.id;
-      break;
+    if (isProfile && !isCaughtInProfile(profile, entry.id)) {
+      entry.weight *= 1.35;
     }
+    entry.baseWeight = entry.weight;
+  }
+
+  const distinctSpeciesCount = new Set(weightedPool.map((entry) => entry.id)).size;
+  const prevSpeciesId = recentHistory.length > 0 ? recentHistory[recentHistory.length - 1] : null;
+  const priorRecentSet = new Set(recentHistory.slice(-4, -1));
+
+  if (!disableAntiRepeat && distinctSpeciesCount > 1) {
+    for (const entry of weightedPool) {
+      if (prevSpeciesId !== null && entry.id === prevSpeciesId) {
+        entry.weight = 0;
+      } else if (priorRecentSet.has(entry.id)) {
+        entry.weight *= 0.15;
+      }
+    }
+
+    const postWeightTotal = weightedPool.reduce((sum, entry) => sum + Math.max(0, entry.weight), 0);
+    if (postWeightTotal <= 0) {
+      for (const entry of weightedPool) {
+        if (entry.baseWeight > 0 && (prevSpeciesId === null || entry.id !== prevSpeciesId)) {
+          entry.weight = 1;
+        }
+      }
+      const fallbackTotal = weightedPool.reduce((sum, entry) => sum + Math.max(0, entry.weight), 0);
+      if (fallbackTotal <= 0) {
+        for (const entry of weightedPool) {
+          if (entry.baseWeight > 0) entry.weight = 1;
+        }
+      }
+    }
+  }
+
+  const totalWeight = weightedPool.reduce((sum, entry) => sum + Math.max(0, entry.weight), 0);
+  const positiveEntries = weightedPool.filter((entry) => entry.weight > 0);
+  let pickedId = (positiveEntries[0] || weightedPool[0]).id;
+  if (totalWeight > 0) {
+    let roll = Math.random() * totalWeight;
+    for (const entry of weightedPool) {
+      if (entry.weight <= 0) continue;
+      roll -= entry.weight;
+      if (roll <= 0) {
+        pickedId = entry.id;
+        break;
+      }
+    }
+  }
+
+  recentWildEncounters = [...recentWildEncounters, pickedId].slice(-MAX_RECENT_ENCOUNTERS);
+  if (isProfile) {
+    profile.recentEncounters = [...recentHistory, pickedId].slice(-MAX_RECENT_ENCOUNTERS);
   }
 
   let minLv;
@@ -775,22 +863,58 @@ export function rollWildPokemon(biomeId, avgTeamLevelOrProfile = 5, options = {}
     upgradeTier = 1 + Math.floor(Math.random() * maxEliteTier);
   }
 
+  const rawDepth = options?.depthTier;
+  const depthTier = (
+    rawDepth !== null
+    && rawDepth !== undefined
+    && rawDepth !== ''
+    && typeof rawDepth !== 'boolean'
+    && Number.isFinite(Number(rawDepth))
+  )
+    ? Math.max(0, Math.min(2, Math.floor(Number(rawDepth))))
+    : 0;
+  const depthBoost = depthTier === 1
+    ? 1 + Math.floor(Math.random() * 2)
+    : (depthTier >= 2 ? 2 + Math.floor(Math.random() * 3) : 0);
+
   const rareBoost = isRarePatch ? 1 + Math.floor(Math.random() * 2) : 0;
   const eliteBoost = isElite ? 1 : 0;
   const levelBonus = Number.isFinite(Number(options?.levelBonus)) ? Math.round(Number(options.levelBonus)) : 0;
   const maxAllowed = Math.min(50, maxLv + rareBoost + eliteBoost + Math.max(0, levelBonus));
-  const span = Math.max(
+  const baseSpan = Math.max(
     minLv,
     Math.min(maxAllowed, targetCenter + Math.floor(Math.random() * 3) - 1 + rareBoost + eliteBoost + levelBonus),
   );
+  const finalLevel = Math.max(1, Math.min(50, baseSpan + depthBoost));
 
   const shinyChance = isRarePatch ? 1 / 6 : 0.05;
   const isShiny = options?.forceShiny !== undefined ? Boolean(options.forceShiny) : Math.random() < shinyChance;
 
-  return createPokemon(pickedId, Math.max(1, Math.min(50, span)), biomeId, {
+  let encounterTrait = null;
+  if (options?.encounterTrait !== undefined) {
+    encounterTrait = normalizeEncounterTrait(options.encounterTrait);
+  } else if (isElite || depthTier === 2) {
+    encounterTrait = 'apex';
+  } else {
+    const traitRoll = Math.random();
+    if (isRarePatch) {
+      if (traitRoll < 0.34) encounterTrait = 'curious';
+      else if (traitRoll < 0.67) encounterTrait = 'treasure';
+      else encounterTrait = 'spirited';
+    } else if (traitRoll < 0.18) {
+      encounterTrait = 'curious';
+    } else if (traitRoll < 0.36) {
+      encounterTrait = 'treasure';
+    } else if (traitRoll < 0.54) {
+      encounterTrait = 'spirited';
+    }
+  }
+
+  return createPokemon(pickedId, finalLevel, biomeId, {
     isShiny,
     upgradeTier,
     isElite,
+    encounterTrait,
   });
 }
 
@@ -817,6 +941,60 @@ export function getScaledShrineGuard(shrine, profile = null) {
   return { guardianId, level, upgradeTier };
 }
 
+const SHRINE_TRIAL_ROAMERS_BY_BIOME = {
+  forest: [251, 385, 151, 492, 640],
+  cave: [150, 377, 379, 488, 719],
+  water: [245, 382, 249, 490],
+  volcano: [146, 145, 244, 383, 485],
+  peak: [144, 151, 384, 380, 381],
+  grove: [385, 251, 151, 492, 716],
+  desert: [248, 383, 377, 639, 718],
+  marsh: [251, 385, 491, 488, 647],
+  sanctum: [384, 249, 150, 250, 381],
+  canyon: [243, 244, 145, 642],
+  reef: [382, 245, 249, 490],
+  ruins: [483, 486, 484, 487, 379],
+  rift: [493, 150, 250, 643, 644, 649],
+  faeveldt: [717, 718, 719, 720, 721],
+  atoll: [792, 800, 801, 802, 807, 808],
+  highlands: [889, 890, 893, 898, 905],
+  crater: [1007, 1008, 1009, 1010, 1017, 1025],
+};
+
+const FALLBACK_SHRINE_TRIAL_LEGENDARIES = [144, 145, 146, 150, 151, 243, 244, 245];
+
+export function getScaledShrineTrial(shrine, profile = null) {
+  const baseGuardId = Number(shrine?.guardianId);
+  const biomeRoamers = SHRINE_TRIAL_ROAMERS_BY_BIOME[shrine?.biome] || [];
+  const poolSet = new Set();
+  if (Number.isInteger(baseGuardId) && SPECIES[baseGuardId]) {
+    poolSet.add(baseGuardId);
+  }
+  for (const id of biomeRoamers) {
+    if (SPECIES[id]) poolSet.add(id);
+  }
+  for (const id of FALLBACK_SHRINE_TRIAL_LEGENDARIES) {
+    if (poolSet.size >= 4) break;
+    if (SPECIES[id]) poolSet.add(id);
+  }
+  const pool = [...poolSet];
+
+  const trialCount = Math.max(0, Math.floor(Number(profile?.shrineTrialCounts?.[shrine?.id]) || 0));
+  const guardianId = pool[(trialCount + 1) % pool.length];
+  const shrineBaseLv = Math.max(1, Math.min(50, Number(shrine?.level) || 10));
+  const power = profile ? Math.round(getTrainerPowerLevel(profile)) : shrineBaseLv;
+  const level = Math.min(50, Math.max(shrineBaseLv + 3, power + 3 + Math.min(5, trialCount)));
+  const upgradeTier = Math.min(MAX_UPGRADE_TIER, Math.max(2, Math.floor(level / 10)));
+
+  return {
+    guardianId,
+    level,
+    upgradeTier,
+    isElite: true,
+    trialNumber: trialCount + 1,
+  };
+}
+
 function evolveSpeciesForLevel(speciesId, targetLevel) {
   let currentId = Number(speciesId);
   const visited = new Set([currentId]);
@@ -839,9 +1017,79 @@ export function getScaledRivalParty(rival, profile = null) {
     : [{ speciesId: 25, level: 6 }];
 
   const isRematch = Boolean(profile?.rivalsDefeated?.includes(rival?.id));
-  const rematchBoost = isRematch ? 2 : 0;
+  const rematchCount = isRematch
+    ? Math.max(0, Math.floor(Number(profile?.rivalRematchCounts?.[rival?.id]) || 0))
+    : 0;
+  const rematchBoost = isRematch ? 2 + Math.min(6, rematchCount * 2) : 0;
   const power = profile ? getTrainerPowerLevel(profile) : 5;
   const badgesCount = Array.isArray(profile?.badges) ? profile.badges.length : 0;
+
+  const validRematchPool = Array.isArray(rival?.rematchPool)
+    ? [...new Set(rival.rematchPool.map(Number).filter((id) => Number.isInteger(id) && Boolean(SPECIES[id])))]
+    : [];
+
+  if (isRematch && validRematchPool.length >= 3) {
+    const desiredSize = rawParty.length <= 2
+      ? (rawParty.length === 2 && rematchCount === 0 ? 2 : Math.min(4, rematchCount >= 2 ? 4 : 3))
+      : Math.min(4, rematchCount >= 1 ? 4 : 3);
+    const maxRotatedSize = validRematchPool.length <= 3 ? 3 : 4;
+    const partySize = Math.max(2, Math.min(desiredSize, maxRotatedSize));
+
+    const aceEntry = rawParty[rawParty.length - 1];
+    const aceBaseId = Number(aceEntry?.speciesId ?? aceEntry?.id);
+    const aceBaseLv = Math.max(1, Math.min(50, Number(aceEntry?.level) || 6));
+    const aceTargetLv = Math.round(power + rematchBoost + 1);
+    const aceLevel = Math.min(50, Math.max(Math.min(50, aceBaseLv + rematchBoost), Math.min(50, aceTargetLv)));
+    const aceSpeciesId = SPECIES[aceBaseId] ? evolveSpeciesForLevel(aceBaseId, aceLevel) : validRematchPool[0];
+
+    const firstRawId = Number(rawParty[0]?.speciesId ?? rawParty[0]?.id);
+    const supportCount = partySize - 1;
+    const avgSupportLv = Math.min(50, Math.max(1, Math.round(power + rematchBoost - 1)));
+    const eligiblePool = [];
+    const seenEligibleEvolved = new Set([aceSpeciesId]);
+    for (const candBaseId of validRematchPool) {
+      const approxEvolved = evolveSpeciesForLevel(candBaseId, avgSupportLv);
+      if (seenEligibleEvolved.has(approxEvolved)) continue;
+      seenEligibleEvolved.add(approxEvolved);
+      eligiblePool.push(candBaseId);
+    }
+    const rotationPool = eligiblePool.length >= supportCount ? eligiblePool : validRematchPool;
+    const shift = rematchCount % rotationPool.length;
+    const picked = [];
+    const usedSpecies = new Set([aceSpeciesId]);
+
+    for (let pass = 0; pass < 2 && picked.length < supportCount; pass += 1) {
+      for (let k = 0; k < rotationPool.length && picked.length < supportCount; k += 1) {
+        const candBaseId = rotationPool[(shift + k) % rotationPool.length];
+        const slotIdx = picked.length;
+        const rawSlot = rawParty[Math.min(slotIdx, rawParty.length - 1)];
+        const baseLv = Math.max(1, Math.min(50, Number(rawSlot?.level) || Math.max(1, aceBaseLv - (partySize - 1 - slotIdx))));
+        const slotOffset = -(partySize - 1 - slotIdx);
+        const targetLv = Math.round(power + rematchBoost + slotOffset);
+        const level = Math.min(50, Math.max(Math.min(50, baseLv + rematchBoost), Math.min(50, targetLv)));
+        const evolvedId = evolveSpeciesForLevel(candBaseId, level);
+
+        if (usedSpecies.has(evolvedId)) continue;
+        if (pass === 0 && slotIdx === 0 && rematchCount === 0 && evolvedId === firstRawId && rotationPool.length > supportCount) continue;
+
+        usedSpecies.add(evolvedId);
+        const delta = Math.max(0, level - baseLv);
+        const upgradeTier = Math.min(
+          MAX_UPGRADE_TIER,
+          Math.max(delta >= 2 ? 1 : 0, Math.floor(delta / 6) + Math.floor(badgesCount / 5) + (rematchCount >= 2 ? 1 : 0)),
+        );
+        picked.push({ speciesId: evolvedId, level, upgradeTier });
+      }
+    }
+
+    const aceDelta = Math.max(0, aceLevel - aceBaseLv);
+    const aceTier = Math.min(
+      MAX_UPGRADE_TIER,
+      Math.max(aceDelta >= 2 ? 1 : 0, Math.floor(aceDelta / 6) + Math.floor(badgesCount / 5) + (rematchCount >= 2 ? 1 : 0)),
+    );
+    picked.push({ speciesId: aceSpeciesId, level: aceLevel, upgradeTier: aceTier });
+    return picked;
+  }
 
   return rawParty
     .map((entry, idx) => {
@@ -874,7 +1122,12 @@ export function getScaledRivalParty(rival, profile = null) {
 }
 
 export function getBattleShardReward(enemy, options = {}) {
-  const { isShrine = false, isTrainer = false, caught = false } = options || {};
+  const {
+    isShrine = false,
+    isTrainer = false,
+    caught = false,
+    includeTraitBonus = true,
+  } = options || {};
   const tier = Math.max(0, Number(enemy?.upgradeTier) || 0);
   const level = Math.max(1, Number(enemy?.level) || 1);
   const isElite = Boolean(enemy?.isElite);
@@ -892,6 +1145,11 @@ export function getBattleShardReward(enemy, options = {}) {
 
   if (caught && (isElite || level >= 15)) {
     reward += 1;
+  }
+
+  const traitId = options?.encounterTrait ?? enemy?.encounterTrait ?? null;
+  if (!isTrainer && includeTraitBonus && traitId && ENCOUNTER_TRAITS?.[traitId]?.shardBonus) {
+    reward += ENCOUNTER_TRAITS[traitId].shardBonus;
   }
 
   return Math.max(1, Math.round(reward));
@@ -1172,10 +1430,12 @@ export function calculateDamage(attacker, defender, move, options = {}) {
   const defenderAbilityTrigger = applyAbilities ? evaluateDefensiveAbility(defender, move, effectiveness) : null;
   const attackerAbMult = attackerAbilityTrigger ? attackerAbilityTrigger.mult : 1;
   const defenderAbMult = defenderAbilityTrigger ? defenderAbilityTrigger.mult : 1;
+  const traitId = options?.encounterTrait ?? (options?.applyEncounterTraits === true ? attacker?.encounterTrait : null);
+  const traitDmgMult = traitId && ENCOUNTER_TRAITS?.[traitId]?.dmgMult ? ENCOUNTER_TRAITS[traitId].dmgMult : 1;
 
   const rawDamage = Math.max(
     1,
-    Math.round(basePower * stab * effectiveness * critMult * variance * shieldMult * attackerAbMult * defenderAbMult),
+    Math.round(basePower * stab * effectiveness * critMult * variance * shieldMult * attackerAbMult * defenderAbMult * traitDmgMult),
   );
   const damage = Number.isFinite(rawDamage) ? rawDamage : 1;
 
@@ -1198,7 +1458,7 @@ export function calculateDamage(attacker, defender, move, options = {}) {
   };
 }
 
-export function calculateCatchAttempt(wildPokemon, ballBonus = 1.0) {
+export function calculateCatchAttempt(wildPokemon, ballBonus = 1.0, options = {}) {
   const rawMaxHp = Number(wildPokemon?.maxHp);
   const safeMaxHp = Number.isFinite(rawMaxHp) && rawMaxHp > 0 ? rawMaxHp : 1;
   const rawHp = Number(wildPokemon?.hp);
@@ -1209,8 +1469,10 @@ export function calculateCatchAttempt(wildPokemon, ballBonus = 1.0) {
   const factor = Number.isFinite(rawFactor) && rawFactor > 0 ? rawFactor : 0.78;
   const rawBonus = Number(ballBonus);
   const safeBonus = Number.isFinite(rawBonus) && rawBonus > 0 ? rawBonus : 1.0;
+  const traitId = options?.encounterTrait ?? wildPokemon?.encounterTrait ?? null;
+  const traitCatchMult = traitId && ENCOUNTER_TRAITS?.[traitId]?.catchMult ? ENCOUNTER_TRAITS[traitId].catchMult : 1.0;
 
-  const raw = (1 - 0.68 * hpRatio) * factor * safeBonus;
+  const raw = (1 - 0.68 * hpRatio) * factor * safeBonus * traitCatchMult;
   const chance = raw <= 0.82
     ? Math.max(0.08, raw)
     : Math.min(0.995, 0.82 + 0.175 * (1 - Math.exp(-(raw - 0.82) * 1.8)));

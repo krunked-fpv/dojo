@@ -396,6 +396,74 @@ function hydrateStarShards(rawShards, fallback = 2) {
   return Number.isFinite(num) ? Math.max(0, Math.floor(num)) : fallback;
 }
 
+function toNonNegInt(rawVal, fallback = 0) {
+  if (rawVal === null || rawVal === undefined || rawVal === '' || typeof rawVal === 'boolean') {
+    return fallback;
+  }
+  const num = Number(rawVal);
+  return Number.isFinite(num) ? Math.max(0, Math.floor(num)) : fallback;
+}
+
+function hydrateCountMap(rawMap) {
+  const out = {};
+  if (!isPlainObject(rawMap)) return out;
+  for (const [key, rawVal] of Object.entries(rawMap)) {
+    const id = String(key).trim();
+    if (!id) continue;
+    if (rawVal === null || rawVal === undefined || rawVal === '' || typeof rawVal === 'boolean') continue;
+    const num = Number(rawVal);
+    if (Number.isFinite(num) && num >= 0) {
+      out[id] = Math.floor(num);
+    }
+  }
+  return out;
+}
+
+function hydrateRecentEncounters(rawList) {
+  if (!Array.isArray(rawList)) return [];
+  const valid = [];
+  for (const item of rawList) {
+    const id = resolveSpeciesId(item);
+    if (id !== null) {
+      valid.push(id);
+    }
+  }
+  return valid.slice(-8);
+}
+
+function getCaughtSpeciesCount(profile) {
+  const caught = profile?.pokedex?.caught;
+  if (!isPlainObject(caught)) return 0;
+  return Object.values(caught).filter((val) => val === true || (Number.isFinite(Number(val)) && Number(val) > 0)).length;
+}
+
+function hydrateArcade(rawArcade, autoUnlocked = false) {
+  const src = isPlainObject(rawArcade) ? rawArcade : {};
+  return {
+    unlocked: Boolean(src.unlocked || autoUnlocked),
+    highScore: toNonNegInt(src.highScore, 0),
+    plays: toNonNegInt(src.plays, 0),
+    bestWave: toNonNegInt(src.bestWave, 0),
+    secretKnocks: toNonNegInt(src.secretKnocks, 0),
+  };
+}
+
+function syncArcadeAutoUnlock(profile) {
+  if (!profile || typeof profile !== 'object') return false;
+  const badgeCount = Array.isArray(profile.badges) ? profile.badges.length : 0;
+  const caughtCount = getCaughtSpeciesCount(profile);
+  const shouldUnlock = badgeCount >= 1 || caughtCount >= 5;
+  if (!isPlainObject(profile.arcade)) {
+    profile.arcade = hydrateArcade(null, shouldUnlock);
+    return shouldUnlock;
+  }
+  if (shouldUnlock && !profile.arcade.unlocked) {
+    profile.arcade.unlocked = true;
+    return true;
+  }
+  return false;
+}
+
 function createFreshProfile(trainerId) {
   return {
     trainerId,
@@ -415,6 +483,10 @@ function createFreshProfile(trainerId) {
     npcsTalked: [],
     biomesVisited: [],
     rivalsDefeated: [],
+    rivalRematchCounts: {},
+    shrineTrialCounts: {},
+    recentEncounters: [],
+    arcade: hydrateArcade(null, false),
     bag: {
       potions: 5,
       greatBalls: 3,
@@ -512,6 +584,9 @@ function hydrateProfile(raw, trainerId) {
     npcsTalked: hydrateUniqueStrings(raw.npcsTalked),
     biomesVisited: hydrateUniqueStrings(raw.biomesVisited),
     rivalsDefeated: hydrateUniqueStrings(raw.rivalsDefeated),
+    rivalRematchCounts: hydrateCountMap(raw.rivalRematchCounts),
+    shrineTrialCounts: hydrateCountMap(raw.shrineTrialCounts),
+    recentEncounters: hydrateRecentEncounters(raw.recentEncounters),
     bag: {
       potions: Math.max(0, Number.isFinite(Number(raw.bag?.potions)) ? Number(raw.bag.potions) : 5),
       greatBalls: Math.max(0, Number.isFinite(Number(raw.bag?.greatBalls)) ? Number(raw.bag.greatBalls) : 3),
@@ -530,6 +605,8 @@ function hydrateProfile(raw, trainerId) {
   });
 
   syncProfilePokedex(profile);
+  const autoUnlocked = profile.badges.length >= 1 || getCaughtSpeciesCount(profile) >= 5;
+  profile.arcade = hydrateArcade(raw.arcade, autoUnlocked);
   return profile;
 }
 
@@ -630,6 +707,10 @@ export class StorageManager {
       ...profile,
       appearance: hydrateAppearance(profile.appearance),
       rivalsDefeated: hydrateUniqueStrings(profile.rivalsDefeated),
+      rivalRematchCounts: hydrateCountMap(profile.rivalRematchCounts),
+      shrineTrialCounts: hydrateCountMap(profile.shrineTrialCounts),
+      recentEncounters: hydrateRecentEncounters(profile.recentEncounters),
+      arcade: hydrateArcade(profile.arcade, false),
       team: profile.team.map((p) => p.toJSON()),
       box: profile.box.map((p) => p.toJSON()),
     };
@@ -759,6 +840,7 @@ export class StorageManager {
 
     syncProfilePokedex(profile);
     const newBadges = this.evaluateBadges(false);
+    syncArcadeAutoUnlock(profile);
     this.save();
     return { destination, newBadges };
   }
@@ -1121,22 +1203,124 @@ export class StorageManager {
   markRivalDefeated(rivalId, rewards = {}) {
     const profile = this.getActiveProfile();
     if (!profile || !rivalId) {
-      return { firstWin: false, newBadges: [] };
+      return { firstWin: false, rematchCount: 0, newBadges: [] };
     }
     if (!Array.isArray(profile.rivalsDefeated)) {
       profile.rivalsDefeated = [];
+    }
+    if (!isPlainObject(profile.rivalRematchCounts)) {
+      profile.rivalRematchCounts = {};
     }
     const id = String(rivalId);
     const firstWin = !profile.rivalsDefeated.includes(id);
     if (firstWin) {
       profile.rivalsDefeated.push(id);
+      profile.rivalRematchCounts[id] = toNonNegInt(profile.rivalRematchCounts[id], 0);
+    } else {
+      profile.rivalRematchCounts[id] = toNonNegInt(profile.rivalRematchCounts[id], 0) + 1;
     }
     if (rewards && typeof rewards === 'object') {
       this.addRewards(rewards, false);
     }
     const newBadges = this.evaluateBadges(false);
     this.save();
-    return { firstWin, newBadges };
+    return {
+      firstWin,
+      rematchCount: profile.rivalRematchCounts[id],
+      newBadges,
+    };
+  }
+
+  recordShrineTrialWin(shrineId, rewards = { starShards: 3, starBalls: 1 }) {
+    const profile = this.getActiveProfile();
+    if (!profile || !shrineId) {
+      return { trialCount: 0, newBadges: [] };
+    }
+    const id = String(shrineId);
+    if (!isPlainObject(profile.shrineTrialCounts)) {
+      profile.shrineTrialCounts = {};
+    }
+    const nextCount = toNonNegInt(profile.shrineTrialCounts[id], 0) + 1;
+    profile.shrineTrialCounts[id] = nextCount;
+    if (rewards && typeof rewards === 'object') {
+      this.addRewards(rewards, false);
+    }
+    const newBadges = this.evaluateBadges(false);
+    this.save();
+    return { trialCount: nextCount, newBadges };
+  }
+
+  isArcadeUnlocked(profile = this.getActiveProfile()) {
+    if (!profile || typeof profile !== 'object') return false;
+    if (profile.arcade?.unlocked) return true;
+    if (Array.isArray(profile.badges) && profile.badges.length >= 1) return true;
+    return getCaughtSpeciesCount(profile) >= 5;
+  }
+
+  unlockArcade(persist = true) {
+    const profile = this.getActiveProfile();
+    if (!profile) return false;
+    if (!isPlainObject(profile.arcade)) {
+      profile.arcade = hydrateArcade(null, false);
+    }
+    profile.arcade.unlocked = true;
+    if (persist) this.save();
+    return true;
+  }
+
+  recordSecretKnock() {
+    const profile = this.getActiveProfile();
+    if (!profile) {
+      return { knocks: 0, unlocked: false, justUnlocked: false };
+    }
+    const wasUnlocked = this.isArcadeUnlocked(profile);
+    if (!isPlainObject(profile.arcade)) {
+      profile.arcade = hydrateArcade(null, wasUnlocked);
+    }
+    const knocks = toNonNegInt(profile.arcade.secretKnocks, 0) + 1;
+    profile.arcade.secretKnocks = knocks;
+    const unlocked = wasUnlocked || knocks >= 3;
+    const justUnlocked = !wasUnlocked && unlocked;
+    if (unlocked) {
+      profile.arcade.unlocked = true;
+    }
+    this.save();
+    return { knocks, unlocked, justUnlocked };
+  }
+
+  recordArcadeRun({ score = 0, wave = 1, stars = 0, rewards = {} } = {}) {
+    const profile = this.getActiveProfile();
+    if (!profile) {
+      return { isNewBest: false, highScore: 0, bestWave: 0, plays: 0, newBadges: [] };
+    }
+    if (!isPlainObject(profile.arcade)) {
+      profile.arcade = hydrateArcade(null, this.isArcadeUnlocked(profile));
+    }
+    const safeScore = toNonNegInt(score, 0);
+    const safeWave = Math.max(1, toNonNegInt(wave, 1));
+    const prevHigh = toNonNegInt(profile.arcade.highScore, 0);
+    const prevBestWave = toNonNegInt(profile.arcade.bestWave, 0);
+    const isNewBest = safeScore > prevHigh;
+
+    profile.arcade.plays = toNonNegInt(profile.arcade.plays, 0) + 1;
+    profile.arcade.highScore = Math.max(prevHigh, safeScore);
+    profile.arcade.bestWave = Math.max(prevBestWave, safeWave);
+    profile.arcade.unlocked = true;
+
+    if (rewards && typeof rewards === 'object') {
+      this.addRewards(rewards, false);
+    }
+    const newBadges = this.evaluateBadges(false);
+    this.save();
+
+    return {
+      isNewBest,
+      highScore: profile.arcade.highScore,
+      bestWave: profile.arcade.bestWave,
+      plays: profile.arcade.plays,
+      stars: toNonNegInt(stars, 0),
+      newBadges,
+    };
   }
 
   recordBattleWin() {
@@ -1158,7 +1342,8 @@ export class StorageManager {
         unlockedNow.push(badge);
       }
     }
-    if (persist && unlockedNow.length > 0) this.save();
+    const arcadeAutoUnlocked = syncArcadeAutoUnlock(profile);
+    if (persist && (unlockedNow.length > 0 || arcadeAutoUnlocked)) this.save();
     return unlockedNow;
   }
 

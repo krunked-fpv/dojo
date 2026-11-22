@@ -2782,4 +2782,51 @@ export const BADGES = [
   },
 ];
 
+export const ENCOUNTER_TRAITS = {
+  curious: {
+    id: 'curious',
+    label: 'Curious',
+    icon: '✨',
+    badgeText: '✨ Curious',
+    catchMult: 1.12,
+    bondBonus: 4,
+    xpMult: 1.0,
+    shardBonus: 0,
+    dmgMult: 1.0,
+  },
+  treasure: {
+    id: 'treasure',
+    label: 'Treasure',
+    icon: '💎',
+    badgeText: '💎 Treasure',
+    catchMult: 1.0,
+    bondBonus: 0,
+    xpMult: 1.0,
+    shardBonus: 1,
+    dmgMult: 1.0,
+  },
+  spirited: {
+    id: 'spirited',
+    label: 'Spirited',
+    icon: '⚡',
+    badgeText: '⚡ Spirited',
+    catchMult: 1.0,
+    bondBonus: 0,
+    xpMult: 1.15,
+    shardBonus: 0,
+    dmgMult: 1.08,
+  },
+  apex: {
+    id: 'apex',
+    label: 'Apex',
+    icon: '👑',
+    badgeText: '👑 Apex',
+    catchMult: 1.0,
+    bondBonus: 0,
+    xpMult: 1.15,
+    shardBonus: 1,
+    dmgMult: 1.08,
+  },
+};
+
 export * from './world-data.js';
