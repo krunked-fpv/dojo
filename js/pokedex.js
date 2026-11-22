@@ -36,7 +36,26 @@ const BIOME_ORDER = [
   'reef',
   'ruins',
   'rift',
+  'faeveldt',
+  'atoll',
+  'highlands',
+  'crater',
 ];
+
+const DEX_GEN_OPTIONS = [
+  { id: 'all', label: 'All Gens', min: 1, max: Infinity },
+  { id: 'gen1', label: 'Gen 1 (#1–151)', min: 1, max: 151 },
+  { id: 'gen2', label: 'Gen 2 (#152–251)', min: 152, max: 251 },
+  { id: 'gen3', label: 'Gen 3 (#252–386)', min: 252, max: 386 },
+  { id: 'gen4', label: 'Gen 4 (#387–493)', min: 387, max: 493 },
+  { id: 'gen5', label: 'Gen 5 (#494–649)', min: 494, max: 649 },
+  { id: 'gen6', label: 'Gen 6 (#650–721)', min: 650, max: 721 },
+  { id: 'gen7', label: 'Gen 7 (#722–809)', min: 722, max: 809 },
+  { id: 'gen8', label: 'Gen 8 (#810–905)', min: 810, max: 905 },
+  { id: 'gen9', label: 'Gen 9 (#906–1025)', min: 906, max: 1025 },
+];
+
+const DEX_GEN_MAP = Object.fromEntries(DEX_GEN_OPTIONS.map((g) => [g.id, g]));
 
 const FALLBACK_STYLES = {
   default: { id: 'default', name: 'Signature Outfit', icon: '✨', outfitPrimary: '#a855f7', outfitSecondary: '#f472b6', accent: '#c084fc', accentDark: '#7e22ce', accentSoft: 'rgba(192, 132, 252, 0.22)' },
@@ -85,12 +104,20 @@ const FALLBACK_BIOME_OFFSETS = {
   reef: 3,
   ruins: 3,
   rift: 4,
+  faeveldt: 2,
+  atoll: 3,
+  highlands: 3,
+  crater: 4,
 };
 
 const FALLBACK_GEM_INFO = {
   prism_gem: { icon: '💠', name: 'Prism Gem' },
   chrono_gem: { icon: '⏳', name: 'Chrono Amber' },
   nebula_gem: { icon: '☄️', name: 'Nebula Core' },
+  pixie_gem: { icon: '🎀', name: 'Pixie Ribbon Gem' },
+  alola_gem: { icon: '🌺', name: 'Island Kahuna Shell' },
+  crown_gem: { icon: '🛡️', name: 'Sovereign Crest' },
+  tera_gem: { icon: '💎', name: 'Terastal Shard' },
 };
 
 export function getAbilitySafe(monOrSpecies) {
@@ -451,6 +478,7 @@ export class PokedexUI {
     this.dexFilter = 'all';
     this.dexTypeFilter = 'all';
     this.dexAbilityFilter = 'all';
+    this.dexGenFilter = 'all';
     this.dexSearchQuery = '';
     this.selectedSpeciesId = null;
     this.swapBoxIndex = null;
@@ -462,6 +490,22 @@ export class PokedexUI {
     this._fallbackAura = null;
 
     this.bindUI();
+  }
+
+  resetDexFilters() {
+    this.dexFilter = 'all';
+    this.dexTypeFilter = 'all';
+    this.dexAbilityFilter = 'all';
+    this.dexGenFilter = 'all';
+    this.dexSearchQuery = '';
+  }
+
+  playCryOrBlip(speciesId, fallbackFreq = 740) {
+    if (typeof this.audio?.playPokemonCry === 'function') {
+      this.audio.playPokemonCry(speciesId);
+    } else {
+      this.audio?.playMenuBlip?.(fallbackFreq);
+    }
   }
 
   disconnectDexObserver() {
@@ -491,10 +535,7 @@ export class PokedexUI {
         this.evoBanner = null;
         this.editingNicknameUid = null;
         if (tab === 'dex') {
-          this.dexFilter = 'all';
-          this.dexTypeFilter = 'all';
-          this.dexAbilityFilter = 'all';
-          this.dexSearchQuery = '';
+          this.resetDexFilters();
         }
         this.render();
       });
@@ -514,10 +555,7 @@ export class PokedexUI {
     this._fallbackAcc = null;
     this._fallbackAura = null;
     if (tab === 'dex') {
-      this.dexFilter = 'all';
-      this.dexTypeFilter = 'all';
-      this.dexAbilityFilter = 'all';
-      this.dexSearchQuery = '';
+      this.resetDexFilters();
     }
     if (this.modalEl) {
       this.modalEl.hidden = false;
@@ -687,6 +725,18 @@ export class PokedexUI {
       <strong>#${String(selected.id).padStart(3, '0')} ${selSeen ? escapeHtml(selected.name) : 'Undiscovered Pokémon'}</strong>
       ${typeBadgeHtml}
     `;
+    if (selSeen) {
+      const detailCryBtn = document.createElement('button');
+      detailCryBtn.id = 'dex-detail-cry-btn';
+      detailCryBtn.type = 'button';
+      detailCryBtn.className = 'dex-detail-cry-btn';
+      detailCryBtn.setAttribute('aria-label', `Play ${selected.name} cry`);
+      detailCryBtn.textContent = '🔊 Cry';
+      detailCryBtn.addEventListener('click', () => {
+        this.playCryOrBlip(selected.id, 740);
+      });
+      head.appendChild(detailCryBtn);
+    }
     info.appendChild(head);
 
     const ability = getAbilitySafe(selected);
@@ -753,6 +803,10 @@ export class PokedexUI {
       { id: 'reef', label: '🪸 Trench' },
       { id: 'ruins', label: '🏛️ Ruins' },
       { id: 'rift', label: '☄️ Rift' },
+      { id: 'faeveldt', label: '🧚 Faeveldt' },
+      { id: 'atoll', label: '🌺 Atoll' },
+      { id: 'highlands', label: '🛡️ Highlands' },
+      { id: 'crater', label: '💎 Crater' },
       { id: 'starter', label: '🌟 Starters' },
     ];
     if (!filterDefs.some((f) => f.id === this.dexFilter)) {
@@ -763,6 +817,9 @@ export class PokedexUI {
     }
     if (this.dexAbilityFilter !== 'all' && !abilitiesMap[this.dexAbilityFilter]) {
       this.dexAbilityFilter = 'all';
+    }
+    if (this.dexGenFilter !== 'all' && !DEX_GEN_MAP[this.dexGenFilter]) {
+      this.dexGenFilter = 'all';
     }
 
     const wrap = document.createElement('div');
@@ -850,12 +907,25 @@ export class PokedexUI {
     }
     abilitySelect.value = this.dexAbilityFilter;
 
+    const genSelect = document.createElement('select');
+    genSelect.id = 'dex-gen-select';
+    genSelect.className = 'dex-gen-select';
+    genSelect.setAttribute('aria-label', 'Filter Pokédex by generation');
+    for (const genOpt of DEX_GEN_OPTIONS) {
+      const opt = document.createElement('option');
+      opt.value = genOpt.id;
+      opt.textContent = genOpt.label;
+      genSelect.appendChild(opt);
+    }
+    genSelect.value = this.dexGenFilter;
+
     const resultCountEl = document.createElement('span');
     resultCountEl.className = 'dex-result-count';
 
     searchRow.appendChild(searchBox);
     searchRow.appendChild(typeSelect);
     searchRow.appendChild(abilitySelect);
+    searchRow.appendChild(genSelect);
     searchRow.appendChild(resultCountEl);
     wrap.appendChild(searchRow);
 
@@ -881,22 +951,28 @@ export class PokedexUI {
     detailMount.className = 'dex-detail-mount';
     wrap.appendChild(detailMount);
 
-    const getFiltered = () => allSpecies.filter((sp) => {
-      const isCaught = (caughtMap.get(sp.id) || 0) > 0;
-      const isSeen = isCaught || seenSet.has(sp.id);
-      if (this.dexFilter === 'caught' && !isCaught) return false;
-      if (this.dexFilter === 'uncaught' && isCaught) return false;
-      if (!['all', 'caught', 'uncaught'].includes(this.dexFilter) && sp.biome !== this.dexFilter) {
-        return false;
-      }
-      if (this.dexTypeFilter !== 'all' && sp.type !== this.dexTypeFilter) {
-        return false;
-      }
-      if (this.dexAbilityFilter !== 'all' && sp.ability !== this.dexAbilityFilter) {
-        return false;
-      }
-      return this.matchesDexSearch(sp, this.dexSearchQuery, isSeen);
-    });
+    const getFiltered = () => {
+      const genRange = this.dexGenFilter !== 'all' ? DEX_GEN_MAP[this.dexGenFilter] : null;
+      return allSpecies.filter((sp) => {
+        const isCaught = (caughtMap.get(sp.id) || 0) > 0;
+        const isSeen = isCaught || seenSet.has(sp.id);
+        if (this.dexFilter === 'caught' && !isCaught) return false;
+        if (this.dexFilter === 'uncaught' && isCaught) return false;
+        if (!['all', 'caught', 'uncaught'].includes(this.dexFilter) && sp.biome !== this.dexFilter) {
+          return false;
+        }
+        if (this.dexTypeFilter !== 'all' && sp.type !== this.dexTypeFilter) {
+          return false;
+        }
+        if (this.dexAbilityFilter !== 'all' && sp.ability !== this.dexAbilityFilter) {
+          return false;
+        }
+        if (genRange && (sp.id < genRange.min || sp.id > genRange.max)) {
+          return false;
+        }
+        return this.matchesDexSearch(sp, this.dexSearchQuery, isSeen);
+      });
+    };
 
     const syncControlStates = () => {
       for (const pill of pillButtons) {
@@ -908,6 +984,9 @@ export class PokedexUI {
       if (abilitySelect.value !== this.dexAbilityFilter) {
         abilitySelect.value = this.dexAbilityFilter;
       }
+      if (genSelect.value !== this.dexGenFilter) {
+        genSelect.value = this.dexGenFilter;
+      }
       if (searchInput.value !== this.dexSearchQuery) {
         searchInput.value = this.dexSearchQuery;
       }
@@ -918,10 +997,7 @@ export class PokedexUI {
       const currentFiltered = getFiltered();
       this.selectedSpeciesId = speciesId;
       if (!currentFiltered.some((sp) => sp.id === speciesId)) {
-        this.dexFilter = 'all';
-        this.dexTypeFilter = 'all';
-        this.dexAbilityFilter = 'all';
-        this.dexSearchQuery = '';
+        this.resetDexFilters();
         syncControlStates();
         refreshDexResults();
       } else {
@@ -963,10 +1039,7 @@ export class PokedexUI {
         resetBtn.textContent = 'Show All';
         resetBtn.addEventListener('click', () => {
           this.audio.playMenuBlip(680);
-          this.dexFilter = 'all';
-          this.dexTypeFilter = 'all';
-          this.dexAbilityFilter = 'all';
-          this.dexSearchQuery = '';
+          this.resetDexFilters();
           syncControlStates();
           refreshDexResults();
         });
@@ -998,6 +1071,26 @@ export class PokedexUI {
           card.appendChild(numBadge);
 
           if (isSeen) {
+            const cryBtn = document.createElement('span');
+            cryBtn.setAttribute('role', 'button');
+            cryBtn.tabIndex = 0;
+            cryBtn.className = 'dex-cry-btn';
+            cryBtn.setAttribute('aria-label', `Play ${sp.name} cry`);
+            cryBtn.title = 'Play Cry';
+            cryBtn.textContent = '🔊';
+            const handleCry = (e) => {
+              e.stopPropagation();
+              this.playCryOrBlip(sp.id, 740);
+            };
+            cryBtn.addEventListener('click', handleCry);
+            cryBtn.addEventListener('keydown', (e) => {
+              if (e.key === 'Enter' || e.key === ' ' || e.code === 'Enter' || e.code === 'Space') {
+                e.preventDefault();
+                handleCry(e);
+              }
+            });
+            card.appendChild(cryBtn);
+
             const img = document.createElement('img');
             img.loading = 'lazy';
             img.decoding = 'async';
@@ -1042,14 +1135,18 @@ export class PokedexUI {
             badge.textContent = 'Seen';
             badge.style.backgroundColor = '#334155';
           } else {
-            const biomeLabel = sp.biome === 'starter' ? 'Lab' : (BIOMES[sp.biome]?.name.split(' ')[0] || 'Wild');
+            const biomeLabel = sp.biome === 'starter' ? 'Lab' : (BIOMES[sp.biome]?.name?.split(' ')?.[0] || 'Wild');
             badge.textContent = biomeLabel;
             badge.style.backgroundColor = '#1e293b';
           }
           card.appendChild(badge);
 
           card.addEventListener('click', () => {
-            this.audio.playMenuBlip(700);
+            if (isSeen) {
+              this.playCryOrBlip(sp.id, 700);
+            } else {
+              this.audio?.playMenuBlip?.(700);
+            }
             this.selectedSpeciesId = sp.id;
             for (const c of grid.querySelectorAll('.dex-card')) {
               c.classList.toggle('is-selected', Number(c.dataset.speciesId) === sp.id);
@@ -1114,6 +1211,12 @@ export class PokedexUI {
     abilitySelect.addEventListener('change', () => {
       this.audio.playMenuBlip(680);
       this.dexAbilityFilter = abilitySelect.value || 'all';
+      refreshDexResults();
+    });
+
+    genSelect.addEventListener('change', () => {
+      this.audio.playMenuBlip(680);
+      this.dexGenFilter = genSelect.value || 'all';
       refreshDexResults();
     });
 
@@ -1201,6 +1304,7 @@ export class PokedexUI {
     } else {
       this.audio?.playLevelUp?.();
     }
+    this.audio?.playPokemonCry?.(option.toId);
 
     this.evoBanner = {
       kind: 'evo',
@@ -1863,7 +1967,7 @@ export class PokedexUI {
         <span class="guide-compass-badge">${guidance?.icon || '🧭'} STARLIGHT COMPASS OBJECTIVE</span>
         <span class="guide-compass-dir">${dirText}${Number.isFinite(guidance?.distance) && guidance.distance > 0 ? ` • ${guidance.distance} tiles` : ''}</span>
       </div>
-      <h3 class="guide-compass-title">${guidance?.title || `Explore Starlight Island & Discover All ${Object.keys(BIOMES || {}).length || 14} Biomes!`}</h3>
+      <h3 class="guide-compass-title">${guidance?.title || `Explore Starlight Island & Discover All ${Object.keys(BIOMES || {}).length || 18} Biomes!`}</h3>
       <div class="guide-compass-stats">
         ${targetBiome ? `<span>📍 Destination: <strong>${targetBiome.icon} ${targetBiome.name}</strong></span>` : ''}
         <span>⚡ Trainer Power: <strong>Lv.${powerLevel}</strong></span>

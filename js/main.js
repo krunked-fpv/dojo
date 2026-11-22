@@ -994,7 +994,7 @@ class GameApp {
       const lead = profile.team[0];
       const trainerName = TRAINERS[profile.trainerId]?.name || 'Trainer';
       this.openDialogue(
-        `${trainerName} & ${lead?.displayName || lead?.name || 'Partner'} set out on Starlight Island! Follow the Starlight Compass across Whispering Forest, Crystal Cavern, Sapphire Lagoon, Ember Caldera, Starfall Peak, Celestial Grove, Sunstone Dunes, Glowspore Bayou, Astral Sky Citadel, Thundersteppe Canyon, Abyssal Pearl Trench, Chrono Relic Ruins, and Mythic Starlight Rift!`
+        `${trainerName} & ${lead?.displayName || lead?.name || 'Partner'} set out from Starlight Village! Follow the Starlight Compass across Whispering Forest, Crystal Cavern, Sapphire Lagoon, Ember Caldera, Starfall Peak, Celestial Grove, Sunstone Dunes, Glowspore Bayou, Astral Sky Citadel, Thundersteppe Canyon, Abyssal Pearl Trench, Chrono Relic Ruins, Mythic Starlight Rift, Pixie Faeveldt Glade, Sunburst Alola Atoll, Iron Crown Highlands, and Terastal Crystal Crater!`
       );
     }
   }
@@ -1221,6 +1221,10 @@ class GameApp {
         prism_gem: { icon: '💠', name: 'Prism Gem' },
         chrono_gem: { icon: '⏳', name: 'Chrono Amber' },
         nebula_gem: { icon: '☄️', name: 'Nebula Core' },
+        pixie_gem: { icon: '🎀', name: 'Pixie Ribbon Gem' },
+        alola_gem: { icon: '🌺', name: 'Island Kahuna Shell' },
+        crown_gem: { icon: '🛡️', name: 'Sovereign Crest' },
+        tera_gem: { icon: '💎', name: 'Terastal Shard' },
       };
       for (const [gemId, count] of Object.entries(rewards.gems)) {
         if (count > 0) {
