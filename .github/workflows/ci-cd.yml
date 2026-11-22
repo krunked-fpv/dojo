@@ -1,0 +1,98 @@
+name: Starlight Island CI/CD
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
+jobs:
+  ci-gate:
+    name: Static & Chromium QA Gate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install Playwright Chromium (zero repo package.json)
+        run: |
+          npx --yes playwright install --with-deps chromium
+          PW_NODE_MODULES="$(node -e '
+            const fs = require("node:fs");
+            const path = require("node:path");
+            const os = require("node:os");
+            const { execFileSync } = require("node:child_process");
+            const candidates = [];
+            try {
+              const cacheDir = execFileSync("npm", ["config", "get", "cache"], { encoding: "utf8" }).trim();
+              if (cacheDir) candidates.push(path.join(cacheDir, "_npx"));
+            } catch {}
+            if (process.env.NPM_CONFIG_CACHE) candidates.push(path.join(process.env.NPM_CONFIG_CACHE, "_npx"));
+            candidates.push(path.join(os.homedir(), ".npm", "_npx"));
+            candidates.push(path.join(os.homedir(), ".cache", "npm", "_npx"));
+            for (const base of candidates) {
+              if (!fs.existsSync(base)) continue;
+              for (const entry of fs.readdirSync(base)) {
+                const nm = path.join(base, entry, "node_modules");
+                if (fs.existsSync(path.join(nm, "playwright", "package.json"))) {
+                  console.log(nm);
+                  process.exit(0);
+                }
+              }
+            }
+            try {
+              const globalNm = execFileSync("npm", ["root", "-g"], { encoding: "utf8" }).trim();
+              if (globalNm && fs.existsSync(path.join(globalNm, "playwright", "package.json"))) {
+                console.log(globalNm);
+                process.exit(0);
+              }
+            } catch {}
+            process.exit(1);
+          ')"
+          echo "NODE_PATH=${PW_NODE_MODULES}" >> "$GITHUB_ENV"
+          echo "PLAYWRIGHT_PATH=${PW_NODE_MODULES}/playwright" >> "$GITHUB_ENV"
+
+      - name: Run Static CI Gate
+        run: node scripts/ci-static-gate.mjs
+
+      - name: Run Browser CI Gate (Test Runner, 6-Viewport Touch Matrix & Offline PWA)
+        run: node scripts/ci-browser-gate.mjs
+
+  deploy-pages:
+    name: Deploy to GitHub Pages
+    needs: ci-gate
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload Pages Artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: "."
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
