@@ -1,5 +1,6 @@
 import * as Config from './config.js';
 import { GAME_META, SPECIES, TRAINERS, TYPES, getSpriteUrls } from './config.js';
+import * as PokemonMod from './pokemon.js';
 import { generateSilhouetteDataUri } from './pokemon.js';
 import {
   CHESTS,
@@ -158,7 +159,47 @@ const ENCOUNTER_TILE_BIOME = {
   [TILE.REEF_WATER]: 'reef',
   [TILE.RUINS_FLOOR]: 'ruins',
   [TILE.RIFT_FLOOR]: 'rift',
+  [TILE.FAE_GRASS]: 'faeveldt',
+  [TILE.ATOLL_SAND]: 'atoll',
+  [TILE.CROWN_GRASS]: 'highlands',
+  [TILE.TERA_FLOOR]: 'crater',
 };
+
+const FOLLOWER_ARCHETYPES = [
+  'biped',
+  'quadruped',
+  'winged',
+  'serpentine',
+  'aquatic',
+  'insectoid',
+  'draconic',
+  'construct',
+  'amorphous',
+  'flora',
+];
+
+const FOLLOWER_ARCHETYPE_SET = new Set(FOLLOWER_ARCHETYPES);
+
+function resolveFollowerArchetypeFallback(species) {
+  const fromMod = typeof PokemonMod.resolveSpeciesArchetype === 'function'
+    ? PokemonMod.resolveSpeciesArchetype(species)
+    : null;
+  if (fromMod && FOLLOWER_ARCHETYPE_SET.has(fromMod)) {
+    return fromMod;
+  }
+  const type = String(species?.type || '').toLowerCase();
+  const id = Math.abs(Math.round(Number(species?.id) || 0));
+  if (type === 'bug') return 'insectoid';
+  if (type === 'water') return 'aquatic';
+  if (type === 'dragon') return 'draconic';
+  if (type === 'flying') return 'winged';
+  if (type === 'grass') return 'flora';
+  if (type === 'ghost') return 'amorphous';
+  if (type === 'steel' || type === 'rock') return 'construct';
+  if (type === 'poison') return 'serpentine';
+  if (type === 'fighting' || type === 'psychic') return 'biped';
+  return FOLLOWER_ARCHETYPES[id % FOLLOWER_ARCHETYPES.length];
+}
 
 const QUEST_BY_ID = new Map(FIELD_QUESTS.map((q) => [q.id, q]));
 
@@ -901,7 +942,7 @@ export class OverworldEngine {
       this.ripples.push({ x: tx, y: ty, kind: 'water', life: 0, maxLife: 0.62 });
     } else if (tile === TILE.SNOW_GRASS || tile === TILE.SNOW_PATH) {
       this.ripples.push({ x: tx, y: ty, kind: 'snow', life: 0, maxLife: 0.68 });
-    } else if (tile === TILE.DUNE_SAND) {
+    } else if (tile === TILE.DUNE_SAND || tile === TILE.ATOLL_SAND) {
       this.ripples.push({ x: tx, y: ty, kind: 'sand', life: 0, maxLife: 0.65 });
     }
     if (this.ripples.length > 14) {
@@ -1073,6 +1114,10 @@ export class OverworldEngine {
       else if (tile === TILE.REEF_WATER) this.spawnParticles(x, y, '#38bdf8', 7);
       else if (tile === TILE.RUINS_FLOOR) this.spawnParticles(x, y, '#f59e0b', 7, true);
       else if (tile === TILE.RIFT_FLOOR) this.spawnParticles(x, y, '#e879f9', 8, true);
+      else if (tile === TILE.FAE_GRASS) this.spawnParticles(x, y, '#f9a8d4', 7, true);
+      else if (tile === TILE.ATOLL_SAND) this.spawnParticles(x, y, '#fb923c', 7);
+      else if (tile === TILE.CROWN_GRASS) this.spawnParticles(x, y, '#94a3b8', 7, true);
+      else if (tile === TILE.TERA_FLOOR) this.spawnParticles(x, y, '#38bdf8', 8, true);
 
       this.stepsSinceBattle += 1;
       this.encounterTileStreak += 1;
@@ -1172,7 +1217,15 @@ export class OverworldEngine {
                         ? 'rgba(245, 158, 11, 0.055)'
                         : biomeId === 'rift'
                           ? 'rgba(232, 121, 249, 0.065)'
-                          : 'rgba(15, 23, 42, 0.085)';
+                          : biomeId === 'faeveldt'
+                            ? 'rgba(249, 168, 212, 0.06)'
+                            : biomeId === 'atoll'
+                              ? 'rgba(251, 146, 60, 0.055)'
+                              : biomeId === 'highlands'
+                                ? 'rgba(148, 163, 184, 0.06)'
+                                : biomeId === 'crater'
+                                  ? 'rgba(103, 232, 249, 0.065)'
+                                  : 'rgba(15, 23, 42, 0.085)';
       for (let c = 0; c < 3; c++) {
         const span = this.viewW + 180;
         const cx = ((nowMs * (0.011 + c * 0.004) + c * 190 - camX * 0.35) % span + span) % span - 90;
@@ -1307,13 +1360,17 @@ export class OverworldEngine {
 
   drawBiomeWeather(ctx, biomeId, nowMs) {
     ctx.save();
-    if (biomeId === 'peak' || biomeId === 'sanctum' || biomeId === 'rift') {
-      // Soft dancing northern aurora ribbons (or cosmic astral/prismatic ribbons in Sanctum/Rift)
-      const bandColors = biomeId === 'rift'
-        ? ['rgba(232, 121, 249, 0.095)', 'rgba(56, 189, 248, 0.085)', 'rgba(250, 204, 21, 0.07)']
-        : biomeId === 'sanctum'
-          ? ['rgba(167, 139, 250, 0.095)', 'rgba(103, 232, 249, 0.085)', 'rgba(250, 204, 21, 0.065)']
-          : ['rgba(56, 189, 248, 0.085)', 'rgba(52, 211, 153, 0.09)', 'rgba(192, 132, 252, 0.08)'];
+    if (biomeId === 'peak' || biomeId === 'sanctum' || biomeId === 'rift' || biomeId === 'crater' || biomeId === 'faeveldt') {
+      // Soft dancing northern aurora ribbons (or cosmic/Terastal/pastel ribbons)
+      const bandColors = biomeId === 'crater'
+        ? ['rgba(56, 189, 248, 0.1)', 'rgba(244, 114, 182, 0.09)', 'rgba(250, 204, 21, 0.08)']
+        : biomeId === 'faeveldt'
+          ? ['rgba(249, 168, 212, 0.09)', 'rgba(192, 132, 252, 0.085)', 'rgba(167, 243, 208, 0.075)']
+          : biomeId === 'rift'
+            ? ['rgba(232, 121, 249, 0.095)', 'rgba(56, 189, 248, 0.085)', 'rgba(250, 204, 21, 0.07)']
+            : biomeId === 'sanctum'
+              ? ['rgba(167, 139, 250, 0.095)', 'rgba(103, 232, 249, 0.085)', 'rgba(250, 204, 21, 0.065)']
+              : ['rgba(56, 189, 248, 0.085)', 'rgba(52, 211, 153, 0.09)', 'rgba(192, 132, 252, 0.08)'];
       for (let b = 0; b < bandColors.length; b++) {
         const waveY = 14 + b * 14 + Math.sin(nowMs * 0.0014 + b * 1.7) * 8;
         const shiftX = Math.sin(nowMs * 0.0009 + b * 2.1) * 28;
@@ -1489,6 +1546,45 @@ export class OverworldEngine {
           ctx.fillRect(mx - 1, my, 4, 1);
           ctx.fillRect(mx, my - 1, 1, 4);
         }
+      } else if (biomeId === 'faeveldt') {
+        // Pastel drifting fairy dust & pixie flower petals
+        const mx = Math.round(((mote.xFrac * this.viewW + nowMs * 0.009 * mote.speed + Math.sin(nowMs * 0.002 + mote.seed) * 14) % this.viewW + this.viewW) % this.viewW);
+        const my = Math.round(((mote.yFrac * this.viewH + Math.cos(nowMs * 0.0018 + mote.seed) * 10 + nowMs * 0.004 * mote.speed) % this.viewH + this.viewH) % this.viewH);
+        ctx.globalAlpha = Math.min(1, twinkle + 0.15);
+        ctx.fillStyle = i % 3 === 0 ? '#f9a8d4' : i % 3 === 1 ? '#c084fc' : '#a7f3d0';
+        ctx.fillRect(mx, my, mote.variant === 0 ? 3 : 2, 2);
+        if (twinkle > 0.68) {
+          ctx.fillStyle = '#fef08a';
+          ctx.fillRect(mx, my, 1, 1);
+        }
+      } else if (biomeId === 'atoll') {
+        // Warm sunburst lagoon sparkles & coral seafoam wisps
+        const mx = Math.round(((mote.xFrac * this.viewW + Math.sin(nowMs * 0.002 * mote.speed + mote.seed) * 15) % this.viewW + this.viewW) % this.viewW);
+        const my = Math.round(((mote.yFrac * this.viewH - nowMs * 0.007 * mote.speed) % this.viewH + this.viewH) % this.viewH);
+        ctx.globalAlpha = Math.min(1, twinkle * 0.9);
+        ctx.fillStyle = i % 3 === 0 ? '#fb923c' : i % 3 === 1 ? '#fef08a' : '#38bdf8';
+        ctx.fillRect(mx, my, 3, 2);
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(mx, my, 1, 1);
+      } else if (biomeId === 'highlands') {
+        // Crisp silver highland mist & sovereign wind glints
+        const mx = Math.round(((mote.xFrac * this.viewW + nowMs * 0.017 * mote.speed) % this.viewW + this.viewW) % this.viewW);
+        const my = Math.round(((mote.yFrac * this.viewH + Math.sin(nowMs * 0.0025 * mote.speed + mote.seed) * 7) % this.viewH + this.viewH) % this.viewH);
+        ctx.globalAlpha = 0.45 + 0.4 * twinkle;
+        ctx.fillStyle = i % 3 === 0 ? '#cbd5e1' : i % 3 === 1 ? '#67e8f9' : '#fde047';
+        ctx.fillRect(mx, my, mote.variant === 0 ? 3 : 2, 1.5);
+      } else if (biomeId === 'crater') {
+        // Iridescent Terastal crystal motes & prism star sparkles
+        const mx = Math.round(((mote.xFrac * this.viewW + Math.sin(nowMs * 0.0017 * mote.speed + mote.seed) * 14) % this.viewW + this.viewW) % this.viewW);
+        const my = Math.round(((mote.yFrac * this.viewH - nowMs * 0.006 * mote.speed + Math.cos(nowMs * 0.002 + mote.seed) * 10) % this.viewH + this.viewH) % this.viewH);
+        ctx.globalAlpha = Math.min(1, twinkle + 0.22);
+        ctx.fillStyle = i % 3 === 0 ? '#38bdf8' : i % 3 === 1 ? '#f472b6' : '#fef08a';
+        ctx.fillRect(mx, my, 2, 2);
+        if (twinkle > 0.58) {
+          ctx.fillStyle = '#ffffff';
+          ctx.fillRect(mx - 1, my, 4, 1);
+          ctx.fillRect(mx, my - 1, 1, 4);
+        }
       } else {
         // Peak snowflakes
         const mx = Math.round(((mote.xFrac * this.viewW + Math.sin(nowMs * 0.0015 * mote.speed + mote.seed) * 16) % this.viewW + this.viewW) % this.viewW);
@@ -1578,6 +1674,38 @@ export class OverworldEngine {
         ctx.fillRect(sx + 6, sy + 9, 2, 2);
         ctx.fillRect(sx + 22, sy + 21, 2, 2);
       }
+    } else if (tileBiomeId === 'faeveldt') {
+      ctx.fillStyle = h > 0.5 ? '#4c3a6e' : '#433262';
+      ctx.fillRect(sx, sy, ts, ts);
+      if (h > 0.7) {
+        ctx.fillStyle = '#f9a8d4';
+        ctx.fillRect(sx + 7, sy + 10, 2, 2);
+        ctx.fillRect(sx + 21, sy + 22, 2, 2);
+      }
+    } else if (tileBiomeId === 'atoll') {
+      ctx.fillStyle = h > 0.5 ? '#f5c77e' : '#eab96e';
+      ctx.fillRect(sx, sy, ts, ts);
+      if (h > 0.7) {
+        ctx.fillStyle = '#fb923c';
+        ctx.fillRect(sx + 6, sy + 11, 2, 2);
+        ctx.fillRect(sx + 22, sy + 22, 2, 2);
+      }
+    } else if (tileBiomeId === 'highlands') {
+      ctx.fillStyle = h > 0.5 ? '#3b4a5e' : '#334155';
+      ctx.fillRect(sx, sy, ts, ts);
+      if (h > 0.7) {
+        ctx.fillStyle = '#94a3b8';
+        ctx.fillRect(sx + 7, sy + 9, 3, 2);
+        ctx.fillRect(sx + 21, sy + 22, 3, 2);
+      }
+    } else if (tileBiomeId === 'crater') {
+      ctx.fillStyle = h > 0.5 ? '#132a46' : '#0f223a';
+      ctx.fillRect(sx, sy, ts, ts);
+      if (h > 0.68) {
+        ctx.fillStyle = '#38bdf8';
+        ctx.fillRect(sx + 6, sy + 9, 2, 2);
+        ctx.fillRect(sx + 22, sy + 21, 2, 2);
+      }
     } else {
       ctx.fillStyle = h > 0.5 ? '#5ec269' : '#57ba62';
       ctx.fillRect(sx, sy, ts, ts);
@@ -1634,6 +1762,18 @@ export class OverworldEngine {
       ctx.fillRect(sx, sy, ts, ts);
     } else if (tile === TILE.RIFT_FLOOR || tile === TILE.RIFT_PATH || tile === TILE.RIFT_WALL) {
       ctx.fillStyle = '#130924';
+      ctx.fillRect(sx, sy, ts, ts);
+    } else if (tile === TILE.FAE_GRASS || tile === TILE.FAE_PATH || tile === TILE.FAE_WALL) {
+      ctx.fillStyle = '#382a54';
+      ctx.fillRect(sx, sy, ts, ts);
+    } else if (tile === TILE.ATOLL_SAND || tile === TILE.ATOLL_PATH || tile === TILE.ATOLL_WALL) {
+      ctx.fillStyle = '#e7b36a';
+      ctx.fillRect(sx, sy, ts, ts);
+    } else if (tile === TILE.CROWN_GRASS || tile === TILE.CROWN_PATH || tile === TILE.CROWN_WALL) {
+      ctx.fillStyle = '#293548';
+      ctx.fillRect(sx, sy, ts, ts);
+    } else if (tile === TILE.TERA_FLOOR || tile === TILE.TERA_PATH || tile === TILE.TERA_WALL) {
+      ctx.fillStyle = '#0c1c33';
       ctx.fillRect(sx, sy, ts, ts);
     } else {
       this.drawBaseGround(ctx, sx, sy, ts, h, tileBiomeId);
@@ -1926,7 +2066,15 @@ export class OverworldEngine {
                         ? '#f59e0b'
                         : tileBiomeId === 'rift'
                           ? '#e879f9'
-                          : '#38bdf8';
+                          : tileBiomeId === 'faeveldt'
+                            ? '#f9a8d4'
+                            : tileBiomeId === 'atoll'
+                              ? '#fb923c'
+                              : tileBiomeId === 'highlands'
+                                ? '#cbd5e1'
+                                : tileBiomeId === 'crater'
+                                  ? '#38bdf8'
+                                  : '#38bdf8';
         ctx.fillRect(sx + 11, sy + 14, 10, 4);
         ctx.fillRect(sx + 14, sy + 11, 4, 10);
         ctx.fillStyle = '#fef08a';
@@ -2066,20 +2214,28 @@ export class OverworldEngine {
                           ? '#fde047'
                           : shrine?.id === 'reef_shrine' || shrine?.biome === 'reef'
                             ? '#38bdf8'
-                            : shrine?.id === 'ruins_shrine' || shrine?.biome === 'ruins'
-                              ? '#f59e0b'
-                              : shrine?.id === 'rift_shrine' || shrine?.biome === 'rift'
-                                ? '#e879f9'
-                                : shrine?.biome === 'forest'
-                                  ? '#4ade80'
-                                  : shrine?.biome === 'cave'
-                                    ? '#c084fc'
-                                    : shrine?.biome === 'volcano'
-                                      ? '#fb7185'
-                                      : shrine?.biome === 'peak'
-                                        ? '#67e8f9'
-                                        : '#38bdf8';
-        if (cleared || shrine?.id === 'eclipse_shrine' || shrine?.id === 'grove_shrine' || shrine?.id === 'desert_shrine' || shrine?.id === 'marsh_shrine' || shrine?.id === 'sanctum_shrine' || shrine?.id === 'canyon_shrine' || shrine?.id === 'reef_shrine' || shrine?.id === 'ruins_shrine' || shrine?.id === 'rift_shrine') {
+                              : shrine?.id === 'ruins_shrine' || shrine?.biome === 'ruins'
+                                ? '#f59e0b'
+                                : shrine?.id === 'rift_shrine' || shrine?.biome === 'rift'
+                                  ? '#e879f9'
+                                  : shrine?.id === 'faeveldt_shrine' || shrine?.biome === 'faeveldt'
+                                    ? '#f9a8d4'
+                                    : shrine?.id === 'atoll_shrine' || shrine?.biome === 'atoll'
+                                      ? '#fb923c'
+                                      : shrine?.id === 'highlands_shrine' || shrine?.biome === 'highlands'
+                                        ? '#cbd5e1'
+                                        : shrine?.id === 'crater_shrine' || shrine?.biome === 'crater'
+                                          ? '#38bdf8'
+                                          : shrine?.biome === 'forest'
+                                            ? '#4ade80'
+                                            : shrine?.biome === 'cave'
+                                              ? '#c084fc'
+                                              : shrine?.biome === 'volcano'
+                                                ? '#fb7185'
+                                                : shrine?.biome === 'peak'
+                                                  ? '#67e8f9'
+                                                  : '#38bdf8';
+        if (cleared || shrine?.id === 'eclipse_shrine' || shrine?.id === 'grove_shrine' || shrine?.id === 'desert_shrine' || shrine?.id === 'marsh_shrine' || shrine?.id === 'sanctum_shrine' || shrine?.id === 'canyon_shrine' || shrine?.id === 'reef_shrine' || shrine?.id === 'ruins_shrine' || shrine?.id === 'rift_shrine' || shrine?.id === 'faeveldt_shrine' || shrine?.id === 'atoll_shrine' || shrine?.id === 'highlands_shrine' || shrine?.id === 'crater_shrine') {
           ctx.save();
           ctx.globalAlpha = 0.35 + 0.25 * Math.sin(nowMs * 0.007);
           ctx.strokeStyle = shrine?.id === 'eclipse_shrine' && !cleared
@@ -2100,7 +2256,15 @@ export class OverworldEngine {
                           ? '#67e8f9'
                           : shrine?.id === 'rift_shrine' && !cleared
                             ? '#fde047'
-                            : '#fef08a';
+                            : shrine?.id === 'faeveldt_shrine' && !cleared
+                              ? '#a7f3d0'
+                              : shrine?.id === 'atoll_shrine' && !cleared
+                                ? '#fef08a'
+                                : shrine?.id === 'highlands_shrine' && !cleared
+                                  ? '#60a5fa'
+                                  : shrine?.id === 'crater_shrine' && !cleared
+                                    ? '#f472b6'
+                                    : '#fef08a';
           ctx.lineWidth = 1.5;
           ctx.beginPath();
           ctx.arc(sx + 16, sy + 9 + bob, 9, 0, Math.PI * 2);
@@ -2612,6 +2776,242 @@ export class OverworldEngine {
         break;
       }
 
+      case TILE.FAE_GRASS: {
+        // Luminous pastel fae meadow turf with glowing fairy blossoms (faeveldt wild encounter tile)
+        ctx.fillStyle = h > 0.5 ? '#352957' : '#2e224d';
+        ctx.fillRect(sx + 1, sy + 1, ts - 2, ts - 2);
+        const sway = Math.sin(nowMs * 0.0044 + tx * 0.8 + ty * 0.55) * 1.7;
+        const rustle = this.rustleTile && this.rustleTile.x === tx && this.rustleTile.y === ty ? 3.2 : 0;
+        ctx.fillStyle = '#6ee7b7';
+        for (let i = 0; i < 4; i++) {
+          const bx = sx + 4 + i * 7;
+          ctx.fillRect(bx + sway + (i % 2 ? rustle : -rustle), sy + 6, 4, 9);
+          ctx.fillRect(bx - sway * 0.7, sy + 18, 4, 9);
+        }
+        const bloom = 0.6 + 0.4 * Math.sin(nowMs * 0.0055 + tx + ty);
+        ctx.globalAlpha = bloom;
+        ctx.fillStyle = h > 0.5 ? '#f9a8d4' : '#e879f9';
+        ctx.fillRect(sx + 6 + sway * 0.4, sy + 8, 4, 3);
+        ctx.fillRect(sx + 20 - sway * 0.4, sy + 20, 4, 3);
+        ctx.fillStyle = '#fef08a';
+        ctx.fillRect(sx + 7 + sway * 0.4, sy + 9, 2, 1);
+        ctx.fillRect(sx + 21 - sway * 0.4, sy + 21, 2, 1);
+        ctx.globalAlpha = 1;
+        break;
+      }
+
+      case TILE.FAE_PATH: {
+        // Rose-quartz & moonstone glade flagstones
+        ctx.fillStyle = '#831843';
+        ctx.fillRect(sx, sy, ts, ts);
+        ctx.fillStyle = h > 0.5 ? '#fce7f3' : '#fbcfe8';
+        ctx.fillRect(sx + 1, sy + 1, 14, 14);
+        ctx.fillRect(sx + 17, sy + 17, 14, 14);
+        ctx.fillStyle = h > 0.5 ? '#f5d0fe' : '#e9d5ff';
+        ctx.fillRect(sx + 17, sy + 1, 14, 14);
+        ctx.fillRect(sx + 1, sy + 17, 14, 14);
+        const glint = 0.4 + 0.35 * Math.sin(nowMs * 0.0045 + tx + ty);
+        ctx.fillStyle = `rgba(244, 114, 182, ${glint.toFixed(2)})`;
+        ctx.fillRect(sx + 15, sy + 2, 2, 28);
+        ctx.fillRect(sx + 2, sy + 15, 28, 2);
+        break;
+      }
+
+      case TILE.FAE_WALL: {
+        // Luminous pastel-blossom Faeveldt tree canopy wall (solid)
+        ctx.fillStyle = '#2e1065';
+        ctx.fillRect(sx + 2, sy + 3, ts - 4, ts - 5);
+        ctx.fillStyle = '#831843';
+        ctx.fillRect(sx + 12, sy + 20, 8, 10);
+        ctx.fillStyle = '#db2777';
+        ctx.beginPath();
+        ctx.arc(sx + 16, sy + 14, 12, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = '#f9a8d4';
+        ctx.beginPath();
+        ctx.arc(sx + 13, sy + 11, 7, 0, Math.PI * 2);
+        ctx.fill();
+        const faeGlow = 0.65 + 0.35 * Math.sin(nowMs * 0.005 + tx + ty);
+        ctx.globalAlpha = faeGlow;
+        ctx.fillStyle = '#a7f3d0';
+        ctx.fillRect(sx + 9, sy + 9, 3, 3);
+        ctx.fillRect(sx + 20, sy + 13, 3, 3);
+        ctx.fillStyle = '#fef08a';
+        ctx.fillRect(sx + 15, sy + 7, 2, 2);
+        ctx.globalAlpha = 1;
+        break;
+      }
+
+      case TILE.ATOLL_SAND: {
+        // Sunlit warm coral Alola beach sand with hibiscus petals (atoll wild encounter tile)
+        ctx.fillStyle = h > 0.5 ? '#f5b963' : '#eba94f';
+        ctx.fillRect(sx, sy, ts, ts);
+        const shift = Math.sin(nowMs * 0.0038 + tx * 0.7 + ty * 0.5) * 1.4;
+        const rustle = this.rustleTile && this.rustleTile.x === tx && this.rustleTile.y === ty ? 2.8 : 0;
+        ctx.fillStyle = '#d97706';
+        ctx.fillRect(sx + 3, sy + 10, 12, 2);
+        ctx.fillRect(sx + 17, sy + 22, 12, 2);
+        ctx.fillStyle = '#fef3c7';
+        ctx.fillRect(sx + 5 + shift + rustle, sy + 8, 11, 3);
+        ctx.fillRect(sx + 15 - shift - rustle, sy + 19, 11, 3);
+        ctx.fillStyle = h > 0.5 ? '#fb7185' : '#38bdf8';
+        ctx.fillRect(sx + 8, sy + 14, 4, 3);
+        ctx.fillRect(sx + 22, sy + 8, 4, 3);
+        ctx.fillStyle = '#fef08a';
+        ctx.fillRect(sx + 9, sy + 15, 2, 1);
+        break;
+      }
+
+      case TILE.ATOLL_PATH: {
+        // Tropical sunlit palmwood & shell boardwalk
+        ctx.fillStyle = '#9a3412';
+        ctx.fillRect(sx, sy, ts, ts);
+        ctx.fillStyle = '#d97706';
+        for (let py = 2; py < ts; py += 8) {
+          ctx.fillRect(sx + 2, sy + py, ts - 4, 6);
+        }
+        ctx.fillStyle = '#fbbf24';
+        ctx.fillRect(sx + 2, sy + 2, 2, ts - 4);
+        ctx.fillRect(sx + ts - 4, sy + 2, 2, ts - 4);
+        if (h > 0.6) {
+          ctx.fillStyle = '#fbcfe8';
+          ctx.fillRect(sx + 14, sy + 13, 4, 3);
+        }
+        break;
+      }
+
+      case TILE.ATOLL_WALL: {
+        // Tropical basalt & palm-canopy sea cliff studded with sunlit coral (solid)
+        ctx.fillStyle = '#7c2d12';
+        ctx.fillRect(sx, sy, ts, ts);
+        ctx.fillStyle = '#9a3412';
+        ctx.fillRect(sx + 2, sy + 4, ts - 4, 16);
+        ctx.fillStyle = '#15803d';
+        ctx.beginPath();
+        ctx.arc(sx + 16, sy + 10, 10, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = '#4ade80';
+        ctx.fillRect(sx + 6, sy + 6, 8, 4);
+        ctx.fillRect(sx + 18, sy + 6, 8, 4);
+        ctx.fillStyle = '#fb7185';
+        ctx.fillRect(sx + 10, sy + 17, 4, 4);
+        ctx.fillRect(sx + 20, sy + 18, 4, 4);
+        ctx.fillStyle = '#431407';
+        ctx.fillRect(sx, sy + ts - 4, ts, 4);
+        break;
+      }
+
+      case TILE.CROWN_GRASS: {
+        // Highland slate-emerald heather turf with silver thistles (highlands wild encounter tile)
+        ctx.fillStyle = h > 0.5 ? '#1e4e4a' : '#19423f';
+        ctx.fillRect(sx + 1, sy + 1, ts - 2, ts - 2);
+        const sway = Math.sin(nowMs * 0.0046 + tx * 0.75 + ty * 0.5) * 1.7;
+        const rustle = this.rustleTile && this.rustleTile.x === tx && this.rustleTile.y === ty ? 3.2 : 0;
+        ctx.fillStyle = '#2dd4bf';
+        for (let i = 0; i < 4; i++) {
+          const bx = sx + 4 + i * 7;
+          ctx.fillRect(bx + sway + (i % 2 ? rustle : -rustle), sy + 6, 4, 10);
+          ctx.fillRect(bx - sway * 0.7, sy + 18, 4, 10);
+        }
+        ctx.fillStyle = h > 0.5 ? '#c084fc' : '#e2e8f0';
+        ctx.fillRect(sx + 6 + sway * 0.4, sy + 7, 3, 3);
+        ctx.fillRect(sx + 21 - sway * 0.4, sy + 19, 3, 3);
+        break;
+      }
+
+      case TILE.CROWN_PATH: {
+        // Dressed Highland slate flagstones with forged iron-gold trim
+        ctx.fillStyle = '#1e293b';
+        ctx.fillRect(sx, sy, ts, ts);
+        ctx.fillStyle = h > 0.5 ? '#64748b' : '#475569';
+        ctx.fillRect(sx + 1, sy + 1, 14, 14);
+        ctx.fillRect(sx + 17, sy + 17, 14, 14);
+        ctx.fillStyle = h > 0.5 ? '#475569' : '#64748b';
+        ctx.fillRect(sx + 17, sy + 1, 14, 14);
+        ctx.fillRect(sx + 1, sy + 17, 14, 14);
+        ctx.fillStyle = 'rgba(250, 204, 21, 0.42)';
+        ctx.fillRect(sx + 15, sy + 2, 2, 28);
+        ctx.fillRect(sx + 2, sy + 15, 28, 2);
+        break;
+      }
+
+      case TILE.CROWN_WALL: {
+        // Iron Crown slate bastion & shield-emblem parapet (solid)
+        ctx.fillStyle = '#0f172a';
+        ctx.fillRect(sx, sy, ts, ts);
+        ctx.fillStyle = '#334155';
+        ctx.fillRect(sx + 2, sy + 2, ts - 4, ts - 6);
+        ctx.fillStyle = '#64748b';
+        ctx.fillRect(sx + 4, sy + 4, ts - 8, 12);
+        ctx.fillStyle = '#eab308';
+        ctx.fillRect(sx + 2, sy + 2, ts - 4, 2);
+        ctx.fillRect(sx + 13, sy + 7, 6, 7);
+        ctx.fillStyle = '#38bdf8';
+        ctx.fillRect(sx + 15, sy + 9, 2, 3);
+        ctx.fillStyle = '#020617';
+        ctx.fillRect(sx, sy + ts - 4, ts, 4);
+        break;
+      }
+
+      case TILE.TERA_FLOOR: {
+        // Deep Area Zero crystal cavern floor with iridescent diamond prisms (crater wild encounter tile)
+        ctx.fillStyle = h > 0.5 ? '#0f2544' : '#0b1d38';
+        ctx.fillRect(sx, sy, ts, ts);
+        ctx.strokeStyle = '#1e40af';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(sx + 2, sy + 2, ts - 4, ts - 4);
+        const rustle = this.rustleTile && this.rustleTile.x === tx && this.rustleTile.y === ty ? 0.35 : 0;
+        const glow = Math.min(1, 0.5 + 0.45 * Math.sin(nowMs * 0.006 + tx * 0.9 + ty * 0.8) + rustle);
+        ctx.globalAlpha = glow;
+        ctx.fillStyle = h > 0.5 ? '#38bdf8' : '#f472b6';
+        ctx.fillRect(sx + 12, sy + 8, 8, 16);
+        ctx.fillRect(sx + 8, sy + 12, 16, 8);
+        ctx.fillStyle = '#fef08a';
+        ctx.fillRect(sx + 13, sy + 13, 6, 6);
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(sx + 15, sy + 15, 2, 2);
+        ctx.globalAlpha = 1;
+        break;
+      }
+
+      case TILE.TERA_PATH: {
+        // Iridescent Terastal crystal bridge & refracting walkway
+        ctx.fillStyle = '#1d4ed8';
+        ctx.fillRect(sx, sy, ts, ts);
+        ctx.fillStyle = h > 0.5 ? '#bae6fd' : '#e0f2fe';
+        ctx.fillRect(sx + 1, sy + 1, 14, 14);
+        ctx.fillRect(sx + 17, sy + 17, 14, 14);
+        ctx.fillStyle = h > 0.5 ? '#fbcfe8' : '#fef08a';
+        ctx.fillRect(sx + 17, sy + 1, 14, 14);
+        ctx.fillRect(sx + 1, sy + 17, 14, 14);
+        const shimmer = 0.55 + 0.4 * Math.sin(nowMs * 0.0055 + tx + ty);
+        ctx.fillStyle = `rgba(56, 189, 248, ${shimmer.toFixed(2)})`;
+        ctx.fillRect(sx + 15, sy + 2, 2, 28);
+        ctx.fillRect(sx + 2, sy + 15, 28, 2);
+        break;
+      }
+
+      case TILE.TERA_WALL: {
+        // Faceted iridescent Terastal crystal monolith wall (solid)
+        ctx.fillStyle = '#081426';
+        ctx.fillRect(sx, sy, ts, ts);
+        ctx.fillStyle = '#1e3a8a';
+        ctx.fillRect(sx + 2, sy + 2, ts - 4, ts - 6);
+        ctx.fillStyle = '#0284c7';
+        ctx.fillRect(sx + 5, sy + 4, ts - 10, 14);
+        const facet = 0.6 + 0.4 * Math.sin(nowMs * 0.006 + tx * 1.1 + ty);
+        ctx.globalAlpha = facet;
+        ctx.fillStyle = h > 0.5 ? '#67e8f9' : '#f472b6';
+        ctx.fillRect(sx + 8, sy + 6, 6, 9);
+        ctx.fillRect(sx + 18, sy + 8, 5, 7);
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(sx + 10, sy + 7, 2, 3);
+        ctx.globalAlpha = 1;
+        ctx.fillStyle = '#020617';
+        ctx.fillRect(sx, sy + ts - 4, ts, 4);
+        break;
+      }
+
       default:
         break;
     }
@@ -2905,6 +3305,66 @@ export class OverworldEngine {
       ctx.fill();
       ctx.fillStyle = '#fef08a';
       ctx.fillRect(sx + 15, sy + 10, 2, 2);
+    } else if (landmark.id === 'landmark_faeveldt_arch') {
+      ctx.fillStyle = 'rgba(46, 16, 101, 0.28)';
+      ctx.beginPath();
+      ctx.ellipse(sx + 16, sy + 27, 11, 4, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#db2777';
+      ctx.fillRect(sx + 5, sy + 11, 5, 15);
+      ctx.fillRect(sx + 22, sy + 11, 5, 15);
+      ctx.fillRect(sx + 7, sy + 6, 18, 6);
+      ctx.fillStyle = '#fbcfe8';
+      ctx.fillRect(sx + 9, sy + 7, 14, 3);
+      ctx.globalAlpha = glow;
+      ctx.fillStyle = '#a7f3d0';
+      ctx.fillRect(sx + 14, sy + 14, 4, 4);
+    } else if (landmark.id === 'landmark_atoll_altar') {
+      ctx.fillStyle = 'rgba(124, 45, 18, 0.28)';
+      ctx.beginPath();
+      ctx.ellipse(sx + 16, sy + 27, 10, 4, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#d97706';
+      ctx.fillRect(sx + 7, sy + 20, 18, 6);
+      ctx.fillStyle = '#fb923c';
+      ctx.fillRect(sx + 10, sy + 13, 12, 8);
+      ctx.globalAlpha = glow;
+      ctx.fillStyle = '#fef08a';
+      ctx.beginPath();
+      ctx.arc(sx + 16, sy + 10, 5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#38bdf8';
+      ctx.fillRect(sx + 15, sy + 16, 2, 3);
+    } else if (landmark.id === 'landmark_highlands_citadel') {
+      ctx.fillStyle = 'rgba(15, 23, 42, 0.34)';
+      ctx.beginPath();
+      ctx.ellipse(sx + 16, sy + 27, 10, 4, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#334155';
+      ctx.fillRect(sx + 8, sy + 20, 16, 6);
+      ctx.fillStyle = '#64748b';
+      ctx.fillRect(sx + 10, sy + 8, 12, 13);
+      ctx.fillStyle = '#eab308';
+      ctx.fillRect(sx + 12, sy + 10, 8, 7);
+      ctx.globalAlpha = glow;
+      ctx.fillStyle = '#60a5fa';
+      ctx.fillRect(sx + 14, sy + 12, 4, 3);
+    } else if (landmark.id === 'landmark_crater_tera_core') {
+      ctx.fillStyle = 'rgba(8, 20, 38, 0.36)';
+      ctx.beginPath();
+      ctx.ellipse(sx + 16, sy + 27, 10, 4, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#1e3a8a';
+      ctx.fillRect(sx + 9, sy + 20, 14, 6);
+      ctx.fillStyle = '#38bdf8';
+      ctx.fillRect(sx + 12, sy + 8, 8, 12);
+      ctx.globalAlpha = glow;
+      ctx.fillStyle = '#f472b6';
+      ctx.fillRect(sx + 10, sy + 11, 4, 5);
+      ctx.fillStyle = '#fef08a';
+      ctx.fillRect(sx + 18, sy + 11, 4, 5);
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(sx + 15, sy + 6, 2, 10);
     } else {
       ctx.fillStyle = 'rgba(15, 23, 42, 0.25)';
       ctx.beginPath();
@@ -3437,11 +3897,17 @@ export class OverworldEngine {
       return entry;
     }
 
-    const urls = getSpriteUrls(species.id, useBack, shiny);
-    const candidates = [
+    const urls = getSpriteUrls(species.id, useBack, shiny) || {};
+    const safeType = species?.type && TYPES?.[species.type] ? species.type : 'normal';
+    const remoteUrls = [
       urls.animated,
       urls.static,
-      `./assets/fallback/${species.type}.svg`,
+      ...(Array.isArray(urls.fallbacks) ? urls.fallbacks : []),
+    ].filter((u, idx, arr) => typeof u === 'string' && u.length > 0 && arr.indexOf(u) === idx);
+    const remoteCount = remoteUrls.length;
+    const candidates = [
+      ...remoteUrls,
+      `./assets/fallback/${safeType}.svg`,
       generateSilhouetteDataUri(species, useBack),
     ];
 
@@ -3472,8 +3938,8 @@ export class OverworldEngine {
       };
 
       // Prevent slow remote GIF/PNG requests from stalling local fallback rendering
-      if (idx < 2 && typeof setTimeout === 'function') {
-        timer = setTimeout(advance, idx === 0 ? 1500 : 1200);
+      if (idx < remoteCount && typeof setTimeout === 'function') {
+        timer = setTimeout(advance, idx === 0 ? 1400 : 1000);
       }
 
       img.onload = () => {
@@ -3501,47 +3967,236 @@ export class OverworldEngine {
   _drawMiniCompanionFallback(ctx, sx, y, species, dir) {
     const bodyColor = species?.color || '#38bdf8';
     const accentColor = TYPES[species?.type]?.color || '#fef08a';
+    const archetype = resolveFollowerArchetypeFallback(species);
+    const eyeShift = dir === 'left' ? -1 : dir === 'right' ? 1 : 0;
+
+    const drawEyes = (ex1, ex2, ey, visor = false) => {
+      if (dir === 'up') {
+        ctx.fillStyle = '#ffffff';
+        ctx.globalAlpha = 0.7;
+        ctx.fillRect(sx + 15, y + 16, 2, 4);
+        ctx.globalAlpha = 1;
+        return;
+      }
+      if (visor) {
+        ctx.fillStyle = '#0f172a';
+        ctx.fillRect(ex1 - 1 + eyeShift, ey - 1, (ex2 - ex1) + 5, 4);
+        ctx.fillStyle = accentColor;
+        ctx.fillRect(ex1 + eyeShift, ey, (ex2 - ex1) + 3, 2);
+        return;
+      }
+      ctx.fillStyle = '#0f172a';
+      ctx.fillRect(ex1 + eyeShift, ey, 2, 2);
+      ctx.fillRect(ex2 + eyeShift, ey, 2, 2);
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(ex1 + eyeShift, ey, 1, 1);
+      ctx.fillRect(ex2 + eyeShift, ey, 1, 1);
+    };
+
+    if (archetype === 'quadruped') {
+      const bx = sx + 7;
+      const by = y + 13;
+      // 4 legs + tail + horizontal quadruped body + pointed ears
+      ctx.fillStyle = '#0f172a';
+      ctx.fillRect(bx + 1, by, 3, 4);
+      ctx.fillRect(bx + 6, by, 3, 4);
+      ctx.fillRect(bx + 1, by + 3, 15, 8);
+      ctx.fillRect(bx + 2, by + 11, 3, 3);
+      ctx.fillRect(bx + 6, by + 11, 3, 3);
+      ctx.fillRect(bx + 11, by + 11, 3, 3);
+      ctx.fillRect(bx + 14, by + 4, 3, 4);
+      ctx.fillStyle = accentColor;
+      ctx.fillRect(bx + 15, by + 3, 3, 3);
+      ctx.fillStyle = bodyColor;
+      ctx.fillRect(bx + 2, by + 4, 13, 7);
+      ctx.fillRect(bx + 3, by + 10, 2, 3);
+      ctx.fillRect(bx + 7, by + 10, 2, 3);
+      ctx.fillRect(bx + 11, by + 10, 2, 3);
+      drawEyes(bx + 3, bx + 6, by + 6);
+      return;
+    }
+
+    if (archetype === 'winged') {
+      const bx = sx + 7;
+      const by = y + 11;
+      // Outstretched left & right wings + avian crest + beak
+      ctx.fillStyle = '#0f172a';
+      ctx.fillRect(bx, by + 4, 18, 7);
+      ctx.fillRect(bx + 4, by + 1, 10, 12);
+      ctx.fillStyle = accentColor;
+      ctx.fillRect(bx + 1, by + 5, 4, 5);
+      ctx.fillRect(bx + 13, by + 5, 4, 5);
+      ctx.fillRect(bx + 8, by, 2, 3);
+      ctx.fillStyle = bodyColor;
+      ctx.fillRect(bx + 5, by + 2, 8, 10);
+      ctx.fillStyle = '#fbbf24';
+      ctx.fillRect(bx + 7, by + 12, 2, 2);
+      ctx.fillRect(bx + 10, by + 12, 2, 2);
+      if (dir !== 'up') {
+        ctx.fillRect(bx + 8 + eyeShift, by + 7, 2, 2);
+      }
+      drawEyes(bx + 6, bx + 10, by + 5);
+      return;
+    }
+
+    if (archetype === 'serpentine') {
+      const bx = sx + 7;
+      const by = y + 11;
+      // S-curved coiled serpent body + crested hood + tail rattle
+      ctx.fillStyle = '#0f172a';
+      ctx.fillRect(bx + 3, by + 1, 8, 6);
+      ctx.fillRect(bx + 7, by + 5, 8, 5);
+      ctx.fillRect(bx + 2, by + 9, 13, 5);
+      ctx.fillStyle = bodyColor;
+      ctx.fillRect(bx + 4, by + 2, 6, 4);
+      ctx.fillRect(bx + 8, by + 6, 6, 3);
+      ctx.fillRect(bx + 3, by + 10, 11, 3);
+      ctx.fillStyle = accentColor;
+      ctx.fillRect(bx + 13, by + 9, 3, 3);
+      ctx.fillRect(bx + 5, by, 4, 2);
+      drawEyes(bx + 4, bx + 8, by + 3);
+      return;
+    }
+
+    if (archetype === 'aquatic') {
+      const bx = sx + 7;
+      const by = y + 12;
+      // Sleek swimmer with tall dorsal fin & forked caudal fin
+      ctx.fillStyle = '#0f172a';
+      ctx.fillRect(bx + 6, by, 4, 4);
+      ctx.fillRect(bx + 2, by + 3, 11, 9);
+      ctx.fillRect(bx + 13, by + 2, 4, 11);
+      ctx.fillStyle = accentColor;
+      ctx.fillRect(bx + 7, by + 1, 2, 3);
+      ctx.fillRect(bx + 14, by + 3, 3, 3);
+      ctx.fillRect(bx + 14, by + 9, 3, 3);
+      ctx.fillStyle = bodyColor;
+      ctx.fillRect(bx + 3, by + 4, 10, 7);
+      ctx.fillStyle = '#e0f2fe';
+      ctx.fillRect(bx + 5, by + 8, 5, 2);
+      drawEyes(bx + 4, bx + 8, by + 5);
+      return;
+    }
+
+    if (archetype === 'insectoid') {
+      const bx = sx + 8;
+      const by = y + 11;
+      // Twin antennae + segmented thorax/abdomen + 4 side legs + wing shimmer
+      ctx.fillStyle = '#0f172a';
+      ctx.fillRect(bx + 3, by, 2, 3);
+      ctx.fillRect(bx + 11, by, 2, 3);
+      ctx.fillRect(bx + 3, by + 3, 10, 10);
+      ctx.fillRect(bx + 1, by + 6, 3, 2);
+      ctx.fillRect(bx + 12, by + 6, 3, 2);
+      ctx.fillRect(bx + 1, by + 10, 3, 2);
+      ctx.fillRect(bx + 12, by + 10, 3, 2);
+      ctx.fillStyle = bodyColor;
+      ctx.fillRect(bx + 4, by + 4, 8, 4);
+      ctx.fillRect(bx + 5, by + 9, 6, 4);
+      ctx.fillStyle = accentColor;
+      ctx.fillRect(bx + 2, by + 4, 3, 4);
+      ctx.fillRect(bx + 11, by + 4, 3, 4);
+      drawEyes(bx + 5, bx + 9, by + 5);
+      return;
+    }
+
+    if (archetype === 'draconic') {
+      const bx = sx + 7;
+      const by = y + 11;
+      // Twin horns, bat-like wing fins, armored crest, spiked tail
+      ctx.fillStyle = '#0f172a';
+      ctx.fillRect(bx + 4, by, 3, 4);
+      ctx.fillRect(bx + 11, by, 3, 4);
+      ctx.fillRect(bx, by + 5, 18, 6);
+      ctx.fillRect(bx + 4, by + 3, 10, 11);
+      ctx.fillStyle = accentColor;
+      ctx.fillRect(bx + 1, by + 6, 4, 4);
+      ctx.fillRect(bx + 13, by + 6, 4, 4);
+      ctx.fillRect(bx + 5, by + 1, 2, 2);
+      ctx.fillRect(bx + 11, by + 1, 2, 2);
+      ctx.fillStyle = bodyColor;
+      ctx.fillRect(bx + 5, by + 4, 8, 9);
+      ctx.fillStyle = '#fef08a';
+      ctx.fillRect(bx + 7, by + 9, 4, 3);
+      drawEyes(bx + 6, bx + 10, by + 6);
+      return;
+    }
+
+    if (archetype === 'construct') {
+      const bx = sx + 8;
+      const by = y + 11;
+      // Geometric iron/stone chassis + heavy shoulder pauldrons + glowing visor
+      ctx.fillStyle = '#0f172a';
+      ctx.fillRect(bx + 3, by + 1, 10, 13);
+      ctx.fillRect(bx, by + 4, 16, 6);
+      ctx.fillStyle = bodyColor;
+      ctx.fillRect(bx + 4, by + 2, 8, 11);
+      ctx.fillStyle = accentColor;
+      ctx.fillRect(bx + 1, by + 5, 3, 4);
+      ctx.fillRect(bx + 12, by + 5, 3, 4);
+      ctx.fillRect(bx + 6, by + 9, 4, 3);
+      drawEyes(bx + 5, bx + 9, by + 5, true);
+      return;
+    }
+
+    if (archetype === 'amorphous') {
+      const bx = sx + 8;
+      const by = y + 11;
+      // Floating spectral dome + wavy tattered hem + twin spirit wisps
+      ctx.fillStyle = '#0f172a';
+      ctx.fillRect(bx + 3, by + 2, 10, 10);
+      ctx.fillRect(bx + 2, by + 5, 12, 8);
+      ctx.fillStyle = accentColor;
+      ctx.fillRect(bx, by + 3, 2, 3);
+      ctx.fillRect(bx + 14, by + 4, 2, 3);
+      ctx.fillStyle = bodyColor;
+      ctx.fillRect(bx + 4, by + 3, 8, 8);
+      ctx.fillRect(bx + 3, by + 6, 10, 5);
+      ctx.fillRect(bx + 3, by + 11, 2, 2);
+      ctx.fillRect(bx + 7, by + 11, 2, 3);
+      ctx.fillRect(bx + 11, by + 11, 2, 2);
+      drawEyes(bx + 5, bx + 9, by + 6);
+      return;
+    }
+
+    if (archetype === 'flora') {
+      const bx = sx + 8;
+      const by = y + 11;
+      // Blossom crown + leafy collar + sprout body & root feet
+      ctx.fillStyle = '#0f172a';
+      ctx.fillRect(bx + 4, by, 8, 5);
+      ctx.fillRect(bx + 2, by + 4, 12, 9);
+      ctx.fillStyle = accentColor;
+      ctx.fillRect(bx + 5, by + 1, 6, 3);
+      ctx.fillStyle = '#fef08a';
+      ctx.fillRect(bx + 7, by + 2, 2, 2);
+      ctx.fillStyle = '#22c55e';
+      ctx.fillRect(bx + 2, by + 8, 12, 3);
+      ctx.fillStyle = bodyColor;
+      ctx.fillRect(bx + 4, by + 5, 8, 7);
+      ctx.fillStyle = '#15803d';
+      ctx.fillRect(bx + 4, by + 12, 3, 2);
+      ctx.fillRect(bx + 9, by + 12, 3, 2);
+      drawEyes(bx + 5, bx + 9, by + 6);
+      return;
+    }
+
+    // Default 'biped': upright companion with ear tufts, arms & feet
     const bx = sx + 9;
     const by = y + 12;
-
-    // 14x14 mini-companion outline + ears
     ctx.fillStyle = '#0f172a';
     ctx.fillRect(bx + 1, by, 4, 4);
     ctx.fillRect(bx + 9, by, 4, 4);
     ctx.fillRect(bx + 1, by + 3, 12, 10);
-
-    // Inner ears
     ctx.fillStyle = accentColor;
     ctx.fillRect(bx + 2, by + 1, 2, 3);
     ctx.fillRect(bx + 10, by + 1, 2, 3);
-
-    // Body fill
     ctx.fillStyle = bodyColor;
     ctx.fillRect(bx + 2, by + 4, 10, 8);
     ctx.fillRect(bx + 3, by + 3, 8, 10);
-
-    // Belly / collar accent
     ctx.fillStyle = accentColor;
     ctx.fillRect(bx + 5, by + 10, 4, 2);
-
-    if (dir === 'up') {
-      ctx.fillStyle = '#ffffff';
-      ctx.globalAlpha = 0.75;
-      ctx.fillRect(bx + 6, by + 5, 2, 4);
-      ctx.fillRect(bx + 5, by + 6, 4, 2);
-      ctx.globalAlpha = 1;
-    } else {
-      const eyeShift = dir === 'left' ? -1 : dir === 'right' ? 1 : 0;
-      ctx.fillStyle = '#0f172a';
-      ctx.fillRect(bx + 4 + eyeShift, by + 6, 2, 2);
-      ctx.fillRect(bx + 8 + eyeShift, by + 6, 2, 2);
-      ctx.fillStyle = '#ffffff';
-      ctx.fillRect(bx + 4 + eyeShift, by + 6, 1, 1);
-      ctx.fillRect(bx + 8 + eyeShift, by + 6, 1, 1);
-      ctx.fillStyle = '#fda4af';
-      ctx.fillRect(bx + 3 + eyeShift, by + 8, 1, 1);
-      ctx.fillRect(bx + 10 + eyeShift, by + 8, 1, 1);
-    }
+    drawEyes(bx + 4, bx + 8, by + 6);
   }
 
   drawFollower(ctx, sx, sy, lead, dir, nowMs = 0) {
