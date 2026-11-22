@@ -327,6 +327,180 @@ export function getBiomeScaledInfo(biome, profile) {
   };
 }
 
+const FALLBACK_FARMING_BIOME_ORDER = [
+  'forest',
+  'cave',
+  'water',
+  'volcano',
+  'peak',
+  'desert',
+  'grove',
+  'marsh',
+  'faeveldt',
+  'canyon',
+  'sanctum',
+  'atoll',
+  'reef',
+  'highlands',
+  'ruins',
+  'crater',
+  'rift',
+];
+
+const FALLBACK_BIOME_WARP_POINTS = {
+  village: { x: 8, y: 15, dir: 'down' },
+  forest: { x: 4, y: 5, dir: 'up' },
+  cave: { x: 21, y: 5, dir: 'right' },
+  water: { x: 15, y: 31, dir: 'down' },
+  volcano: { x: 39, y: 11, dir: 'up' },
+  peak: { x: 47, y: 23, dir: 'down' },
+  grove: { x: 25, y: 44, dir: 'up' },
+  desert: { x: 56, y: 16, dir: 'down' },
+  marsh: { x: 13, y: 55, dir: 'down' },
+  sanctum: { x: 46, y: 53, dir: 'right' },
+  canyon: { x: 73, y: 17, dir: 'down' },
+  reef: { x: 16, y: 64, dir: 'down' },
+  ruins: { x: 51, y: 64, dir: 'down' },
+  rift: { x: 78, y: 42, dir: 'down' },
+  faeveldt: { x: 90, y: 14, dir: 'right' },
+  atoll: { x: 25, y: 77, dir: 'down' },
+  highlands: { x: 60, y: 77, dir: 'down' },
+  crater: { x: 88, y: 46, dir: 'down' },
+};
+
+function computePartyFarmingLevelFallback(profileOrLevel = null) {
+  if (typeof profileOrLevel === 'number') {
+    if (profileOrLevel === -Infinity) return 1;
+    if (profileOrLevel === Infinity) return 50;
+    if (!Number.isFinite(profileOrLevel)) return 5;
+    return Math.max(1, Math.min(50, Math.round(profileOrLevel)));
+  }
+  const team = Array.isArray(profileOrLevel)
+    ? profileOrLevel
+    : Array.isArray(profileOrLevel?.team)
+      ? profileOrLevel.team
+      : [];
+  const validMons = team.filter(Boolean);
+  if (validMons.length === 0) return 5;
+  const healthy = validMons.filter((m) => Number(m.hp) > 0 && !m.isFainted);
+  const pool = healthy.length > 0 ? healthy : validMons;
+  const levels = pool
+    .map((m) => {
+      const lv = Number(m?.level);
+      return Number.isFinite(lv) ? Math.max(1, Math.min(50, Math.round(lv))) : 5;
+    })
+    .sort((a, b) => b - a);
+  if (levels.length === 0) return 5;
+  if (levels.length === 1) return levels[0];
+  return Math.max(1, Math.min(50, Math.round(0.68 * levels[0] + 0.32 * levels[1])));
+}
+
+export function getRecommendedFarmingZoneSafe(profileOrLevel = null) {
+  const isProfile = Boolean(profileOrLevel && typeof profileOrLevel === 'object' && !Array.isArray(profileOrLevel));
+  const profile = isProfile ? profileOrLevel : null;
+
+  if (typeof PokemonMod.resolveRecommendedFarmingZone === 'function') {
+    const rec = PokemonMod.resolveRecommendedFarmingZone(profileOrLevel);
+    if (rec && rec.biomeId) {
+      const biome = rec.biome || BIOMES[rec.biomeId] || BIOMES.forest;
+      const fallbackPt = Config.getBiomeWarpPoint?.(biome.id)
+        || FALLBACK_BIOME_WARP_POINTS[biome.id]
+        || { x: 4, y: 5, dir: 'up' };
+      return {
+        ...rec,
+        biomeId: biome.id,
+        biome,
+        partyLevel: Number.isFinite(rec.partyLevel) ? rec.partyLevel : computePartyFarmingLevelFallback(profileOrLevel),
+        minLv: Number.isFinite(rec.minLv) ? rec.minLv : (biome.levelRange?.[0] ?? 2),
+        maxLv: Number.isFinite(rec.maxLv) ? rec.maxLv : (biome.levelRange?.[1] ?? 7),
+        x: Number.isFinite(rec.x) ? rec.x : fallbackPt.x,
+        y: Number.isFinite(rec.y) ? rec.y : fallbackPt.y,
+        dir: rec.dir || fallbackPt.dir || 'down',
+      };
+    }
+  }
+
+  const partyLevel = computePartyFarmingLevelFallback(profileOrLevel);
+  let biome = null;
+  let clamped = null;
+  let warp = null;
+
+  if (typeof Config.resolveFarmingBiomeForLevel === 'function') {
+    const resolved = Config.resolveFarmingBiomeForLevel(partyLevel, profile);
+    if (resolved && resolved.biomeId) {
+      biome = resolved.biome || BIOMES[resolved.biomeId] || BIOMES.forest;
+      clamped = resolved.clamped ?? null;
+      warp = {
+        x: resolved.x,
+        y: resolved.y,
+        dir: resolved.dir || 'down',
+      };
+    }
+  }
+
+  if (!biome) {
+    const order = Array.isArray(Config.FARMING_BIOME_ORDER) && Config.FARMING_BIOME_ORDER.length > 0
+      ? Config.FARMING_BIOME_ORDER
+      : FALLBACK_FARMING_BIOME_ORDER;
+    if (partyLevel < 2) {
+      biome = BIOMES.forest;
+      clamped = 'low';
+    } else if (partyLevel > 36) {
+      biome = BIOMES.rift;
+      clamped = 'high';
+    } else {
+      const shrinesCleared = Array.isArray(profile?.shrinesCleared) ? new Set(profile.shrinesCleared) : null;
+      const hasUnclearedShrine = (bId) => {
+        if (!shrinesCleared) return false;
+        return Object.values(SHRINES || {}).some((s) => s.biome === bId && !shrinesCleared.has(s.id));
+      };
+      const candidates = order
+        .map((id, idx) => ({ biome: BIOMES[id], idx }))
+        .filter((entry) => entry.biome && Array.isArray(entry.biome.levelRange)
+          && entry.biome.levelRange[0] <= partyLevel && partyLevel <= entry.biome.levelRange[1]);
+      candidates.sort((a, b) => {
+        const midA = (a.biome.levelRange[0] + a.biome.levelRange[1]) / 2;
+        const midB = (b.biome.levelRange[0] + b.biome.levelRange[1]) / 2;
+        const diff = Math.abs(partyLevel - midA) - Math.abs(partyLevel - midB);
+        if (Math.abs(diff) > 1e-9) return diff;
+        if (shrinesCleared) {
+          const uncA = hasUnclearedShrine(a.biome.id) ? 0 : 1;
+          const uncB = hasUnclearedShrine(b.biome.id) ? 0 : 1;
+          if (uncA !== uncB) return uncA - uncB;
+        }
+        return a.idx - b.idx;
+      });
+      biome = candidates[0]?.biome || BIOMES.forest;
+    }
+  }
+
+  const fallbackPt = Config.getBiomeWarpPoint?.(biome.id)
+    || FALLBACK_BIOME_WARP_POINTS[biome.id]
+    || { x: 4, y: 5, dir: 'up' };
+  const rawPt = warp && Number.isFinite(warp.x) && Number.isFinite(warp.y) ? warp : fallbackPt;
+  const safePt = typeof Config.findNearestSafePosition === 'function'
+    ? Config.findNearestSafePosition(rawPt.x, rawPt.y, rawPt.dir || fallbackPt.dir || 'down')
+    : { x: rawPt.x, y: rawPt.y, dir: rawPt.dir || 'down' };
+  const scaled = getBiomeScaledInfo(biome, profile);
+
+  return {
+    biomeId: biome.id,
+    biome,
+    partyLevel,
+    baseMin: scaled.baseMin ?? biome.levelRange?.[0] ?? 2,
+    baseMax: scaled.baseMax ?? biome.levelRange?.[1] ?? 7,
+    minLv: scaled.minLv ?? biome.levelRange?.[0] ?? 2,
+    maxLv: scaled.maxLv ?? biome.levelRange?.[1] ?? 7,
+    threatLabel: scaled.threatLabel || 'Balanced',
+    threatTone: scaled.threatTone || 'balanced',
+    isScaled: Boolean(scaled.isScaled),
+    clamped,
+    x: safePt.x,
+    y: safePt.y,
+    dir: safePt.dir || 'down',
+  };
+}
+
 export function hasAnyReadyEvolutionSafe(profile, storage = null) {
   if (!profile) return false;
   if (typeof storage?.hasAnyReadyEvolution === 'function') {
@@ -501,7 +675,7 @@ function formatCompassArrow(guidance, profile) {
 }
 
 export class PokedexUI {
-  constructor({ storage, audio, onTeamChanged, onBadgesUnlocked, onAppearanceChanged, onCelebrate, onOpenArcade, onClose }) {
+  constructor({ storage, audio, onTeamChanged, onBadgesUnlocked, onAppearanceChanged, onCelebrate, onOpenArcade, onWarpToLevelZone, onClose }) {
     this.storage = storage;
     this.audio = audio;
     this.onTeamChanged = onTeamChanged;
@@ -509,6 +683,7 @@ export class PokedexUI {
     this.onAppearanceChanged = onAppearanceChanged;
     this.onCelebrate = onCelebrate;
     this.onOpenArcade = onOpenArcade;
+    this.onWarpToLevelZone = onWarpToLevelZone;
     this.onClose = onClose;
 
     this.modalEl = document.getElementById('pokedex-modal');
@@ -2095,6 +2270,7 @@ export class PokedexUI {
     const powerLevel = getTrainerPowerSafe(profile);
     const starShards = toNonNegIntSafe(profile.bag?.starShards);
     const cheerState = getCheerStateSafe(this.storage, profile);
+    const recZone = getRecommendedFarmingZoneSafe(profile);
 
     const compassCard = document.createElement('div');
     compassCard.className = 'guide-compass-card';
@@ -2115,6 +2291,24 @@ export class PokedexUI {
         <span>📜 Quests: <strong>${doneQuests}/${quests.length}</strong></span>
       </div>
     `;
+    const warpBar = document.createElement('div');
+    warpBar.className = 'guide-warp-bar';
+    const recPill = document.createElement('span');
+    recPill.className = 'guide-recommended-pill';
+    recPill.textContent = `🌟 Recommended for Lv.${recZone.partyLevel}: ${recZone.biome.icon} ${recZone.biome.name}`;
+    const guideWarpBtn = document.createElement('button');
+    guideWarpBtn.id = 'guide-warp-zone-btn';
+    guideWarpBtn.type = 'button';
+    guideWarpBtn.className = 'mini-btn is-accent guide-warp-btn';
+    guideWarpBtn.textContent = `✨ Warp to Lv.${recZone.minLv}–${recZone.maxLv} Zone`;
+    guideWarpBtn.title = `Warp to ${recZone.biome.name} (Lv.${recZone.minLv}–${recZone.maxLv})`;
+    guideWarpBtn.addEventListener('click', () => {
+      this.audio?.playMenuBlip?.(780);
+      this.onWarpToLevelZone?.(recZone);
+    });
+    warpBar.appendChild(recPill);
+    warpBar.appendChild(guideWarpBtn);
+    compassCard.appendChild(warpBar);
     wrap.appendChild(compassCard);
 
     const nextCheerHint = cheerState.charges >= cheerState.maxCharges
@@ -2234,8 +2428,9 @@ export class PokedexUI {
       const seenBiome = stats?.seen ?? 0;
       const pct = totalBiomeSp > 0 ? Math.min(100, Math.round((caughtBiome / totalBiomeSp) * 100)) : 100;
 
+      const isRecommended = Boolean(recZone && biome.id === recZone.biomeId);
       const card = document.createElement('div');
-      card.className = `biome-progress-card ${stats?.shrineCleared ? 'is-cleared' : visited ? 'is-visited' : ''}`;
+      card.className = `biome-progress-card ${stats?.shrineCleared ? 'is-cleared' : visited ? 'is-visited' : ''}${isRecommended ? ' is-recommended' : ''}`;
 
       const statusLabel = stats?.shrineCleared
         ? '✓ Shrine Cleared'
@@ -2260,6 +2455,9 @@ export class PokedexUI {
       const rivalRow = biomeRival
         ? `<span>⚔️ ${biomeRival.name}: ${profile.rivalsDefeated?.includes(biomeRival.id) ? 'Defeated ✓ (Rematchable)' : 'Ready to Duel!'}</span>`
         : '';
+      const recommendedTag = isRecommended
+        ? '<span class="biome-recommended-tag">🌟 Best Lv. Match</span>'
+        : '';
       const threatPill = !scaled.isSafe
         ? `<span class="biome-threat-tag is-${scaled.threatTone}" title="${scaled.isScaled ? `Scaled from base Lv.${scaled.baseMin}–${scaled.baseMax}` : 'Matches base island level range'}">${scaled.threatLabel}</span>`
         : '';
@@ -2268,6 +2466,7 @@ export class PokedexUI {
         <div class="biome-card-head">
           <strong>${biome.icon} ${biome.name}</strong>
           <div class="biome-card-pills">
+            ${recommendedTag}
             ${threatPill}
             <span class="biome-lv-pill">${lvRange}</span>
           </div>

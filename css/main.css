@@ -974,7 +974,7 @@ button {
 
 .biome-banner {
   position: absolute;
-  top: 58px;
+  top: 60px;
   left: 50%;
   transform: translateX(-50%);
   z-index: 8;
@@ -986,12 +986,17 @@ button {
   font-weight: 900;
   font-size: 0.82rem;
   white-space: nowrap;
-  max-width: calc(100% - 24px);
+  max-width: calc(100% - 336px);
   overflow: hidden;
   text-overflow: ellipsis;
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
   pointer-events: none;
-  animation: pop-in 200ms ease;
+  animation: biome-banner-fade 200ms ease;
+}
+
+@keyframes biome-banner-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 
 .compass-hud {
@@ -1002,7 +1007,7 @@ button {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  max-width: min(345px, calc(100% - 20px - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px)));
+  max-width: min(320px, calc(100% - 186px - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px)));
   padding: 6px 11px;
   border-radius: 14px;
   border: 1.5px solid rgba(255, 255, 255, 0.22);
@@ -1086,13 +1091,13 @@ button {
   }
 }
 
-@media (max-width: 680px) {
+@media (max-width: 719px) {
   .compass-hud {
     top: 8px;
     left: calc(8px + env(safe-area-inset-left, 0px));
     padding: 5px 9px;
     gap: 6px;
-    max-width: min(255px, calc(100% - 16px - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px)));
+    max-width: calc(100% - 134px - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px));
   }
   .compass-arrow {
     width: 24px;
@@ -1104,6 +1109,14 @@ button {
   }
   .compass-sub {
     font-size: 0.63rem;
+  }
+  .biome-banner {
+    top: 52px;
+    left: calc(8px + env(safe-area-inset-left, 0px));
+    transform: none;
+    max-width: calc(100% - 134px - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px));
+    font-size: 0.76rem;
+    padding: 4px 11px;
   }
 }
 
@@ -2179,6 +2192,37 @@ button {
   color: #cbd5e1;
 }
 
+.guide-warp-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+  padding-top: 9px;
+  border-top: 1px solid rgba(255, 255, 255, 0.14);
+}
+
+.guide-recommended-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(250, 204, 21, 0.14);
+  border: 1.5px solid rgba(250, 204, 21, 0.6);
+  color: #fef08a;
+  font-size: 0.75rem;
+  font-weight: 900;
+}
+
+.guide-warp-btn {
+  padding: 6px 12px;
+  font-size: 0.78rem;
+  box-shadow: 0 2px 0 #090d1a, 0 0 12px var(--trainer-accent-soft);
+}
+
 .guide-economy-card {
   min-width: 0;
   max-width: 100%;
@@ -2318,6 +2362,23 @@ button {
 
 .biome-progress-card.is-cleared {
   border-color: rgba(74, 222, 128, 0.65);
+}
+
+.biome-progress-card.is-recommended {
+  border-color: #fde047;
+  background: linear-gradient(145deg, rgba(250, 204, 21, 0.12), #1a233a);
+  box-shadow: 0 0 16px rgba(250, 204, 21, 0.18);
+}
+
+.biome-recommended-tag {
+  font-size: 0.66rem;
+  font-weight: 900;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: rgba(250, 204, 21, 0.2);
+  border: 1px solid rgba(250, 204, 21, 0.72);
+  color: #fef08a;
+  white-space: nowrap;
 }
 
 .biome-card-head {

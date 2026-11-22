@@ -27,6 +27,7 @@ import { StarlightMinigame } from './minigame.js';
 import {
   PokedexUI,
   getBiomeScaledInfo,
+  getRecommendedFarmingZoneSafe,
   getTrainerAppearanceOptions,
   hasAnyReadyEvolutionSafe,
 } from './pokedex.js';
@@ -116,6 +117,14 @@ class GameApp {
     this.compassArrowEl = document.getElementById('compass-arrow');
     this.compassGoalEl = document.getElementById('compass-goal');
     this.compassSubEl = document.getElementById('compass-biome-progress');
+    this.minimapHudEl = document.getElementById('minimap-hud');
+    this.minimapZoneLabelEl = document.getElementById('minimap-zone-label');
+    this.minimapCanvasWrapEl = document.getElementById('minimap-canvas-wrap');
+    this.minimapCanvasEl = document.getElementById('minimap-canvas');
+    this.warpZoneBtn = document.getElementById('warp-zone-btn');
+    this.warpZoneLabelEl = document.getElementById('warp-zone-label');
+    this.warpTransitionEl = document.getElementById('warp-transition');
+    this.warpCalloutEl = document.getElementById('warp-callout');
     this.interactPillEl = document.getElementById('interact-pill');
     this.worldDialogueEl = document.getElementById('world-dialogue');
     this.worldDialogueTextEl = document.getElementById('world-dialogue-text');
@@ -170,6 +179,10 @@ class GameApp {
     this.encounterTransitioning = false;
     this.encounterTimer = null;
     this.encounterToken = 0;
+    this.warpTransitioning = false;
+    this.warpTimer = null;
+    this.warpToken = 0;
+    this.warpResolver = null;
 
     this.loopRafId = null;
     this.loopStartCount = 0;
@@ -189,6 +202,12 @@ class GameApp {
       onOpenArcade: () => {
         this.pokedex.close();
         this.openMinigame();
+      },
+      onWarpToLevelZone: () => {
+        this.pokedex.close();
+        this.syncControlVisibility();
+        this.syncOverworldPause();
+        return this.triggerLevelZoneWarp();
       },
       onAppearanceChanged: (overrideAppearance = null) => {
         const p = storage.getActiveProfile();
@@ -263,6 +282,7 @@ class GameApp {
   }
 
   init() {
+    this.overworld?.attachMinimapCanvas?.(this.minimapCanvasEl);
     this.applySettings();
     this.bindBootEvents();
     this.bindHudAndModalEvents();
@@ -312,7 +332,7 @@ class GameApp {
     this.syncControlVisibility();
   }
 
-  syncControlVisibility() {
+  syncControlVisibility(options = {}) {
     const inBattle = Boolean(this.battle?.active || this.encounterTransitioning);
     const modalOpen = Boolean(this.pokedex?.isOpen() || this.isSettingsOpen() || this.minigame?.isOpen());
 
@@ -330,6 +350,8 @@ class GameApp {
       this.input.clearAll();
       this.overworld?.clearTouchNavigation?.();
     }
+
+    this.syncMinimapHud(performance.now(), options);
   }
 
   applyTrainerTheme(trainerId, appearance = null) {
@@ -469,6 +491,41 @@ class GameApp {
       this.openPokedex('guide');
     });
 
+    if (this.minimapHudEl) {
+      for (const evtName of ['pointerdown', 'pointerup', 'click']) {
+        this.minimapHudEl.addEventListener(evtName, (e) => {
+          e.stopPropagation();
+          if (evtName === 'pointerdown') {
+            audio.unlock?.();
+          }
+        });
+      }
+      this.minimapHudEl.addEventListener('touchstart', (e) => {
+        e.stopPropagation();
+        audio.unlock?.();
+      }, { passive: true });
+    }
+
+    this.warpZoneBtn?.addEventListener('click', () => {
+      audio.unlock?.();
+      this.triggerLevelZoneWarp();
+    });
+
+    this.minimapCanvasWrapEl?.addEventListener('click', () => {
+      audio.unlock?.();
+      audio.playMenuBlip(680);
+      this.openPokedex('guide');
+    });
+
+    this.minimapCanvasWrapEl?.addEventListener('keydown', (e) => {
+      if (e.code === 'Enter' || e.code === 'Space' || e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        audio.unlock?.();
+        audio.playMenuBlip(680);
+        this.openPokedex('guide');
+      }
+    });
+
     this.hudMuteBtn?.addEventListener('click', () => this.toggleMute());
     this.settingMuteBtn?.addEventListener('click', () => this.toggleMute());
 
@@ -569,6 +626,7 @@ class GameApp {
 
     this.bindHoldReset(this.resetTrainerBtn, this.resetTrainerFill, () => {
       const id = storage.getActiveTrainerId();
+      this.cancelWarpTransition();
       this.minigame?.close?.();
       storage.resetTrainerProgress(id);
       if (this.hudArcadeBtn) {
@@ -586,6 +644,7 @@ class GameApp {
     });
 
     this.bindHoldReset(this.resetAllBtn, this.resetAllFill, () => {
+      this.cancelWarpTransition();
       this.minigame?.close?.();
       storage.resetAllProgress();
       if (this.hudArcadeBtn) {
@@ -680,7 +739,7 @@ class GameApp {
         this.battle.triggerPrimaryAction();
         return;
       }
-      if (!this.pokedex.isOpen() && !this.isSettingsOpen() && !this.gameShellEl.hidden && !this.encounterTransitioning) {
+      if (!this.pokedex.isOpen() && !this.isSettingsOpen() && !this.gameShellEl.hidden && !this.encounterTransitioning && !this.warpTransitioning) {
         this.overworld.triggerInteract();
       }
     });
@@ -709,13 +768,17 @@ class GameApp {
     });
 
     this.input.on('pokedex', () => {
-      if (this.gameShellEl.hidden || this.battle.active || this.encounterTransitioning || this.isSettingsOpen() || this.minigame?.isOpen()) return;
+      if (this.gameShellEl.hidden || this.battle.active || this.encounterTransitioning || this.warpTransitioning || this.isSettingsOpen() || this.minigame?.isOpen()) return;
       if (this.pokedex.isOpen()) {
         this.pokedex.close();
         this.syncOverworldPause();
       } else {
         this.openPokedex('dex');
       }
+    });
+
+    this.input.on('warp', () => {
+      this.triggerLevelZoneWarp();
     });
 
     this.input.on('navigate', (dir) => {
@@ -835,6 +898,7 @@ class GameApp {
 
   showBootScreen() {
     this.cancelEncounterTransition();
+    this.cancelWarpTransition();
     this.clearCelebration();
     this.badgeQueue = [];
     this.badgeShowing = false;
@@ -867,6 +931,7 @@ class GameApp {
     this.syncControlVisibility();
     this.syncInstallBanner();
     this.updateCompassHud();
+    this.syncMinimapHud();
 
     drawTrainerPortrait(document.getElementById('portrait-violet'), 'violet', storage.getProfile('violet')?.appearance);
     drawTrainerPortrait(document.getElementById('portrait-ozias'), 'ozias', storage.getProfile('ozias')?.appearance);
@@ -880,6 +945,7 @@ class GameApp {
   }
 
   selectTrainer(trainerId) {
+    this.cancelWarpTransition();
     this._starterFallbackStyle = null;
     this._starterFallbackAcc = null;
     this._starterFallbackAura = null;
@@ -900,6 +966,7 @@ class GameApp {
     this.gameShellEl.hidden = true;
     this.syncControlVisibility();
     this.updateCompassHud();
+    this.syncMinimapHud();
 
     this.starterGreetingEl.textContent = `Welcome, ${trainer.name}! Choose your first partner Pokémon!`;
     this.renderStarterStyleBar(trainerId);
@@ -1135,6 +1202,7 @@ class GameApp {
     const startTheme = startBiome && THEMES[startBiome.id] ? startBiome.id : 'overworld';
     audio.playBGM(startTheme);
     this.updateCompassHud();
+    this.syncMinimapHud();
 
     if (isBrandNew) {
       const lead = profile.team[0];
@@ -1203,6 +1271,241 @@ class GameApp {
 
     this.overworld?.syncFollower?.();
     this.updateCompassHud();
+    this.syncMinimapHud();
+  }
+
+  isMinimapHidden() {
+    return Boolean(
+      !storage.getActiveProfile() ||
+      !this.bootScreenEl?.hidden ||
+      !this.starterScreenEl?.hidden ||
+      this.gameShellEl?.hidden ||
+      this.battle?.active ||
+      this.encounterTransitioning ||
+      (this.battle?.screenEl && !this.battle.screenEl.hidden) ||
+      this.pokedex?.isOpen() ||
+      this.isSettingsOpen() ||
+      this.minigame?.isOpen()
+    );
+  }
+
+  canTriggerZoneWarp() {
+    return Boolean(
+      !this.isMinimapHidden() &&
+      !this.dialogueOpen &&
+      (!this.worldDialogueEl || this.worldDialogueEl.hidden) &&
+      !this.warpTransitioning
+    );
+  }
+
+  getRecommendedWarpTarget(profile = storage.getActiveProfile()) {
+    const zone = getRecommendedFarmingZoneSafe(profile);
+    return {
+      biomeId: zone.biomeId,
+      biome: zone.biome,
+      partyLevel: zone.partyLevel,
+      minLv: zone.minLv,
+      maxLv: zone.maxLv,
+      x: zone.x,
+      y: zone.y,
+      dir: zone.dir,
+    };
+  }
+
+  syncMinimapHud(nowMs = performance.now(), options = {}) {
+    if (!this.minimapHudEl) return;
+    const hidden = this.isMinimapHidden();
+    if (this.minimapHudEl.hidden !== hidden) {
+      this.minimapHudEl.hidden = hidden;
+    }
+    if (hidden) return;
+
+    const profile = storage.getActiveProfile();
+    if (!profile) return;
+
+    const curBiome = getBiomeAt(profile.pos?.x ?? 8, profile.pos?.y ?? 15) || BIOMES.village;
+    const target = this.getRecommendedWarpTarget(profile);
+    const canWarp = this.canTriggerZoneWarp();
+
+    const zoneText = `${curBiome.icon || '🏡'} ${curBiome.name}`;
+    if (this.minimapZoneLabelEl && this.minimapZoneLabelEl.textContent !== zoneText) {
+      this.minimapZoneLabelEl.textContent = zoneText;
+    }
+
+    const warpText = `Warp • Lv.${target.minLv}–${target.maxLv}`;
+    if (this.warpZoneLabelEl && this.warpZoneLabelEl.textContent !== warpText) {
+      this.warpZoneLabelEl.textContent = warpText;
+    }
+
+    if (this.warpZoneBtn) {
+      const disabled = !canWarp;
+      if (this.warpZoneBtn.disabled !== disabled) {
+        this.warpZoneBtn.disabled = disabled;
+        if (disabled) {
+          this.warpZoneBtn.setAttribute('aria-disabled', 'true');
+        } else {
+          this.warpZoneBtn.removeAttribute('aria-disabled');
+        }
+      }
+      const titleText = `Warp to ${target.biome.name} (Lv.${target.minLv}–${target.maxLv}) [T]`;
+      if (this.warpZoneBtn.title !== titleText) {
+        this.warpZoneBtn.title = titleText;
+      }
+    }
+
+    if (!options?.skipMinimapRender) {
+      this.overworld?.renderMinimap?.(nowMs, { recommendedBiomeId: target.biomeId });
+    }
+  }
+
+  cancelWarpTransition() {
+    this.warpToken += 1;
+    if (this.warpTimer !== null) {
+      clearTimeout(this.warpTimer);
+      this.warpTimer = null;
+    }
+    if (typeof this.warpResolver === 'function') {
+      const resolve = this.warpResolver;
+      this.warpResolver = null;
+      resolve();
+    }
+    this.warpTransitioning = false;
+    if (this.warpTransitionEl) {
+      this.warpTransitionEl.hidden = true;
+    }
+  }
+
+  async triggerLevelZoneWarp(options = {}) {
+    if (!this.canTriggerZoneWarp()) {
+      return { warped: false, reason: 'blocked' };
+    }
+    const profile = storage.getActiveProfile();
+    if (!profile) {
+      return { warped: false, reason: 'blocked' };
+    }
+
+    const token = ++this.warpToken;
+    this.warpTransitioning = true;
+    this.input.clearAll();
+    this.overworld?.clearTouchNavigation?.();
+    this.blurFocusedControl();
+    this.syncControlVisibility();
+    this.syncOverworldPause();
+
+    const target = this.getRecommendedWarpTarget(profile);
+    const safePos = Config.findNearestSafePosition?.(target.x, target.y, target.dir)
+      || { x: target.x, y: target.y, dir: target.dir || 'down' };
+
+    const waitWarpMs = (ms) => {
+      if (ms <= 0) return Promise.resolve();
+      return new Promise((resolve) => {
+        if (this.warpTimer !== null) {
+          clearTimeout(this.warpTimer);
+          this.warpTimer = null;
+        }
+        if (typeof this.warpResolver === 'function') {
+          const prevResolve = this.warpResolver;
+          this.warpResolver = null;
+          prevResolve();
+        }
+        this.warpResolver = resolve;
+        this.warpTimer = setTimeout(() => {
+          this.warpTimer = null;
+          if (this.warpResolver === resolve) {
+            this.warpResolver = null;
+          }
+          resolve();
+        }, ms);
+      });
+    };
+
+    try {
+      if (typeof audio.playWarpTeleport === 'function') {
+        audio.playWarpTeleport({ phase: 'full' });
+      } else {
+        audio.playMenuBlip?.(880);
+      }
+
+      this.overworld?.triggerWarpEffect?.('depart', profile.pos?.x, profile.pos?.y);
+
+      if (this.warpCalloutEl) {
+        this.warpCalloutEl.textContent = `🌟 Warping to ${target.biome.icon} ${target.biome.name} (Lv.${target.minLv}–${target.maxLv})!`;
+      }
+      if (this.warpTransitionEl) {
+        this.warpTransitionEl.hidden = false;
+      }
+
+      await waitWarpMs(options?.instant ? 0 : 180);
+      if (token !== this.warpToken || !storage.getActiveProfile()) {
+        return { warped: false, reason: 'cancelled' };
+      }
+
+      let warpRes = null;
+      if (typeof storage.warpToZone === 'function') {
+        warpRes = storage.warpToZone(safePos.x, safePos.y, safePos.dir, target.biomeId);
+      } else {
+        storage.updatePosition(safePos.x, safePos.y, safePos.dir, false);
+        storage.recordBiomeVisited?.(target.biomeId);
+        const newBadges = storage.evaluateBadges?.(false) || [];
+        storage.save?.();
+        warpRes = { warped: true, pos: { ...safePos }, biomeId: target.biomeId, newBadges };
+      }
+      const landedPos = warpRes?.pos || safePos;
+      if (warpRes?.newBadges?.length) {
+        this.showBadgeToast(warpRes.newBadges);
+      }
+
+      if (typeof this.overworld?.warpToPosition === 'function') {
+        this.overworld.warpToPosition(landedPos.x, landedPos.y, landedPos.dir, { announceBiome: false });
+      } else {
+        this.overworld?.syncFromProfile?.();
+      }
+
+      audio.playBGM(THEMES[target.biomeId] ? target.biomeId : 'overworld');
+      this.handleBiomeChange(target.biome, true);
+      this.triggerCelebration({
+        icon: target.biome.icon || '🌟',
+        title: 'STARLIGHT WARP!',
+        subtitle: `${target.biome.name} • Lv.${target.minLv}–${target.maxLv} Farming Zone`,
+        tone: 'starlight',
+        durationMs: 2200,
+      });
+
+      await waitWarpMs(options?.instant ? 0 : 200);
+      if (token !== this.warpToken) {
+        return { warped: false, reason: 'cancelled' };
+      }
+
+      if (this.warpTransitionEl) {
+        this.warpTransitionEl.hidden = true;
+      }
+      this.warpTransitioning = false;
+      this.refreshHud();
+      this.syncControlVisibility();
+      this.syncOverworldPause();
+      this.syncMinimapHud();
+
+      return {
+        warped: true,
+        biomeId: target.biomeId,
+        biomeName: target.biome.name,
+        partyLevel: target.partyLevel,
+        minLv: target.minLv,
+        maxLv: target.maxLv,
+        x: landedPos.x,
+        y: landedPos.y,
+        dir: landedPos.dir,
+      };
+    } finally {
+      if (token === this.warpToken) {
+        this.warpTransitioning = false;
+        if (this.warpTransitionEl) {
+          this.warpTransitionEl.hidden = true;
+        }
+        this.syncControlVisibility();
+        this.syncOverworldPause();
+      }
+    }
   }
 
   formatCompassDirection(guidance, profile) {
@@ -1301,15 +1604,16 @@ class GameApp {
     }
   }
 
-  syncOverworldPause() {
+  syncOverworldPause(options = {}) {
     if (this.worldDialogueEl && this.worldDialogueEl.hidden && this.dialogueOpen) {
       this.dialogueOpen = false;
     }
-    this.syncControlVisibility();
+    this.syncControlVisibility(options);
     this.updateCompassVisibility();
     const paused = (
       this.dialogueOpen ||
       this.encounterTransitioning ||
+      this.warpTransitioning ||
       this.battle.active ||
       this.pokedex.isOpen() ||
       this.minigame?.isOpen() ||
@@ -1949,7 +2253,7 @@ class GameApp {
   }
 
   openMinigame() {
-    if (this.battle?.active || this.encounterTransitioning) return false;
+    if (this.battle?.active || this.encounterTransitioning || this.warpTransitioning) return false;
     if (typeof storage.isArcadeUnlocked === 'function' && !storage.isArcadeUnlocked()) {
       return false;
     }
@@ -1964,7 +2268,7 @@ class GameApp {
   }
 
   openPokedex(tab = 'dex') {
-    if (this.battle.active || this.encounterTransitioning) return;
+    if (this.battle.active || this.encounterTransitioning || this.warpTransitioning) return;
     this.pokedex.open(tab);
     this.syncControlVisibility();
     this.syncOverworldPause();
@@ -1975,7 +2279,7 @@ class GameApp {
   }
 
   openSettings() {
-    if (!this.settingsModalEl) return;
+    if (!this.settingsModalEl || this.warpTransitioning) return;
     if (this.resetStatusEl) this.resetStatusEl.textContent = '';
     this.settingsModalEl.hidden = false;
     this.syncControlVisibility();
@@ -1996,6 +2300,7 @@ class GameApp {
       loopStartCount: this.loopStartCount,
       measuredFps: Number(this.measuredFps.toFixed(2)),
       encounterTransitioning: this.encounterTransitioning,
+      warpTransitioning: this.warpTransitioning,
       battle: this.battle?.getDiagnostics?.() || null,
       audio: this.audio?.getDiagnostics?.() || null,
       minigame: this.minigame?.getDiagnostics?.() || null,
@@ -2017,13 +2322,16 @@ class GameApp {
       }
     }
 
-    this.syncOverworldPause();
+    this.syncOverworldPause({ skipMinimapRender: true });
 
     const battleShowing = this.battle.active && !this.battle.screenEl?.hidden;
     if (!battleShowing) {
       const dir = this.input.getDirection();
       this.overworld.update(dt, dir);
       this.overworld.render(nowMs);
+      if (!this.isMinimapHidden()) {
+        this.syncMinimapHud(nowMs);
+      }
     }
 
     this.loopRafId = requestAnimationFrame((t) => this.loop(t));
