@@ -882,6 +882,22 @@ button {
   }
 }
 
+@media (max-height: 460px) {
+  .hud-bar {
+    padding: 4px 8px;
+    gap: 6px;
+  }
+  .hud-portrait {
+    width: 30px;
+    height: 30px;
+  }
+  .hud-pill,
+  .hud-icon-btn {
+    padding: 4px 7px;
+    font-size: 0.7rem;
+  }
+}
+
 /* --- Overworld Viewport --- */
 .viewport-stage {
   position: relative;

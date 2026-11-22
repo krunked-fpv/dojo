@@ -260,6 +260,9 @@
   max-width: 820px;
   width: 100%;
   max-height: 94%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   border-color: rgba(56, 189, 248, 0.55);
   background: linear-gradient(180deg, #0f172a 0%, #111827 100%);
 }
@@ -310,8 +313,8 @@
 
 .minigame-stage {
   position: relative;
-  flex: 1 1 auto;
-  min-height: 220px;
+  flex: 1 1 0%;
+  min-height: 110px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -322,6 +325,7 @@
 .minigame-canvas {
   width: 100%;
   height: auto;
+  max-width: 100%;
   max-height: 100%;
   aspect-ratio: 760 / 420;
   display: block;
@@ -393,10 +397,11 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
-  gap: 14px;
-  padding: 16px;
-  background: rgba(9, 13, 26, 0.88);
+  justify-content: safe center;
+  gap: 10px;
+  padding: 12px;
+  overflow-y: auto;
+  background: rgba(9, 13, 26, 0.9);
   backdrop-filter: blur(6px);
   text-align: center;
 }
@@ -404,7 +409,7 @@
 .minigame-results-card {
   max-width: 460px;
   width: 100%;
-  padding: 16px;
+  padding: 12px 14px;
   border-radius: 16px;
   border: 2px solid #fde047;
   background: linear-gradient(145deg, rgba(30, 41, 59, 0.96), rgba(49, 46, 129, 0.92));
@@ -412,8 +417,8 @@
 }
 
 .minigame-results-card h3 {
-  margin: 0 0 6px;
-  font-size: 1.25rem;
+  margin: 0 0 4px;
+  font-size: clamp(1rem, 2.8vw, 1.25rem);
   color: #fef08a;
 }
 
@@ -421,9 +426,9 @@
   display: flex;
   justify-content: center;
   flex-wrap: wrap;
-  gap: 10px;
-  margin: 8px 0 10px;
-  font-size: 0.86rem;
+  gap: 8px;
+  margin: 6px 0 8px;
+  font-size: 0.82rem;
   font-weight: 800;
   color: #e2e8f0;
 }
@@ -432,8 +437,8 @@
   display: flex;
   justify-content: center;
   flex-wrap: wrap;
-  gap: 6px;
-  margin-top: 8px;
+  gap: 5px;
+  margin-top: 6px;
 }
 
 .minigame-new-best {
@@ -453,6 +458,12 @@
   flex-wrap: wrap;
   justify-content: center;
   gap: 10px;
+}
+
+@media (max-width: 640px) and (min-height: 600px) {
+  .minigame-stage {
+    min-height: 260px;
+  }
 }
 
 @media (max-width: 640px) {
@@ -477,6 +488,49 @@
   }
 }
 
+@media (max-height: 540px) {
+  .minigame-card {
+    max-height: 98%;
+  }
+  .minigame-header {
+    padding: 5px 10px;
+  }
+  .minigame-header .modal-title {
+    font-size: 0.92rem;
+  }
+  .minigame-hud {
+    padding: 4px 10px;
+    gap: 4px;
+  }
+  .minigame-stat {
+    font-size: 0.7rem;
+    padding: 2px 6px;
+  }
+  .minigame-stage {
+    min-height: 0;
+  }
+  .minigame-canvas {
+    width: auto;
+    height: 100%;
+    max-width: 100%;
+    max-height: 100%;
+  }
+  .minigame-controls {
+    padding: 5px 10px calc(5px + env(safe-area-inset-bottom, 0px));
+  }
+  .minigame-dash-btn {
+    padding: 6px 14px;
+    font-size: 0.8rem;
+  }
+  .minigame-results {
+    padding: 8px;
+    gap: 6px;
+  }
+  .minigame-results-card {
+    padding: 8px 10px;
+  }
+}
+
 /* Keep 6-button Battle Actions in 2 compact rows across Chromebook & tablet viewports */
 #battle-actions.battle-actions {
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -488,6 +542,13 @@
   min-width: 0;
   padding: 6px 4px;
   font-size: clamp(0.64rem, 1.35vw, 0.74rem);
+}
+
+@media (max-width: 740px), (max-height: 500px) {
+  .move-cat-badge,
+  .pp-pips {
+    display: none;
+  }
 }
 
 @media (max-height: 640px) {
@@ -502,5 +563,42 @@
   }
   #battle-actions.battle-actions .battle-act-btn {
     padding: 5px 4px;
+  }
+}
+
+@media (max-height: 500px) {
+  .battle-stage {
+    min-height: 120px;
+  }
+  .battle-deck {
+    padding: 5px 8px 6px;
+    gap: 6px;
+  }
+  .battle-deck-left {
+    gap: 4px;
+  }
+  .battle-log {
+    min-height: 32px;
+    padding: 5px 22px 5px 8px;
+    font-size: 0.76rem;
+  }
+  .battle-moves {
+    gap: 4px;
+  }
+  .move-btn,
+  .move-card {
+    padding: 5px 7px;
+    gap: 2px;
+  }
+  .move-btn-name {
+    font-size: 0.76rem;
+  }
+  .move-pwr-tag,
+  .move-pp-text {
+    font-size: 0.62rem;
+  }
+  #battle-actions.battle-actions .battle-act-btn {
+    padding: 4px 3px;
+    font-size: 0.66rem;
   }
 }

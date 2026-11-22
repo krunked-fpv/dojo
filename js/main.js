@@ -514,6 +514,44 @@ class GameApp {
       this.closeDialogue();
     });
 
+    let canvasDownWhileDialogue = false;
+    let lastCanvasPointerUpMs = 0;
+    const canCanvasDismissDialogue = () => Boolean(
+      this.dialogueOpen &&
+      !this.battle.active &&
+      !this.encounterTransitioning &&
+      !this.pokedex.isOpen() &&
+      !this.minigame?.isOpen() &&
+      !this.isSettingsOpen(),
+    );
+
+    this.overworldCanvasEl?.addEventListener('pointerdown', (e) => {
+      if (e.button === 2) return;
+      canvasDownWhileDialogue = canCanvasDismissDialogue();
+    });
+
+    this.overworldCanvasEl?.addEventListener('pointerup', (e) => {
+      if (e.button === 2) return;
+      lastCanvasPointerUpMs = performance.now();
+      if (canvasDownWhileDialogue && canCanvasDismissDialogue()) {
+        canvasDownWhileDialogue = false;
+        this.closeDialogue();
+        return;
+      }
+      canvasDownWhileDialogue = false;
+    });
+
+    this.overworldCanvasEl?.addEventListener('pointercancel', () => {
+      canvasDownWhileDialogue = false;
+    });
+
+    this.overworldCanvasEl?.addEventListener('click', () => {
+      if (performance.now() - lastCanvasPointerUpMs < 140) return;
+      if (canCanvasDismissDialogue()) {
+        this.closeDialogue();
+      }
+    });
+
     this.bindHoldReset(this.resetTrainerBtn, this.resetTrainerFill, () => {
       const id = storage.getActiveTrainerId();
       storage.resetTrainerProgress(id);
