@@ -39,6 +39,7 @@ import {
 import {
   MAX_UPGRADE_TIER,
   Pokemon,
+  SPECIES_ARCHETYPES,
   attachPokemonSprite,
   calculateCatchAttempt,
   calculateDamage,
@@ -56,6 +57,7 @@ import {
   getScaledShrineGuard,
   getTrainerPowerLevel,
   getTypeEffectiveness,
+  resolveSpeciesArchetype,
   rollWildPokemon,
 } from '../js/pokemon.js';
 import {
@@ -68,7 +70,14 @@ import {
   syncProfilePokedex,
 } from '../js/storage.js';
 import { AudioEngine, THEMES } from '../js/audio.js';
-import { BATTLE_STATES, BattleEngine } from '../js/battle.js';
+import {
+  BATTLE_STATES,
+  BattleEngine,
+  MOVE_FX_CLASS,
+  PHYSICAL_MOVE_IDS,
+  resolveMoveParticleShape,
+  resolveSpriteMotionStyle,
+} from '../js/battle.js';
 
 function assert(condition, message) {
   if (!condition) {
@@ -527,7 +536,7 @@ function buildTestSuites() {
               engine.start({ enemy: createPokemon(25, 5), biomeId: 'forest' });
               assertEqual(engine.active, false, 'BattleEngine does not stay stuck active on empty team');
               assertEqual(endedWith?.outcome, 'escaped', 'BattleEngine invokes onBattleEnd cleanly');
-              assert(BADGES.length === 24 && Object.keys(SPECIES).length === 649, 'Config roster intact');
+              assert(BADGES.length === 28 && Object.keys(SPECIES).length === 1025, 'Config roster intact');
             } finally {
               engine?.destroy();
               window.localStorage.removeItem(TEST_KEY);
@@ -939,27 +948,30 @@ function buildTestSuites() {
       ],
     },
     {
-      name: '12. Evolution Chains, Evolution Gems & Expanded 649-Species Roster',
+      name: '12. Evolution Chains, Evolution Gems & Expanded 1025-Species Roster',
       tests: [
         {
-          name: 'All 10 TYPES have fallback SVGs, 649 SPECIES & 12 gems exist, and level & gem evolutions update Pokemon & Storage',
+          name: 'All 18 TYPES have fallback SVGs, 1025 SPECIES & 16 gems exist, and level & gem evolutions update Pokemon & Storage',
           async fn() {
             const typeIds = Object.keys(TYPES);
-            assertEqual(typeIds.length, 10, '10 elemental types exist');
-            for (const reqType of ['grass', 'fire', 'water', 'electric', 'rock', 'psychic', 'normal', 'ice', 'ghost', 'dragon']) {
+            assertEqual(typeIds.length, 18, '18 elemental types exist');
+            for (const reqType of [
+              'grass', 'fire', 'water', 'electric', 'rock', 'psychic', 'normal', 'ice', 'ghost', 'dragon',
+              'fighting', 'flying', 'poison', 'ground', 'bug', 'steel', 'dark', 'fairy',
+            ]) {
               assert(Boolean(TYPES[reqType]), `TYPES.${reqType} present`);
               const resp = await fetch(`./assets/fallback/${reqType}.svg`);
               assertEqual(resp.ok, true, `fallback SVG exists for ${reqType}`);
             }
 
-            assertEqual(Object.keys(SPECIES).length, 649, '649 species defined');
-            assertEqual(Object.keys(EVOLUTION_ITEMS).length, 12, '12 evolution gems defined');
+            assertEqual(Object.keys(SPECIES).length, 1025, '1025 species defined');
+            assertEqual(Object.keys(EVOLUTION_ITEMS).length, 16, '16 evolution gems defined');
             assertEqual(EVOLUTIONS[1][0].to, 2, 'Bulbasaur -> Ivysaur');
             assertEqual(EVOLUTIONS[2][0].to, 3, 'Ivysaur -> Venusaur');
             assertEqual(EVOLUTIONS[129][0].to, 130, 'Magikarp -> Gyarados');
             assertEqual(EVOLUTIONS[25][0].to, 26, 'Pikachu -> Raichu');
             const eeveeTargets = EVOLUTIONS[133].map((r) => r.to).sort((a, b) => a - b);
-            assertEqual(JSON.stringify(eeveeTargets), JSON.stringify([134, 135, 136, 196, 197, 470, 471]), 'Eevee -> 7 Eeveelutions');
+            assertEqual(JSON.stringify(eeveeTargets), JSON.stringify([134, 135, 136, 196, 197, 470, 471, 700]), 'Eevee -> 8 Eeveelutions');
 
             const bulbaLv9 = createPokemon(1, 9);
             assertEqual(bulbaLv9.getPendingLevelEvolution(), null, 'Lv.9 Bulbasaur has no pending level evolution');
@@ -968,8 +980,8 @@ function buildTestSuites() {
 
             const eevee = createPokemon(133, 8);
             assertEqual(eevee.getPendingLevelEvolution(), null, 'Eevee has no level evolution');
-            const eeveeNoGems = eevee.getAvailableItemEvolutions({ water_gem: 0, thunder_gem: 0, fire_gem: 0, moon_gem: 0, leaf_gem: 0, ice_gem: 0, sun_gem: 0, dusk_gem: 0, astral_gem: 0 });
-            assertEqual(eeveeNoGems.length, 7, 'Eevee has 7 item evolution paths');
+            const eeveeNoGems = eevee.getAvailableItemEvolutions({ water_gem: 0, thunder_gem: 0, fire_gem: 0, moon_gem: 0, leaf_gem: 0, ice_gem: 0, sun_gem: 0, dusk_gem: 0, astral_gem: 0, pixie_gem: 0 });
+            assertEqual(eeveeNoGems.length, 8, 'Eevee has 8 item evolution paths');
             assertEqual(eeveeNoGems.every((o) => !o.canUse), true, 'cannot use gem evolution with 0 gems');
             const eeveeWithWater = eevee.getAvailableItemEvolutions({ water_gem: 1 });
             assertEqual(eeveeWithWater.find((o) => o.toId === 134)?.canUse, true, 'Vaporeon usable with water_gem');
@@ -1089,29 +1101,29 @@ function buildTestSuites() {
       ],
     },
     {
-      name: '14. 14 Biomes, 16 Shrines, NPCs, Quests & Starlight Compass',
+      name: '14. 18 Biomes, 20 Shrines, NPCs, Quests & Starlight Compass',
       tests: [
         {
-          name: '84x72 world map is BFS-reachable to all 14 biomes, 16 shrines, 28 chests, 19 NPCs, landmarks & quests work',
+          name: '100x84 world map is BFS-reachable to all 18 biomes, 20 shrines, 36 chests, 23 NPCs, landmarks & quests work',
           fn() {
-            assertEqual(WORLD_COLS, 84, 'WORLD_COLS === 84');
-            assertEqual(WORLD_ROWS, 72, 'WORLD_ROWS === 72');
-            assertEqual(WORLD_MAP.length, 72, 'WORLD_MAP has 72 rows');
+            assertEqual(WORLD_COLS, 100, 'WORLD_COLS === 100');
+            assertEqual(WORLD_ROWS, 84, 'WORLD_ROWS === 84');
+            assertEqual(WORLD_MAP.length, 84, 'WORLD_MAP has 84 rows');
             for (let y = 0; y < WORLD_ROWS; y++) {
-              assertEqual(WORLD_MAP[y].length, 84, `row ${y} width === 84`);
+              assertEqual(WORLD_MAP[y].length, 100, `row ${y} width === 100`);
             }
 
-            const reqBiomes = ['village', 'forest', 'cave', 'water', 'volcano', 'peak', 'grove', 'desert', 'marsh', 'sanctum', 'canyon', 'reef', 'ruins', 'rift'];
+            const reqBiomes = ['village', 'forest', 'cave', 'water', 'volcano', 'peak', 'grove', 'desert', 'marsh', 'sanctum', 'canyon', 'reef', 'ruins', 'rift', 'faeveldt', 'atoll', 'highlands', 'crater'];
             for (const bId of reqBiomes) {
               assert(Boolean(BIOMES[bId]), `BIOMES.${bId} exists`);
             }
 
             const shrineList = Object.entries(SHRINES);
-            assertEqual(shrineList.length, 16, '16 shrines exist');
+            assertEqual(shrineList.length, 20, '20 shrines exist');
             const chestList = Object.entries(CHESTS);
-            assertEqual(chestList.length, 28, '28 chests exist');
-            assertEqual(Object.keys(NPCS).length, 19, '19 NPCs exist');
-            assertGreater(Object.keys(LANDMARKS).length, 15, '16+ landmarks exist');
+            assertEqual(chestList.length, 36, '36 chests exist');
+            assertEqual(Object.keys(NPCS).length, 23, '23 NPCs exist');
+            assertGreater(Object.keys(LANDMARKS).length, 19, '20+ landmarks exist');
 
             // BFS from spawn (8, 15)
             const visited = new Set([`${GAME_META.spawn.x},${GAME_META.spawn.y}`]);
@@ -1371,10 +1383,10 @@ function buildTestSuites() {
                     team: [ivysaur.toJSON(), raichu.toJSON()],
                     box: [lapras.toJSON(), eevee.toJSON(), metapod.toJSON()],
                     pokedex: {
-                      seen: ['16', '999'],
+                      seen: ['16', '9999'],
                       caught: {
                         '025': 1,
-                        '999': 1,
+                        '9999': 1,
                         '10': 0,
                       },
                     },
@@ -1403,9 +1415,9 @@ function buildTestSuites() {
               assertEqual(isSpeciesCaught(v, 146), false, 'Moltres #146 remains uncaught');
 
               // Invalid & zero-count stripping, and wild-encounter Metapod #11 must NOT mark Caterpie #10
-              assertEqual(v.pokedex.caught[999], undefined, 'invalid #999 stripped from caught');
+              assertEqual(v.pokedex.caught[9999], undefined, 'invalid #9999 stripped from caught');
               assertEqual(v.pokedex.caught[10], undefined, 'zero-count #10 stripped from caught');
-              assertEqual(v.pokedex.seen.includes(999), false, 'invalid #999 stripped from seen');
+              assertEqual(v.pokedex.seen.includes(9999), false, 'invalid #9999 stripped from seen');
               assertEqual(isSpeciesCaught(v, 10), false, 'wild-encounter Metapod #11 does not falsely mark Caterpie #10 caught');
               assertEqual(isSpeciesSeen(v, 10), false, 'wild-encounter Metapod #11 does not falsely mark Caterpie #10 seen');
               assert(v.stats.totalCaught >= 7, `stats.totalCaught repaired (${v.stats.totalCaught} >= 7)`);
@@ -1416,7 +1428,7 @@ function buildTestSuites() {
                 starterId: 4,
                 team: [createPokemon(2, 12), createPokemon(26, 16)],
                 box: [createPokemon(134, 14), createPokemon(11, 7), createPokemon(148, 16)],
-                pokedex: { seen: { '16': true, '999': true, '10': false }, caught: [4] },
+                pokedex: { seen: { '16': true, '9999': true, '10': false }, caught: [4] },
                 shrinesCleared: [],
                 stats: { totalCaught: 0 },
               };
@@ -1428,12 +1440,12 @@ function buildTestSuites() {
               assertEqual(isSpeciesCaught(lineageProfile, 10), false, 'Metapod #11 does not recover wild Caterpie #10');
               assertEqual(isSpeciesCaught(lineageProfile, 147), false, 'Dragonair #148 does not recover wild Dratini #147');
               assertEqual(isSpeciesSeen(lineageProfile, 16), true, 'object-map seen {"16": true} normalized');
-              assertEqual(isSpeciesSeen(lineageProfile, 999), false, 'invalid #999 stripped from object-map seen');
+              assertEqual(isSpeciesSeen(lineageProfile, 9999), false, 'invalid #9999 stripped from object-map seen');
 
               // recordSeen invalid guard
               hydratedStore.selectTrainer('violet');
-              hydratedStore.recordSeen(999, false);
-              assertEqual(v.pokedex.seen.includes(999), false, 'recordSeen ignores invalid species 999');
+              hydratedStore.recordSeen(9999, false);
+              assertEqual(v.pokedex.seen.includes(9999), false, 'recordSeen ignores invalid species 9999');
 
               // Live PokedexUI & HUD count reconciliation
               storage.state = storage.load();
@@ -1445,20 +1457,20 @@ function buildTestSuites() {
               app.refreshHud();
 
               assert(
-                app.hudDexBtn.textContent.includes('Dex 7/649'),
-                `HUD Dex pill displays reconciled 7/649, got "${app.hudDexBtn.textContent}"`,
+                app.hudDexBtn.textContent.includes('Dex 7/1025'),
+                `HUD Dex pill displays reconciled 7/1025, got "${app.hudDexBtn.textContent}"`,
               );
 
               app.openPokedex('dex');
               const summaryText = document.querySelector('.dex-summary-bar')?.textContent || '';
-              assert(summaryText.includes('Caught: 7/649'), `Dex summary shows Caught: 7/649, got "${summaryText}"`);
-              assert(summaryText.includes('Seen: 9/649'), `Dex summary shows Seen: 9/649, got "${summaryText}"`);
+              assert(summaryText.includes('Caught: 7/1025'), `Dex summary shows Caught: 7/1025, got "${summaryText}"`);
+              assert(summaryText.includes('Seen: 9/1025'), `Dex summary shows Seen: 9/1025, got "${summaryText}"`);
 
               const cards = Array.from(document.querySelectorAll('.dex-grid .dex-card'));
-              assertEqual(cards.length, 649, '649 Pokédex cards rendered');
+              assertEqual(cards.length, 1025, '1025 Pokédex cards rendered');
               assertEqual(cards.filter((c) => c.classList.contains('is-caught')).length, 7, '7 .is-caught cards rendered');
               assertEqual(cards.filter((c) => c.classList.contains('is-seen')).length, 2, '2 .is-seen cards rendered');
-              assertEqual(cards.filter((c) => c.classList.contains('is-unknown')).length, 640, '640 .is-unknown cards rendered');
+              assertEqual(cards.filter((c) => c.classList.contains('is-unknown')).length, 1016, '1016 .is-unknown cards rendered');
 
               const cardById = new Map();
               for (const card of cards) {
@@ -1503,7 +1515,7 @@ function buildTestSuites() {
               // Guide tab Dex header matches Pokédex tab
               app.openPokedex('guide');
               const guideText = document.querySelector('.guide-compass-stats')?.textContent || '';
-              assert(guideText.includes('Dex: 7/649'), `Guide tab shows matching Dex: 7/649, got "${guideText}"`);
+              assert(guideText.includes('Dex: 7/1025'), `Guide tab shows matching Dex: 7/1025, got "${guideText}"`);
             } finally {
               app.pokedex.close();
               if (prevRawSave === null) {
@@ -1728,12 +1740,12 @@ function buildTestSuites() {
       ],
     },
     {
-      name: '18. Expanded Roster, 24 Badges, 16 Shrines, 28 Chests, 19 Quests, 13 Rivals & Safe Relocation',
+      name: '18. Expanded Roster, 28 Badges, 20 Shrines, 36 Chests, 23 Quests, 17 Rivals & Safe Relocation',
       tests: [
         {
-          name: '649 species, 10 Sprint-3 + 8 Sprint-4 moves, 12 gems, 24 badges, 16 shrines, 28 chests, 19 quests, 13 rivals & BFS/sanitizePosition hold',
+          name: '1025 species, 10 Sprint-3 + 8 Sprint-4 moves, 16 gems, 28 badges, 20 shrines, 36 chests, 23 quests, 17 rivals & BFS/sanitizePosition hold',
           fn() {
-            assertEqual(Object.keys(SPECIES).length, 649, '649 species total');
+            assertEqual(Object.keys(SPECIES).length, 1025, '1025 species total');
             const newIds = [18, 39, 40, 45, 62, 65, 76, 94, 116, 117, 143, 145, 151, 179, 180, 181, 196, 230, 470, 471];
             for (const id of newIds) {
               assert(Boolean(SPECIES[id]), `new species #${id} exists`);
@@ -1754,11 +1766,11 @@ function buildTestSuites() {
               }
             }
 
-            assertEqual(Object.keys(EVOLUTION_ITEMS).length, 12, '12 evolution gems exist');
+            assertEqual(Object.keys(EVOLUTION_ITEMS).length, 16, '16 evolution gems exist');
             assert(Boolean(EVOLUTION_ITEMS.leaf_gem && EVOLUTION_ITEMS.ice_gem), 'leaf_gem and ice_gem present');
-            assertEqual(EVOLUTIONS[133].length, 7, '7 Eeveelutions defined');
+            assertEqual(EVOLUTIONS[133].length, 8, '8 Eeveelutions defined');
 
-            assertEqual(BADGES.length, 24, '24 badges defined');
+            assertEqual(BADGES.length, 28, '28 badges defined');
             const tempest = BADGES.find((b) => b.id === 'tempest');
             const celestial = BADGES.find((b) => b.id === 'celestial');
             assert(Boolean(tempest && celestial), 'tempest and celestial badges exist');
@@ -1768,15 +1780,15 @@ function buildTestSuites() {
             const caught25 = Object.fromEntries(Object.keys(SPECIES).slice(0, 25).map((id) => [id, 1]));
             assertEqual(celestial.check({ shrinesCleared: [], pokedex: { caught: caught25 } }), true, 'celestial unlocks on 25 caught species');
 
-            assertEqual(Object.keys(SHRINES).length, 16, '16 shrines defined');
+            assertEqual(Object.keys(SHRINES).length, 20, '20 shrines defined');
             assertEqual(Object.values(SHRINES).some((s) => s.id === 'thunder_shrine' && s.guardianId === 145), true, 'thunder_shrine guardian Zapdos #145');
             assertEqual(Object.values(SHRINES).some((s) => s.id === 'starlight_shrine' && s.guardianId === 151), true, 'starlight_shrine guardian Mew #151');
-            assertEqual(Object.keys(CHESTS).length, 28, '28 chests defined');
-            assertEqual(Object.keys(NPCS).length, 19, '19 NPCs defined');
-            assertEqual(FIELD_QUESTS.length, 19, '19 quests defined');
+            assertEqual(Object.keys(CHESTS).length, 36, '36 chests defined');
+            assertEqual(Object.keys(NPCS).length, 23, '23 NPCs defined');
+            assertEqual(FIELD_QUESTS.length, 23, '23 quests defined');
             assertEqual(FIELD_QUESTS.some((q) => q.id === 'quest_celeste_style'), true, 'quest_celeste_style exists');
             assertEqual(FIELD_QUESTS.some((q) => q.id === 'quest_yuki_peak'), true, 'quest_yuki_peak exists');
-            assertEqual(Object.keys(RIVAL_TRAINERS).length, 13, '13 RIVAL_TRAINERS defined');
+            assertEqual(Object.keys(RIVAL_TRAINERS).length, 17, '17 RIVAL_TRAINERS defined');
 
             // No evolved forms in wild encounters (preserves Suite 16 lineage rules)
             const forbiddenWild = new Set([2, 26, 134, 135, 136, 157, 182, 186, 196, 197, 208, 254, 282, 334, 350, 365, 373, 405, 448, 467, 468, 470, 471, 475, 478]);
@@ -2193,10 +2205,10 @@ function buildTestSuites() {
       ],
     },
     {
-      name: '21. Pokedex Filters (649 Cards), Style Studio, Box Evo, Audio & Battle Layout',
+      name: '21. Pokedex Filters (1025 Cards), Style Studio, Box Evo, Audio & Battle Layout',
       tests: [
         {
-          name: 'Dex defaults to 649 cards, Style Studio updates live preview & theme, Box evolves, THEMES.rival works & battle stage has zero overlap',
+          name: 'Dex defaults to 1025 cards, Style Studio updates live preview & theme, Box evolves, THEMES.rival works & battle stage has zero overlap',
           async fn() {
             const app = window.__starlightApp;
             assert(Boolean(app), 'GameApp mounted');
@@ -2246,16 +2258,16 @@ function buildTestSuites() {
               app.overworld.setActive(true);
               app.overworld.syncFromProfile();
 
-              // 1. Pokédex default 'all' filter (649 cards) + filter pills + reset on reopen
+              // 1. Pokédex default 'all' filter (1025 cards) + filter pills + reset on reopen
               app.openPokedex('dex');
-              assertEqual(document.querySelectorAll('.dex-grid .dex-card').length, 649, 'Dex opens with 649 cards on default "all" filter');
+              assertEqual(document.querySelectorAll('.dex-grid .dex-card').length, 1025, 'Dex opens with 1025 cards on default "all" filter');
               const peakPill = document.querySelector('.dex-filter-pill[data-filter="peak"]');
               assert(Boolean(peakPill), 'Peak filter pill rendered');
               peakPill.click();
               const peakCount = document.querySelectorAll('.dex-grid .dex-card').length;
-              assert(peakCount > 0 && peakCount < 649, `Peak filter narrows cards (${peakCount})`);
+              assert(peakCount > 0 && peakCount < 1025, `Peak filter narrows cards (${peakCount})`);
               app.openPokedex('dex');
-              assertEqual(document.querySelectorAll('.dex-grid .dex-card').length, 649, 'Reopening Dex resets filter to all (649 cards)');
+              assertEqual(document.querySelectorAll('.dex-grid .dex-card').length, 1025, 'Reopening Dex resets filter to all (1025 cards)');
 
               // 2. Style Studio tab + #hud-portrait click + live preview + theme update
               app.pokedex.close();
@@ -2371,12 +2383,12 @@ function buildTestSuites() {
       ],
     },
     {
-      name: '22. Sprint 4 Roster (649), 8 Moves, 12 Gems, 7 Eeveelutions, 24 Badges & Full World BFS',
+      name: '22. Sprint 4 Roster (1025), 8 Moves, 16 Gems, 8 Eeveelutions, 28 Badges & Full World BFS',
       tests: [
         {
-          name: '649 species (16 Sprint-4 id<=467), 8 new moves, 12 gems, 7 Eeveelutions, 24 badges, 16 shrines, 28 chests, 19 NPCs/quests, 13 rivals, 16 landmarks & BFS hold',
+          name: '1025 species (16 Sprint-4 id<=467), 8 new moves, 16 gems, 8 Eeveelutions, 28 badges, 20 shrines, 36 chests, 23 NPCs/quests, 17 rivals, 20 landmarks & BFS hold',
           fn() {
-            assertEqual(Object.keys(SPECIES).length, 649, '649 species defined');
+            assertEqual(Object.keys(SPECIES).length, 1025, '1025 species defined');
             const sprint4SpeciesIds = [182, 186, 197, 208, 280, 281, 282, 333, 334, 363, 364, 365, 403, 404, 405, 467];
             for (const id of sprint4SpeciesIds) {
               assert(Boolean(SPECIES[id]), `Sprint 4 species #${id} defined`);
@@ -2408,12 +2420,12 @@ function buildTestSuites() {
               assertEqual(mv.category, category, `${id}.category`);
             }
 
-            assertEqual(Object.keys(EVOLUTION_ITEMS).length, 12, '12 gems defined');
+            assertEqual(Object.keys(EVOLUTION_ITEMS).length, 16, '16 gems defined');
             assertEqual(EVOLUTION_ITEMS.sun_gem?.icon, '☀️', 'sun_gem present');
             assertEqual(EVOLUTION_ITEMS.dusk_gem?.icon, '🔮', 'dusk_gem present');
 
             const eeveeTargets = EVOLUTIONS[133].map((e) => e.to).sort((a, b) => a - b);
-            assertEqual(JSON.stringify(eeveeTargets), JSON.stringify([134, 135, 136, 196, 197, 470, 471]), '7 Eeveelutions incl. Umbreon #197');
+            assertEqual(JSON.stringify(eeveeTargets), JSON.stringify([134, 135, 136, 196, 197, 470, 471, 700]), '8 Eeveelutions incl. Umbreon #197 & Sylveon #700');
             assert(EVOLUTIONS[44].some((e) => e.to === 182 && e.item === 'sun_gem'), 'Gloom -> Bellossom via sun_gem');
             assert(EVOLUTIONS[61].some((e) => e.to === 186 && e.item === 'sun_gem'), 'Poliwhirl -> Politoed via sun_gem');
             assert(EVOLUTIONS[95].some((e) => e.to === 208 && e.item === 'dusk_gem'), 'Onix -> Steelix via dusk_gem');
@@ -2433,27 +2445,27 @@ function buildTestSuites() {
             assertEqual(defaultLook.aura, 'stars', 'resolveTrainerLook resolves aura');
             assertEqual(resolveTrainerLook('ozias', null).aura, 'none', 'null appearance defaults aura to none');
 
-            assertEqual(BADGES.length, 24, '24 BADGES defined');
+            assertEqual(BADGES.length, 28, '28 BADGES defined');
             const eclipseBadge = BADGES.find((b) => b.id === 'eclipse');
             const stardustBadge = BADGES.find((b) => b.id === 'stardust');
             assert(Boolean(eclipseBadge && stardustBadge), 'eclipse and stardust badges defined');
             assertEqual(eclipseBadge.check({ shrinesCleared: ['eclipse_shrine'], pokedex: { caught: {} } }), true, 'eclipse unlocks on eclipse_shrine');
-            assertEqual(eclipseBadge.check({ shrinesCleared: [], pokedex: { caught: { 92: 1, 93: 1, 197: 1, 282: 1 } } }), true, 'eclipse unlocks on 4 Ghost/Psychic species');
+            assertEqual(eclipseBadge.check({ shrinesCleared: [], pokedex: { caught: { 92: 1, 93: 1, 94: 1, 196: 1 } } }), true, 'eclipse unlocks on 4 Ghost/Psychic species');
             assertEqual(stardustBadge.check({ stats: { upgrades: 1, evolutions: 0 } }), true, 'stardust unlocks on 1 upgrade');
             assertEqual(stardustBadge.check({ stats: { upgrades: 0, evolutions: 3 } }), true, 'stardust unlocks on 3 evolutions');
 
-            assertEqual(Object.keys(SHRINES).length, 16, '16 SHRINES defined');
+            assertEqual(Object.keys(SHRINES).length, 20, '20 SHRINES defined');
             assert(Object.values(SHRINES).some((s) => s.id === 'eclipse_shrine' && s.guardianId === 282 && s.badgeId === 'eclipse'), 'eclipse_shrine guardian Gardevoir #282');
-            assertEqual(Object.keys(CHESTS).length, 28, '28 CHESTS defined');
+            assertEqual(Object.keys(CHESTS).length, 36, '36 CHESTS defined');
             assert(Object.values(CHESTS).some((c) => c.id === 'lagoon_chest_sun' && c.rewards?.gems?.sun_gem === 1), 'lagoon_chest_sun grants sun_gem');
             assert(Object.values(CHESTS).some((c) => c.id === 'cave_chest_dusk' && c.rewards?.gems?.dusk_gem === 1), 'cave_chest_dusk grants dusk_gem');
-            assertEqual(Object.keys(NPCS).length, 19, '19 NPCS defined');
-            assertEqual(FIELD_QUESTS.length, 19, '19 FIELD_QUESTS defined');
+            assertEqual(Object.keys(NPCS).length, 23, '23 NPCS defined');
+            assertEqual(FIELD_QUESTS.length, 23, '23 FIELD_QUESTS defined');
             assert(FIELD_QUESTS.some((q) => q.id === 'quest_orion_upgrade'), 'quest_orion_upgrade defined');
             assert(FIELD_QUESTS.some((q) => q.id === 'quest_selene_twilight'), 'quest_selene_twilight defined');
-            assertEqual(Object.keys(RIVAL_TRAINERS).length, 13, '13 RIVAL_TRAINERS defined');
+            assertEqual(Object.keys(RIVAL_TRAINERS).length, 17, '17 RIVAL_TRAINERS defined');
             assert(Object.values(RIVAL_TRAINERS).some((r) => r.id === 'rival_astra' && r.biome === 'peak'), 'rival_astra in peak');
-            assertEqual(Object.keys(LANDMARKS).length, 16, '16 LANDMARKS defined');
+            assertEqual(Object.keys(LANDMARKS).length, 20, '20 LANDMARKS defined');
 
             // BFS from spawn (8,15) reaches all 8 shrines, 12 chests, 10 NPCs, 5 rivals, 7 landmarks
             const visited = new Set([`${GAME_META.spawn.x},${GAME_META.spawn.y}`]);
@@ -2759,8 +2771,8 @@ function buildTestSuites() {
                 onHudRefresh() {},
               });
 
-              // Enemy: Rock-type Steelix #208 Lv.2 (tests 1.5x BOOST for moonblast + ★3 + ⚡ ELITE)
-              const eliteRock = createPokemon(208, 2, 'cave', { upgradeTier: 3, isElite: true });
+              // Enemy: Rock-type Golem #76 Lv.2 (tests 1.5x BOOST for moonblast + ★3 + ⚡ ELITE)
+              const eliteRock = createPokemon(76, 2, 'cave', { upgradeTier: 3, isElite: true });
               const startP = engine.start({ enemy: eliteRock, biomeId: 'cave' });
               await waitUntil(engine, () => engine.state === BATTLE_STATES.PLAYER_INPUT);
               await startP;
@@ -3026,12 +3038,12 @@ function buildTestSuites() {
       ],
     },
     {
-      name: '26. Sprint 5 Roster (649), Celestial Grove, Bond Perks & Save Migration',
+      name: '26. Sprint 5 Roster (1025), Celestial Grove, Bond Perks & Save Migration',
       tests: [
         {
-          name: '649 species, 8 moves, astral_gem, Kirlia->Gallade split evo, getBondTier, cheerPokemon, badges & post-shrine roamers hold',
+          name: '1025 species, 8 moves, astral_gem, Kirlia->Gallade split evo, getBondTier, cheerPokemon, badges & post-shrine roamers hold',
           fn() {
-            assertEqual(Object.keys(SPECIES).length, 649, '649 species defined');
+            assertEqual(Object.keys(SPECIES).length, 1025, '1025 species defined');
             const sprint5SpeciesIds = [
               155, 156, 157, 175, 176, 252, 253, 254, 349, 350,
               361, 371, 372, 373, 385, 447, 448, 468, 475, 478,
@@ -3066,7 +3078,7 @@ function buildTestSuites() {
               assertEqual(mv.fx, fx, `${id}.fx`);
             }
 
-            assertEqual(Object.keys(EVOLUTION_ITEMS).length, 12, '12 evolution gems defined');
+            assertEqual(Object.keys(EVOLUTION_ITEMS).length, 16, '16 evolution gems defined');
             assert(Boolean(EVOLUTION_ITEMS.astral_gem), 'astral_gem defined');
             assertEqual(EVOLUTION_ITEMS.astral_gem.icon, '🌠', 'astral_gem icon');
 
@@ -3125,7 +3137,7 @@ function buildTestSuites() {
             }
 
             // Grove & Harmony badges
-            assertEqual(BADGES.length, 24, '24 badges defined');
+            assertEqual(BADGES.length, 28, '28 badges defined');
             const groveBadge = BADGES.find((b) => b.id === 'grove');
             const harmonyBadge = BADGES.find((b) => b.id === 'harmony');
             assert(Boolean(groveBadge && harmonyBadge), 'grove and harmony badges defined');
@@ -3221,13 +3233,13 @@ function buildTestSuites() {
           },
         },
         {
-          name: '84x72 Celestial Grove BFS reachability (16 shrines, 28 chests, 19 NPCs, 13 rivals, 16 landmarks, 14 signposts) & lossless v1/v2 migration hold',
+          name: '100x84 Celestial Grove BFS reachability (20 shrines, 36 chests, 23 NPCs, 17 rivals, 20 landmarks, 18 signposts) & lossless v1/v2 migration hold',
           fn() {
-            assertEqual(WORLD_COLS, 84, 'WORLD_COLS === 84');
-            assertEqual(WORLD_ROWS, 72, 'WORLD_ROWS === 72');
-            assertEqual(WORLD_MAP.length, 72, 'WORLD_MAP has 72 rows');
+            assertEqual(WORLD_COLS, 100, 'WORLD_COLS === 100');
+            assertEqual(WORLD_ROWS, 84, 'WORLD_ROWS === 84');
+            assertEqual(WORLD_MAP.length, 84, 'WORLD_MAP has 84 rows');
             for (let y = 0; y < WORLD_ROWS; y++) {
-              assertEqual(WORLD_MAP[y].length, 84, `row ${y} width === 84`);
+              assertEqual(WORLD_MAP[y].length, 100, `row ${y} width === 100`);
             }
 
             assertEqual(getBiomeAt(8, 15).id, 'village', 'spawn remains village');
@@ -3236,13 +3248,13 @@ function buildTestSuites() {
             assertEqual(getBiomeAt(8, 38).id, 'grove', 'row 38+ is grove');
             assertEqual(getBiomeAt(46, 41).id, 'grove', 'grove_shrine is in grove');
 
-            assertEqual(Object.keys(SHRINES).length, 16, '16 shrines');
-            assertEqual(Object.keys(CHESTS).length, 28, '28 chests');
-            assertEqual(Object.keys(NPCS).length, 19, '19 NPCs');
-            assertEqual(FIELD_QUESTS.length, 19, '19 quests');
-            assertEqual(Object.keys(RIVAL_TRAINERS).length, 13, '13 rivals');
-            assertEqual(Object.keys(LANDMARKS).length, 16, '16 landmarks');
-            assertEqual(Object.keys(SIGNPOSTS).length, 14, '14 signposts');
+            assertEqual(Object.keys(SHRINES).length, 20, '20 shrines');
+            assertEqual(Object.keys(CHESTS).length, 36, '36 chests');
+            assertEqual(Object.keys(NPCS).length, 23, '23 NPCs');
+            assertEqual(FIELD_QUESTS.length, 23, '23 quests');
+            assertEqual(Object.keys(RIVAL_TRAINERS).length, 17, '17 rivals');
+            assertEqual(Object.keys(LANDMARKS).length, 20, '20 landmarks');
+            assertEqual(Object.keys(SIGNPOSTS).length, 18, '18 signposts');
 
             const visited = new Set([`${GAME_META.spawn.x},${GAME_META.spawn.y}`]);
             const queue = [[GAME_META.spawn.x, GAME_META.spawn.y]];
@@ -3489,6 +3501,8 @@ function buildTestSuites() {
               // Enemy PP consumption & 0-PP Struggle fallback
               const firstEnemyMove = enemy.getMoveObjects()[0];
               const ppBefore = enemy.getMovePp(firstEnemyMove.id).current;
+              lead.level = 45;
+              lead.recalculateStats();
               lead.hp = lead.maxHp;
               const ppTimer = setInterval(() => engine.finishTypewriter(), 15);
               try {
@@ -3579,7 +3593,7 @@ function buildTestSuites() {
               assert(Boolean(grovePill), 'grove Dex filter pill rendered');
               grovePill.click();
               const groveCards = Array.from(document.querySelectorAll('.dex-grid .dex-card'));
-              assert(groveCards.length > 0 && groveCards.length < 649, `Grove filter narrows cards (${groveCards.length})`);
+              assert(groveCards.length > 0 && groveCards.length < 1025, `Grove filter narrows cards (${groveCards.length})`);
               for (const card of groveCards) {
                 const spId = Number(card.querySelector('.dex-num')?.textContent?.replace('#', '').trim());
                 assertEqual(SPECIES[spId]?.biome, 'grove', `Grove filtered card #${spId} belongs to grove biome`);
@@ -3881,16 +3895,16 @@ function buildTestSuites() {
       ],
     },
     {
-      name: '29. Sprint 6 Roster (649), 308+ Evolutions, Prism Gem, 28 Abilities & Zero-Count Fixes',
+      name: '29. Sprint 6 Roster (1025), 480+ Evolutions, Prism Gem, 38 Abilities & Zero-Count Fixes',
       tests: [
         {
-          name: '649 species, 100 moves (+16), 12 gems (+prism_gem), 308+ evolution edges, 100% reachability & #361 order hold',
+          name: '1025 species, 128 moves (+28 Sprint 8), 16 gems (+prism_gem), 480+ evolution edges, 100% reachability & #361 order hold',
           fn() {
             const allSpecies = Object.values(SPECIES);
-            assertEqual(allSpecies.length, 649, '649 species defined');
-            assertEqual(Object.keys(MOVES).length, 100, '100 moves defined');
-            assertEqual(Object.keys(ABILITIES).length, 28, '28 abilities defined');
-            assertEqual(Object.keys(EVOLUTION_ITEMS).length, 12, '12 evolution gems defined');
+            assertEqual(allSpecies.length, 1025, '1025 species defined');
+            assertEqual(Object.keys(MOVES).length, 128, '128 moves defined');
+            assertEqual(Object.keys(ABILITIES).length, 38, '38 abilities defined');
+            assertEqual(Object.keys(EVOLUTION_ITEMS).length, 16, '16 evolution gems defined');
             assertEqual(EVOLUTION_ITEMS.prism_gem?.id, 'prism_gem', 'prism_gem present');
             assertEqual(EVOLUTION_ITEMS.prism_gem?.icon, '💠', 'prism_gem icon');
 
@@ -3930,9 +3944,9 @@ function buildTestSuites() {
             assertEqual(EVOLUTIONS[361]?.[0]?.to, 478, '#361 first rule is Froslass #478');
             assertEqual(EVOLUTIONS[361]?.[1]?.to, 362, '#361 second rule is Glalie #362');
 
-            // Verify every species is #1..#649, has valid type, biome, ability & 4 valid moves
+            // Verify every species is #1..#1025, has valid type, biome, ability & 4 valid moves
             for (const sp of allSpecies) {
-              assertInRange(sp.id, 1, 649, `species #${sp.id} in National Dex #1..#649`);
+              assertInRange(sp.id, 1, 1025, `species #${sp.id} in National Dex #1..#1025`);
               assert(Boolean(TYPES[sp.type]), `species #${sp.id} valid type`);
               assert(sp.biome === 'starter' || Boolean(BIOMES[sp.biome]), `species #${sp.id} valid biome ${sp.biome}`);
               assert(Boolean(ABILITIES[sp.ability]), `species #${sp.id} valid ability ${sp.ability}`);
@@ -3956,7 +3970,10 @@ function buildTestSuites() {
             for (const sh of Object.values(SHRINES)) {
               reachable.add(Number(sh.guardianId));
             }
-            for (const roamerId of [144, 145, 146, 151, 385, 248, 251, 384, 249, 243, 244, 382, 245, 483, 486, 493, 150, 250, 643, 644, 649]) {
+            for (const roamerId of [
+              144, 145, 146, 151, 385, 248, 251, 384, 249, 243, 244, 382, 245, 483, 486, 493, 150, 250, 643, 644, 649,
+              717, 718, 719, 720, 721, 792, 800, 801, 802, 807, 808, 889, 890, 893, 898, 905, 1007, 1008, 1009, 1010, 1017, 1025,
+            ]) {
               reachable.add(roamerId);
             }
             let changed = true;
@@ -4131,8 +4148,8 @@ function buildTestSuites() {
             assertEqual(BIOMES.marsh.encounters.length, baseCounts.marsh, 'BIOMES.marsh not mutated');
             assertEqual(BIOMES.sanctum.encounters.length, baseCounts.sanctum, 'BIOMES.sanctum not mutated');
 
-            // 24 badges + zero-count badge & quest leak regression guard
-            assertEqual(BADGES.length, 24, '24 badges defined');
+            // 28 badges + zero-count badge & quest leak regression guard
+            assertEqual(BADGES.length, 28, '28 badges defined');
             for (const reqId of ['mirage', 'bayou', 'zenith', 'grand_dex']) {
               assert(BADGES.some((b) => b.id === reqId), `badge ${reqId} exists`);
             }
@@ -4348,12 +4365,12 @@ function buildTestSuites() {
               engine.stop({ outcome: 'escaped', faintedAll: false });
 
               // Player 0-PP Struggle bug fix: 0 PP on ALL moves including synthesis -> executes Struggle & deals damage
-              const bulba = createPokemon(1, 10, 'forest');
+              const bulba = createPokemon(1, 18, 'forest');
               for (const m of bulba.species.movePool) {
                 bulba.movePp[m] = 0;
               }
               vp.team[0] = bulba;
-              const targetCaterpie = createPokemon(10, 10, 'forest');
+              const targetCaterpie = createPokemon(10, 12, 'forest');
               const startStruggle = engine.start({ enemy: targetCaterpie, biomeId: 'forest' });
               await waitUntil(engine, () => engine.state === BATTLE_STATES.PLAYER_INPUT);
               await startStruggle;
@@ -4418,19 +4435,19 @@ function buildTestSuites() {
       ],
     },
     {
-      name: '31. 84x72 World Map BFS, 649-Dex Search/Type Filters, Ability UI, v1/v2 Migration & Layout Gate',
+      name: '31. 100x84 World Map BFS, 1025-Dex Search/Type Filters, Ability UI, v1/v2 Migration & Layout Gate',
       tests: [
         {
-          name: '84x72 map BFS (16 shrines, 28 chests, 19 NPCs/quests, 13 rivals, 16 landmarks, 14 signposts, 11 heals), Overworld tiles 28..36 & Compass hold',
+          name: '100x84 map BFS (20 shrines, 36 chests, 23 NPCs/quests, 17 rivals, 20 landmarks, 18 signposts, 15 heals), Overworld tiles 28..36 & Compass hold',
           fn() {
             const app = window.__starlightApp;
             assert(Boolean(app), 'GameApp mounted');
 
-            assertEqual(WORLD_COLS, 84, 'WORLD_COLS === 84');
-            assertEqual(WORLD_ROWS, 72, 'WORLD_ROWS === 72');
-            assertEqual(WORLD_MAP.length, 72, 'WORLD_MAP has 72 rows');
+            assertEqual(WORLD_COLS, 100, 'WORLD_COLS === 100');
+            assertEqual(WORLD_ROWS, 84, 'WORLD_ROWS === 84');
+            assertEqual(WORLD_MAP.length, 84, 'WORLD_MAP has 84 rows');
             for (let y = 0; y < WORLD_ROWS; y++) {
-              assertEqual(WORLD_MAP[y].length, 84, `row ${y} width === 84`);
+              assertEqual(WORLD_MAP[y].length, 100, `row ${y} width === 100`);
             }
 
             // Preserve spawn, (18,14) solid wall, and existing (0..51, 0..47) biome zones
@@ -4454,14 +4471,14 @@ function buildTestSuites() {
             assert(SOLID_TILES.has(30) && SOLID_TILES.has(33) && SOLID_TILES.has(36), 'SOLID_TILES includes 30, 33, 36');
 
             // Counts
-            assertEqual(Object.keys(BIOMES).length, 14, '14 biomes defined');
-            assertEqual(Object.keys(SHRINES).length, 16, '16 shrines defined');
-            assertEqual(Object.keys(CHESTS).length, 28, '28 chests defined');
-            assertEqual(Object.keys(NPCS).length, 19, '19 NPCs defined');
-            assertEqual(FIELD_QUESTS.length, 19, '19 quests defined');
-            assertEqual(Object.keys(RIVAL_TRAINERS).length, 13, '13 rivals defined');
-            assertEqual(Object.keys(LANDMARKS).length, 16, '16 landmarks defined');
-            assertEqual(Object.keys(SIGNPOSTS).length, 14, '14 signposts defined');
+            assertEqual(Object.keys(BIOMES).length, 18, '18 biomes defined');
+            assertEqual(Object.keys(SHRINES).length, 20, '20 shrines defined');
+            assertEqual(Object.keys(CHESTS).length, 36, '36 chests defined');
+            assertEqual(Object.keys(NPCS).length, 23, '23 NPCs defined');
+            assertEqual(FIELD_QUESTS.length, 23, '23 quests defined');
+            assertEqual(Object.keys(RIVAL_TRAINERS).length, 17, '17 rivals defined');
+            assertEqual(Object.keys(LANDMARKS).length, 20, '20 landmarks defined');
+            assertEqual(Object.keys(SIGNPOSTS).length, 18, '18 signposts defined');
 
             // Full BFS from (8,15)
             const visited = new Set([`${GAME_META.spawn.x},${GAME_META.spawn.y}`]);
@@ -4522,7 +4539,7 @@ function buildTestSuites() {
                 }
               }
             }
-            assertEqual(healCount, 11, '11 Healing Fountains present & reachable');
+            assertEqual(healCount, 15, '15 Healing Fountains present & reachable');
             for (const bId of ['forest', 'cave', 'water', 'volcano', 'peak', 'grove', 'desert', 'marsh', 'sanctum']) {
               assert(reachableEncByBiome.has(bId), `encounter tiles reachable in ${bId}`);
             }
@@ -4575,14 +4592,14 @@ function buildTestSuites() {
           },
         },
         {
-          name: '649-Dex search/type/biome filters, ability UI pills, SW/index sync, v1/v2 solid-tile migration, 60fps & 1280x720/1024x768 non-overlap gate pass',
+          name: '1025-Dex search/type/biome filters, ability UI pills, SW/index sync, v1/v2 solid-tile migration, 60fps & 1280x720/1024x768 non-overlap gate pass',
           async fn() {
             const app = window.__starlightApp;
             assert(Boolean(app), 'GameApp mounted');
 
             // 1. SW & index.html cache/count sanity
             const swText = await (await fetch('./sw.js')).text();
-            assert(swText.includes('starlight-shell-v7') && swText.includes('starlight-assets-v7'), 'sw.js bumped to v7 caches');
+            assert(swText.includes('starlight-shell-v8') && swText.includes('starlight-assets-v8'), 'sw.js bumped to v8 caches');
 
             // 2. v1/v2 save migration with new biomes & solid tiles (30, 33, 36)
             const findFirstTile = (tileId) => {
@@ -4662,9 +4679,9 @@ function buildTestSuites() {
               app.applyTrainerTheme('violet');
               app.refreshHud();
 
-              // Open Pokédex: default 649 cards
+              // Open Pokédex: default 1025 cards
               app.openPokedex('dex');
-              assertEqual(document.querySelectorAll('.dex-grid .dex-card').length, 649, 'Dex renders all 649 cards by default');
+              assertEqual(document.querySelectorAll('.dex-grid .dex-card').length, 1025, 'Dex renders all 1025 cards by default');
 
               // Search by name & #id + input focus safety
               const searchEl = document.getElementById('dex-search-input');
@@ -4694,13 +4711,13 @@ function buildTestSuites() {
               );
 
               document.getElementById('dex-search-clear').click();
-              assertEqual(document.querySelectorAll('.dex-grid .dex-card').length, 649, 'clear button restores 649 cards');
+              assertEqual(document.querySelectorAll('.dex-grid .dex-card').length, 1025, 'clear button restores 1025 cards');
 
               // Type + Biome filters
               typeEl.value = 'dragon';
               typeEl.dispatchEvent(new Event('change', { bubbles: true }));
               const dragonCount = document.querySelectorAll('.dex-grid .dex-card').length;
-              assert(dragonCount > 0 && dragonCount < 649, `Dragon type filter narrows cards (${dragonCount})`);
+              assert(dragonCount > 0 && dragonCount < 1025, `Dragon type filter narrows cards (${dragonCount})`);
 
               for (const bId of ['desert', 'marsh', 'sanctum']) {
                 const pill = document.querySelector(`.dex-filter-pill[data-filter="${bId}"]`);
@@ -4716,17 +4733,17 @@ function buildTestSuites() {
               const resetBtn = document.querySelector('.dex-reset-filters-btn');
               assert(Boolean(resetBtn), 'empty filter state shows Show All button');
               resetBtn.click();
-              assertEqual(document.querySelectorAll('.dex-grid .dex-card').length, 649, 'Show All resets to 649 cards');
+              assertEqual(document.querySelectorAll('.dex-grid .dex-card').length, 1025, 'Show All resets to 1025 cards');
 
-              // Team & Box Ability pills, Guide (14 biomes, 13 rivals, 19 quests), Badges (24)
+              // Team & Box Ability pills, Guide (18 biomes, 17 rivals, 23 quests), Badges (28)
               app.openPokedex('team');
               assertGreater(document.querySelectorAll('.team-card .ability-pill').length, 0, 'Team cards render .ability-pill');
               assertGreater(document.querySelectorAll('.box-card .ability-pill').length, 0, 'Box cards render .ability-pill');
               app.openPokedex('guide');
-              assertEqual(document.querySelectorAll('.biome-progress-card').length, 14, 'Guide renders all 14 biome cards');
-              assertEqual(document.querySelectorAll('.quests-list .quest-card').length, 19, 'Guide renders 19 field quests');
+              assertEqual(document.querySelectorAll('.biome-progress-card').length, 18, 'Guide renders all 18 biome cards');
+              assertEqual(document.querySelectorAll('.quests-list .quest-card').length, 23, 'Guide renders 23 field quests');
               app.openPokedex('badges');
-              assertEqual(document.querySelectorAll('.badges-grid .badge-card').length, 24, 'Badges tab renders 24 badge cards');
+              assertEqual(document.querySelectorAll('.badges-grid .badge-card').length, 28, 'Badges tab renders 28 badge cards');
               app.pokedex.close();
 
               // 4. Layout non-overlap at 1280x720 & 1024x768 (HUD, cards/sprites, AND ability banner)
@@ -4826,21 +4843,21 @@ function buildTestSuites() {
       ],
     },
     {
-      name: '32. Sprint 7 Systems: 649 Contiguous Species, 308+ Evolutions, 100 Moves, 12 Gems, 28 Abilities & 24 Badges',
+      name: '32. Sprint 7 Systems: 1025 Contiguous Species, 480+ Evolutions, 128 Moves, 16 Gems, 38 Abilities & 28 Badges',
       tests: [
         {
-          name: 'All 649 contiguous species (#1..#649), >=308 evo edges across >=285 parents, 100 moves, 12 gems (chrono/nebula) & 100% reachability',
+          name: 'All 1025 contiguous species (#1..#1025), >=308 evo edges across >=285 parents, 128 moves, 16 gems (chrono/nebula) & 100% reachability',
           fn() {
             const allSpecies = Object.values(SPECIES);
-            assertEqual(allSpecies.length, 649, '649 species defined');
-            for (let id = 1; id <= 649; id++) {
+            assertEqual(allSpecies.length, 1025, '1025 species defined');
+            for (let id = 1; id <= 1025; id++) {
               assert(Boolean(SPECIES[id]), `contiguous species #${id} defined`);
             }
 
-            assertEqual(Object.keys(TYPES).length, 10, '10 elemental types preserved');
-            assertEqual(Object.keys(MOVES).length, 100, '100 moves defined');
-            assertEqual(Object.keys(ABILITIES).length, 28, '28 abilities defined');
-            assertEqual(Object.keys(EVOLUTION_ITEMS).length, 12, '12 evolution gems defined');
+            assertEqual(Object.keys(TYPES).length, 18, '18 elemental types preserved');
+            assertEqual(Object.keys(MOVES).length, 128, '128 moves defined');
+            assertEqual(Object.keys(ABILITIES).length, 38, '38 abilities defined');
+            assertEqual(Object.keys(EVOLUTION_ITEMS).length, 16, '16 evolution gems defined');
             assertEqual(EVOLUTION_ITEMS.chrono_gem?.id, 'chrono_gem', 'chrono_gem defined');
             assertEqual(EVOLUTION_ITEMS.chrono_gem?.icon, '⏳', 'chrono_gem icon');
             assertEqual(EVOLUTION_ITEMS.nebula_gem?.id, 'nebula_gem', 'nebula_gem defined');
@@ -4994,7 +5011,7 @@ function buildTestSuites() {
               window.localStorage.removeItem(TEST_KEY);
             }
 
-            // 100% 649-species gameplay reachability BFS
+            // 100% 1025-species gameplay reachability BFS
             const reachable = new Set(STARTER_IDS.map(Number));
             for (const b of Object.values(BIOMES)) {
               for (const enc of b.encounters || []) reachable.add(Number(enc.id));
@@ -5002,7 +5019,10 @@ function buildTestSuites() {
             for (const sh of Object.values(SHRINES)) {
               reachable.add(Number(sh.guardianId));
             }
-            for (const roamerId of [144, 145, 146, 151, 385, 248, 251, 384, 249, 243, 244, 382, 245, 483, 486, 493, 150, 250, 643, 644, 649]) {
+            for (const roamerId of [
+              144, 145, 146, 151, 385, 248, 251, 384, 249, 243, 244, 382, 245, 483, 486, 493, 150, 250, 643, 644, 649,
+              717, 718, 719, 720, 721, 792, 800, 801, 802, 807, 808, 889, 890, 893, 898, 905, 1007, 1008, 1009, 1010, 1017, 1025,
+            ]) {
               reachable.add(roamerId);
             }
             let changed = true;
@@ -5019,17 +5039,17 @@ function buildTestSuites() {
               }
             }
             const unreachable = allSpecies.map((s) => s.id).filter((id) => !reachable.has(id));
-            assertEqual(unreachable.length, 0, `100% 649 species reachable (unreachable: ${unreachable.slice(0, 10).join(',')})`);
+            assertEqual(unreachable.length, 0, `100% 1025 species reachable (unreachable: ${unreachable.slice(0, 10).join(',')})`);
           },
         },
         {
-          name: 'All 28 abilities (>=5 species each), pure evaluators for all 14 Sprint 7 abilities, post-shrine roamers & 24 zero-count-safe badges hold',
+          name: 'All 38 abilities (>=5 species each), pure evaluators for all 14 Sprint 7 abilities, post-shrine roamers & 28 zero-count-safe badges hold',
           fn() {
             const abilityUsage = new Map(Object.keys(ABILITIES).map((id) => [id, []]));
             for (const sp of Object.values(SPECIES)) {
               abilityUsage.get(sp.ability)?.push(sp.id);
             }
-            assertEqual(abilityUsage.size, 28, '28 abilities tracked');
+            assertEqual(abilityUsage.size, 38, '38 abilities tracked');
             for (const [abId, ids] of abilityUsage.entries()) {
               assert(ids.length >= 5, `ability ${abId} assigned to >=5 species (got ${ids.length})`);
             }
@@ -5204,8 +5224,8 @@ function buildTestSuites() {
               assertEqual(BIOMES[bId].encounters.length, baseCounts[bId], `BIOMES.${bId}.encounters not mutated`);
             }
 
-            // 6. 24 zero-count-safe badges
-            assertEqual(BADGES.length, 24, '24 badges defined');
+            // 6. 28 zero-count-safe badges
+            assertEqual(BADGES.length, 28, '28 badges defined');
             for (const bId of ['steppe', 'trench', 'relic', 'rift_crown', 'evo_savant', 'national_legend']) {
               assert(BADGES.some((b) => b.id === bId), `badge ${bId} defined`);
             }
@@ -5217,8 +5237,8 @@ function buildTestSuites() {
               box: [],
               biomesVisited: ['village'],
             };
-            assertEqual(BADGES.filter((b) => b.check(zeroProfile)).length, 0, 'zero-count caught unlocks 0 of 24 badges');
-            assertEqual(FIELD_QUESTS.filter((q) => q.check(zeroProfile)).length, 0, 'zero-count caught satisfies 0 of 19 quests');
+            assertEqual(BADGES.filter((b) => b.check(zeroProfile)).length, 0, 'zero-count caught unlocks 0 of 28 badges');
+            assertEqual(FIELD_QUESTS.filter((q) => q.check(zeroProfile)).length, 0, 'zero-count caught satisfies 0 of 23 quests');
 
             assertEqual(BADGES.find((b) => b.id === 'steppe').check({ shrinesCleared: ['canyon_shrine'], pokedex: { caught: {} } }), true, 'steppe unlocks via shrine');
             assertEqual(BADGES.find((b) => b.id === 'trench').check({ shrinesCleared: ['reef_shrine'], pokedex: { caught: {} } }), true, 'trench unlocks via shrine');
@@ -5492,19 +5512,19 @@ function buildTestSuites() {
       ],
     },
     {
-      name: '34. 84x72 Archipelago BFS, 649-Dex Ability Filter & Lazy Sprites, v7 SW & Zero-Overlap Gate',
+      name: '34. 100x84 Archipelago BFS, 1025-Dex Ability Filter & Lazy Sprites, v8 SW & Zero-Overlap Gate',
       tests: [
         {
-          name: '84x72 map BFS (16 shrines, 28 chests, 19 NPCs/quests, 13 rivals, 16 landmarks, 14 signposts, 11 heals, 13 encounter biomes) & tiles 37..48 hold',
+          name: '100x84 map BFS (20 shrines, 36 chests, 23 NPCs/quests, 17 rivals, 20 landmarks, 18 signposts, 15 heals, 13+ encounter biomes) & tiles 37..48 hold',
           fn() {
             const app = window.__starlightApp;
             assert(Boolean(app), 'GameApp mounted');
 
-            assertEqual(WORLD_COLS, 84, 'WORLD_COLS === 84');
-            assertEqual(WORLD_ROWS, 72, 'WORLD_ROWS === 72');
-            assertEqual(WORLD_MAP.length, 72, 'WORLD_MAP has 72 rows');
+            assertEqual(WORLD_COLS, 100, 'WORLD_COLS === 100');
+            assertEqual(WORLD_ROWS, 84, 'WORLD_ROWS === 84');
+            assertEqual(WORLD_MAP.length, 84, 'WORLD_MAP has 84 rows');
             for (let y = 0; y < WORLD_ROWS; y++) {
-              assertEqual(WORLD_MAP[y].length, 84, `row ${y} width === 84`);
+              assertEqual(WORLD_MAP[y].length, 100, `row ${y} width === 100`);
             }
 
             // Preserved (0..67, 0..59) zones + 4 new biomes
@@ -5533,14 +5553,14 @@ function buildTestSuites() {
             }
 
             // Object counts
-            assertEqual(Object.keys(BIOMES).length, 14, '14 biomes');
-            assertEqual(Object.keys(SHRINES).length, 16, '16 shrines');
-            assertEqual(Object.keys(CHESTS).length, 28, '28 chests');
-            assertEqual(Object.keys(NPCS).length, 19, '19 NPCs');
-            assertEqual(FIELD_QUESTS.length, 19, '19 quests');
-            assertEqual(Object.keys(RIVAL_TRAINERS).length, 13, '13 rivals');
-            assertEqual(Object.keys(LANDMARKS).length, 16, '16 landmarks');
-            assertEqual(Object.keys(SIGNPOSTS).length, 14, '14 signposts');
+            assertEqual(Object.keys(BIOMES).length, 18, '18 biomes');
+            assertEqual(Object.keys(SHRINES).length, 20, '20 shrines');
+            assertEqual(Object.keys(CHESTS).length, 36, '36 chests');
+            assertEqual(Object.keys(NPCS).length, 23, '23 NPCs');
+            assertEqual(FIELD_QUESTS.length, 23, '23 quests');
+            assertEqual(Object.keys(RIVAL_TRAINERS).length, 17, '17 rivals');
+            assertEqual(Object.keys(LANDMARKS).length, 20, '20 landmarks');
+            assertEqual(Object.keys(SIGNPOSTS).length, 18, '18 signposts');
 
             // Full BFS from (8,15)
             const visited = new Set([`${GAME_META.spawn.x},${GAME_META.spawn.y}`]);
@@ -5604,7 +5624,7 @@ function buildTestSuites() {
                 }
               }
             }
-            assertEqual(healCount, 11, '11 Healing Fountains present & reachable');
+            assertEqual(healCount, 15, '15 Healing Fountains present & reachable');
             for (const bId of encTiles.values()) {
               assert(reachableBiomes.has(bId), `wild encounter tiles reachable in ${bId}`);
             }
@@ -5659,16 +5679,16 @@ function buildTestSuites() {
           },
         },
         {
-          name: '649-Dex #dex-ability-select, lazy sprites, focus safety, v7 SW, v1/v2 tiles 39/42/45/48 rescue, 60fps & zero-overlap gate',
+          name: '1025-Dex #dex-ability-select, lazy sprites, focus safety, v8 SW, v1/v2 tiles 39/42/45/48 rescue, 60fps & zero-overlap gate',
           async fn() {
             const app = window.__starlightApp;
             assert(Boolean(app), 'GameApp mounted');
 
-            // 1. SW v7 & index.html static labels
+            // 1. SW v8 & index.html static labels
             const swText = await (await fetch('./sw.js')).text();
-            assert(swText.includes('starlight-shell-v7') && swText.includes('starlight-assets-v7'), 'sw.js uses v7 caches');
+            assert(swText.includes('starlight-shell-v8') && swText.includes('starlight-assets-v8'), 'sw.js uses v8 caches');
             const idxText = await (await fetch('./index.html')).text();
-            assert(idxText.includes('1/649') && idxText.includes('0/24') && idxText.includes('0/16'), 'index.html reflects 649 Dex, 24 Badges & 16 Shrines');
+            assert(idxText.includes('1/1025') && idxText.includes('0/28') && idxText.includes('0/20'), 'index.html reflects 1025 Dex, 28 Badges & 20 Shrines');
 
             // 2. Solid tiles 39, 42, 45, 48 rescue & v1/v2 save migration
             const findFirstTile = (tileId) => {
@@ -5725,7 +5745,7 @@ function buildTestSuites() {
               window.localStorage.removeItem(MIG_KEY);
             }
 
-            // 3. 649-Dex ability filter, lazy sprites, focus safety & layout gates
+            // 3. 1025-Dex ability filter, lazy sprites, focus safety & layout gates
             const prevRawSave = window.localStorage.getItem(STORAGE_KEY);
             const wasBootHidden = app.bootScreenEl.hidden;
             const wasStarterHidden = app.starterScreenEl.hidden;
@@ -5755,7 +5775,7 @@ function buildTestSuites() {
 
               app.openPokedex('dex');
               const allCards = Array.from(document.querySelectorAll('.dex-grid .dex-card'));
-              assertEqual(allCards.length, 649, 'Dex synchronously renders all 649 cards');
+              assertEqual(allCards.length, 1025, 'Dex synchronously renders all 1025 cards');
 
               // Lazy-sprite check: >24 seen species -> first 24 resolved/remote, remaining seen start with fallback SVG & observer active
               const seenImgs = allCards.map((c) => c.querySelector('img.dex-sprite')).filter(Boolean);
@@ -5768,7 +5788,7 @@ function buildTestSuites() {
               const searchEl = document.getElementById('dex-search-input');
               assert(Boolean(abilitySelect && typeSelect && searchEl), '#dex-ability-select, type select & search input mounted');
               assertEqual(abilitySelect.value, 'all', '#dex-ability-select defaults to all');
-              assertEqual(abilitySelect.options.length, 29, '#dex-ability-select has All + 28 ability options');
+              assertEqual(abilitySelect.options.length, 39, '#dex-ability-select has All + 38 ability options');
 
               // Input / Select focus safety
               let leaked = false;
@@ -5787,7 +5807,7 @@ function buildTestSuites() {
               abilitySelect.value = 'chrono_shift';
               abilitySelect.dispatchEvent(new Event('change', { bubbles: true }));
               const chronoCards = Array.from(document.querySelectorAll('.dex-grid .dex-card'));
-              assert(chronoCards.length >= 5 && chronoCards.length < 649, `chrono_shift filter narrows (${chronoCards.length})`);
+              assert(chronoCards.length >= 5 && chronoCards.length < 1025, `chrono_shift filter narrows (${chronoCards.length})`);
               for (const card of chronoCards) {
                 const spId = Number(card.dataset.speciesId);
                 assertEqual(SPECIES[spId]?.ability, 'chrono_shift', `card #${spId} has chrono_shift`);
@@ -5816,24 +5836,24 @@ function buildTestSuites() {
               resetBtn.click();
               assertEqual(app.pokedex.dexAbilityFilter, 'all', 'Show All resets dexAbilityFilter to all');
               assertEqual(document.getElementById('dex-ability-select').value, 'all', 'Show All resets #dex-ability-select value');
-              assertEqual(document.querySelectorAll('.dex-grid .dex-card').length, 649, 'Show All restores 649 cards');
+              assertEqual(document.querySelectorAll('.dex-grid .dex-card').length, 1025, 'Show All restores 1025 cards');
 
               // Reopen resets ability filter
               document.getElementById('dex-ability-select').value = 'pearl_aegis';
               document.getElementById('dex-ability-select').dispatchEvent(new Event('change', { bubbles: true }));
               app.openPokedex('dex');
               assertEqual(app.pokedex.dexAbilityFilter, 'all', 'reopening Dex resets dexAbilityFilter');
-              assertEqual(document.querySelectorAll('.dex-grid .dex-card').length, 649, 'reopened Dex renders 649 cards');
+              assertEqual(document.querySelectorAll('.dex-grid .dex-card').length, 1025, 'reopened Dex renders 1025 cards');
 
               app.pokedex.close();
               assertEqual(app.pokedex._dexSpriteObserver, null, 'closing Dex disconnects IntersectionObserver');
 
-              // Guide (14 biomes, 19 quests) & Badges (24)
+              // Guide (18 biomes, 23 quests) & Badges (28)
               app.openPokedex('guide');
-              assertEqual(document.querySelectorAll('.biome-progress-card').length, 14, 'Guide renders 14 biome cards');
-              assertEqual(document.querySelectorAll('.quests-list .quest-card').length, 19, 'Guide renders 19 field quests');
+              assertEqual(document.querySelectorAll('.biome-progress-card').length, 18, 'Guide renders 18 biome cards');
+              assertEqual(document.querySelectorAll('.quests-list .quest-card').length, 23, 'Guide renders 23 field quests');
               app.openPokedex('badges');
-              assertEqual(document.querySelectorAll('.badges-grid .badge-card').length, 24, 'Badges tab renders 24 badge cards');
+              assertEqual(document.querySelectorAll('.badges-grid .badge-card').length, 28, 'Badges tab renders 28 badge cards');
               app.pokedex.close();
 
               // Verify zero horizontal overflow across Dex / Guide / Badges tabs at 1280x720 & 1024x768
@@ -5925,6 +5945,1275 @@ function buildTestSuites() {
               if (origCabinetStyle === null) app.cabinetEl?.removeAttribute('style');
               else app.cabinetEl?.setAttribute('style', origCabinetStyle);
               if (app.battle.active) app.battle.stop({ outcome: 'escaped', faintedAll: false });
+              app.pokedex.close();
+              app.closeSettings();
+              app.hudInstallGroupEl.hidden = true;
+              if (prevRawSave === null) window.localStorage.removeItem(STORAGE_KEY);
+              else window.localStorage.setItem(STORAGE_KEY, prevRawSave);
+              storage.state = storage.load();
+              app.applyTrainerTheme(storage.getActiveTrainerId() || 'violet');
+              app.encounterTransitioning = false;
+              app.bootScreenEl.hidden = wasBootHidden;
+              app.starterScreenEl.hidden = wasStarterHidden;
+              app.gameShellEl.hidden = wasShellHidden;
+              app.overworld.setActive(wasOverworldActive);
+              if (!wasOverworldActive) app.audio?.stopBGM?.();
+              app.applySettings();
+              if (!wasBootHidden) app.showBootScreen();
+              else app.refreshHud();
+              app.syncControlVisibility();
+              app.syncOverworldPause();
+            }
+          },
+        },
+      ],
+    },
+    {
+      name: '35. Sprint 8 Systems: 1,025 National Dex, Evolutions, 18 Types & Archetypes',
+      tests: [
+        {
+          name: 'Contiguous #1..#1025, 18 TYPES + 18 SVGs, 18x18 TYPE_CHART (0 soft-locks), 128 moves, 38 abilities & pure evaluators hold',
+          async fn() {
+            // 1. 1,025 contiguous species & strict schema
+            const allSpecies = Object.values(SPECIES);
+            assertEqual(allSpecies.length, 1025, '1025 species defined');
+            for (let id = 1; id <= 1025; id++) {
+              const sp = SPECIES[id];
+              assert(Boolean(sp), `contiguous SPECIES[${id}] defined`);
+              assertEqual(sp.id, id, `SPECIES[${id}].id === ${id}`);
+              assert(Boolean(TYPES[sp.type]), `species #${id} valid type ${sp.type}`);
+              assert(sp.biome === 'starter' || Boolean(BIOMES[sp.biome]), `species #${id} valid biome ${sp.biome}`);
+              assert(Boolean(ABILITIES[sp.ability]), `species #${id} valid ability ${sp.ability}`);
+              assertInRange(sp.catchFactor, 0.35, 0.98, `species #${id} catchFactor`);
+              assert(/^#[0-9a-fA-F]{6}$/.test(sp.color), `species #${id} hex color`);
+              for (const k of ['hp', 'atk', 'def', 'spd']) {
+                assertInRange(sp.baseStats[k], 24, 135, `species #${id} baseStats.${k}`);
+              }
+              assertEqual(sp.movePool.length, 4, `species #${id} has 4 moves`);
+              assertEqual(new Set(sp.movePool).size, 4, `species #${id} has 4 distinct moves`);
+              let atkCount = 0;
+              let stabCount = 0;
+              for (const mId of sp.movePool) {
+                const mv = MOVES[mId];
+                assert(Boolean(mv), `species #${id} valid move ${mId}`);
+                if (mv.category === 'attack') atkCount += 1;
+                if (mv.type === sp.type) stabCount += 1;
+              }
+              assert(atkCount >= 2, `species #${id} >=2 attack moves`);
+              assert(stabCount >= 1, `species #${id} >=1 STAB move`);
+              assert(typeof sp.flavor === 'string' && sp.flavor.length > 8, `species #${id} friendly flavor`);
+            }
+
+            // Re-typed canonical #1..#649 species
+            assertEqual(SPECIES[10].type, 'bug', '#10 Caterpie is bug');
+            assertEqual(SPECIES[35].type, 'fairy', '#35 Clefairy is fairy');
+            assertEqual(SPECIES[197].type, 'dark', '#197 Umbreon is dark');
+            assertEqual(SPECIES[208].type, 'steel', '#208 Steelix is steel');
+            assertEqual(SPECIES[282].type, 'fairy', '#282 Gardevoir is fairy');
+            assertEqual(SPECIES[468].type, 'fairy', '#468 Togekiss is fairy');
+            assertEqual(SPECIES[475].type, 'fighting', '#475 Gallade is fighting');
+
+            // 2. All 18 TYPES + 18 SVG fallback files fetched cleanly
+            const allTypeIds = [
+              'grass', 'fire', 'water', 'electric', 'rock', 'psychic', 'normal', 'ice', 'ghost', 'dragon',
+              'fighting', 'flying', 'poison', 'ground', 'bug', 'steel', 'dark', 'fairy',
+            ];
+            assertEqual(Object.keys(TYPES).length, 18, '18 TYPES defined');
+            for (const tId of allTypeIds) {
+              assert(Boolean(TYPES[tId]), `TYPES.${tId} exists`);
+              const resp = await fetch(`./assets/fallback/${tId}.svg`);
+              assertEqual(resp.ok, true, `${tId}.svg fetches HTTP 200`);
+              const svgText = await resp.text();
+              assert(svgText.includes('<svg') && svgText.includes('viewBox="0 0 96 96"'), `${tId}.svg valid 96x96 SVG`);
+            }
+
+            // 3. 18x18 TYPE_CHART canonical matchups & zero 0x soft-locks
+            for (const atk of allTypeIds) {
+              for (const def of allTypeIds) {
+                const mult = getTypeEffectiveness(atk, def);
+                assert(mult > 0, `zero soft-lock: ${atk} -> ${def} must be > 0 (got ${mult})`);
+              }
+            }
+            const canonicalMatchups = [
+              ['water', 'fire', 2], ['water', 'rock', 2], ['water', 'grass', 0.5],
+              ['grass', 'water', 2], ['grass', 'rock', 2],
+              ['fire', 'grass', 2], ['fire', 'water', 0.5],
+              ['electric', 'water', 2], ['normal', 'rock', 0.5], ['normal', 'fire', 1],
+              ['unknown', 'fire', 1], ['psychic', 'rock', 1.5],
+              ['fairy', 'dragon', 2], ['fairy', 'dark', 2], ['fairy', 'fighting', 2],
+              ['steel', 'fairy', 2], ['poison', 'fairy', 2],
+              ['dark', 'ghost', 2], ['dark', 'psychic', 2],
+              ['fighting', 'steel', 2], ['fighting', 'dark', 2],
+              ['ground', 'electric', 2], ['ground', 'steel', 2],
+              ['flying', 'fighting', 2], ['flying', 'bug', 2],
+              ['bug', 'psychic', 2], ['bug', 'dark', 2],
+            ];
+            for (const [atk, def, expected] of canonicalMatchups) {
+              assertEqual(getTypeEffectiveness(atk, def), expected, `${atk} -> ${def}`);
+            }
+
+            // 4. 128 moves including all 28 new Sprint 8 moves
+            assertEqual(Object.keys(MOVES).length, 128, '128 moves defined');
+            const sprint8Moves = [
+              ['close_combat', 'fighting', 'physical', 'attack', 'fighting'],
+              ['vacuum_wave', 'fighting', 'special', 'attack', 'fighting'],
+              ['collision_course', 'fighting', 'physical', 'attack', 'fighting'],
+              ['brave_bird', 'flying', 'physical', 'attack', 'flying'],
+              ['air_slash', 'flying', 'special', 'attack', 'flying'],
+              ['tailwind_grace', 'flying', 'status', 'buff', 'buff'],
+              ['sludge_wave', 'poison', 'special', 'attack', 'poison'],
+              ['poison_jab', 'poison', 'physical', 'attack', 'poison'],
+              ['malignant_chain', 'poison', 'special', 'attack', 'poison'],
+              ['earthquake', 'ground', 'physical', 'attack', 'ground'],
+              ['earth_power', 'ground', 'special', 'attack', 'ground'],
+              ['headlong_rush', 'ground', 'physical', 'attack', 'ground'],
+              ['bug_buzz', 'bug', 'special', 'attack', 'bug'],
+              ['x_scissor', 'bug', 'physical', 'attack', 'bug'],
+              ['quiver_step', 'bug', 'status', 'buff', 'buff'],
+              ['flash_cannon', 'steel', 'special', 'attack', 'steel'],
+              ['gigaton_hammer', 'steel', 'physical', 'attack', 'steel'],
+              ['king_shield', 'steel', 'status', 'shield', 'shield'],
+              ['dark_pulse', 'dark', 'special', 'attack', 'dark'],
+              ['kowtow_cleave', 'dark', 'physical', 'attack', 'dark'],
+              ['lunar_shroud', 'dark', 'status', 'shield', 'shield'],
+              ['dazzling_gleam', 'fairy', 'special', 'attack', 'fairy'],
+              ['play_rough', 'fairy', 'physical', 'attack', 'fairy'],
+              ['geomancy_bloom', 'fairy', 'status', 'buff', 'buff'],
+              ['water_shuriken', 'water', 'special', 'attack', 'water'],
+              ['dragon_darts', 'dragon', 'physical', 'attack', 'dragon'],
+              ['bitter_blade', 'fire', 'physical', 'attack', 'fire'],
+              ['electro_drift', 'electric', 'special', 'attack', 'electric'],
+            ];
+            for (const [id, type, dmgClass, category, fx] of sprint8Moves) {
+              const mv = MOVES[id];
+              assert(Boolean(mv), `MOVES.${id} exists`);
+              assertEqual(mv.type, type, `${id}.type`);
+              assertEqual(mv.damageClass, dmgClass, `${id}.damageClass`);
+              assertEqual(mv.category, category, `${id}.category`);
+              assertEqual(mv.fx, fx, `${id}.fx`);
+            }
+
+            // 5. 38 abilities (>=5 species each) + pure evaluators for all 10 Sprint 8 abilities
+            const abilityMap = new Map(Object.keys(ABILITIES).map((k) => [k, []]));
+            for (const sp of allSpecies) {
+              abilityMap.get(sp.ability)?.push(sp.id);
+            }
+            assertEqual(abilityMap.size, 38, '38 abilities defined');
+            for (const [abId, list] of abilityMap.entries()) {
+              assert(list.length >= 5, `ability ${abId} assigned to >=5 species (got ${list.length})`);
+            }
+
+            // Entry: orichalcum_pulse, gale_wings, disguise_veil
+            for (const [abId, stat, stages, expectShield] of [
+              ['orichalcum_pulse', 'atk', 1, false],
+              ['gale_wings', 'spd', 1, false],
+              ['disguise_veil', 'def', 1, true],
+            ]) {
+              const mon = createPokemon(abilityMap.get(abId)[0], 25);
+              const res = evaluateEntryAbility(mon);
+              assertEqual(res?.abilityId, abId, `entry ${abId}`);
+              assertEqual(res?.stat, stat, `${abId} stat`);
+              assertEqual(res?.stages, stages, `${abId} stages`);
+              assertEqual(Boolean(res?.grantShield), expectShield, `${abId} grantShield`);
+              assertEqual(mon.abilityEntryTriggered, false, `${abId} pure`);
+            }
+
+            // Attack: toxic_alchemy, swarm_resonance, supreme_overlord, pixilate_aura
+            const dummyDef = createPokemon(143, 25);
+            const toxicMon = createPokemon(abilityMap.get('toxic_alchemy')[0], 25);
+            assertEqual(evaluateOffensiveAbility(toxicMon, MOVES.tackle), null, 'toxic_alchemy ignores non-Poison');
+            const toxicEval = evaluateOffensiveAbility(toxicMon, MOVES.sludge_wave);
+            assertEqual(toxicEval?.mult, 1.15, 'toxic_alchemy 1.15x');
+            assertEqual(toxicEval?.drainRatio, 0.2, 'toxic_alchemy 0.2 drainRatio');
+            const toxicDmg = calculateDamage(toxicMon, dummyDef, MOVES.sludge_wave, { forceHit: true, forceCrit: false, fixedVariance: 1.0, applyAbilities: true });
+            assertEqual(toxicDmg.attackerAbilityTrigger?.drainHeal, Math.max(1, Math.round(toxicDmg.damage * 0.2)), 'toxic_alchemy drainHeal');
+
+            const swarmMon = createPokemon(abilityMap.get('swarm_resonance')[0], 25);
+            assertEqual(evaluateOffensiveAbility(swarmMon, MOVES.bug_buzz)?.mult, 1.2, 'swarm_resonance 1.2x above 50% HP');
+            swarmMon.hp = Math.floor(swarmMon.maxHp * 0.5);
+            assertEqual(evaluateOffensiveAbility(swarmMon, MOVES.bug_buzz)?.mult, 1.35, 'swarm_resonance 1.35x at <=50% HP');
+
+            const supremeMon = createPokemon(abilityMap.get('supreme_overlord')[0], 25, 'crater', { bond: 20 });
+            const supEval = evaluateOffensiveAbility(supremeMon, MOVES.dark_pulse);
+            assertEqual(supEval?.mult, 1.2, 'supreme_overlord 1.2x');
+            assertEqual(supEval?.critBonus, 0.15, 'supreme_overlord +15% critBonus');
+            const origRand = Math.random;
+            try {
+              Math.random = () => 0.18;
+              assertEqual(calculateDamage(supremeMon, dummyDef, MOVES.dark_pulse, { forceHit: true, fixedVariance: 1.0, applyAbilities: false }).isCrit, false, '0.18 not crit without supreme_overlord');
+              assertEqual(calculateDamage(supremeMon, dummyDef, MOVES.dark_pulse, { forceHit: true, fixedVariance: 1.0, applyAbilities: true }).isCrit, true, '0.18 crits with supreme_overlord');
+            } finally {
+              Math.random = origRand;
+            }
+
+            const pixieMon = createPokemon(abilityMap.get('pixilate_aura')[0], 25);
+            assertEqual(evaluateOffensiveAbility(pixieMon, MOVES.tackle), null, 'pixilate_aura ignores non-Fairy');
+            assertEqual(evaluateOffensiveAbility(pixieMon, MOVES.dazzling_gleam)?.mult, 1.2, 'pixilate_aura 1.2x Fairy');
+
+            // Defense: stamina_earth, corviknight_armor
+            const stamMon = createPokemon(abilityMap.get('stamina_earth')[0], 25);
+            for (const mvId of ['thunderbolt', 'sludge_wave', 'rock_slide']) {
+              const res = evaluateDefensiveAbility(stamMon, MOVES[mvId], 1);
+              assertEqual(res?.abilityId, 'stamina_earth', `stamina_earth triggers on ${MOVES[mvId].type}`);
+              assertEqual(res?.mult, 0.75, 'stamina_earth 0.75x');
+              assertEqual(res?.counterBoostStat, 'def', 'stamina_earth counterBoostStat === def');
+            }
+            assertEqual(evaluateDefensiveAbility(stamMon, MOVES.water_gun, 2), null, 'stamina_earth ignores Water');
+
+            const corvMon = createPokemon(abilityMap.get('corviknight_armor')[0], 25);
+            for (const mvId of ['close_combat', 'rock_slide', 'dazzling_gleam', 'bug_buzz', 'flash_cannon']) {
+              assertEqual(evaluateDefensiveAbility(corvMon, MOVES[mvId], 1)?.mult, 0.75, `corviknight_armor reduces ${MOVES[mvId].type}`);
+            }
+            assertEqual(evaluateDefensiveAbility(corvMon, MOVES.ember, 2), null, 'corviknight_armor ignores Fire');
+
+            // Turn-end: tera_prism
+            const teraMon = createPokemon(abilityMap.get('tera_prism')[0], 25);
+            const teraRes = evaluateTurnEndAbility(teraMon);
+            assertEqual(teraRes?.abilityId, 'tera_prism', 'tera_prism triggers');
+            assertEqual(teraRes?.boostStat, 'atk', 'tera_prism boosts atk');
+            assertEqual(teraRes?.boostStages, 1, 'tera_prism +1');
+            assertEqual(teraMon.battleStages.atk, 0, 'tera_prism pure');
+            teraMon.battleStages.atk = 2;
+            assertEqual(evaluateTurnEndAbility(teraMon), null, 'tera_prism caps at atk >= 2');
+            teraMon.battleStages.atk = 0;
+            teraMon.hp = 0;
+            assertEqual(evaluateTurnEndAbility(teraMon), null, 'tera_prism null when fainted');
+          },
+        },
+        {
+          name: '16 gems (live Storage evos), 8 Eeveelutions, cross-gen & branched invariants, 28 badges, sprites, 10 archetypes & 100% reachability hold',
+          fn() {
+            // 1. 16 EVOLUTION_ITEMS & 4 new gems (>=5 evos each) + cross-gen & branched invariants
+            assertEqual(Object.keys(EVOLUTION_ITEMS).length, 16, '16 evolution gems defined');
+            const newGemCounts = { pixie_gem: [], alola_gem: [], crown_gem: [], tera_gem: [] };
+            for (const [fromKey, rules] of Object.entries(EVOLUTIONS)) {
+              const fromId = Number(fromKey);
+              assert(Boolean(SPECIES[fromId]), `evo parent #${fromId} exists`);
+              assert(Array.isArray(rules) && rules.length >= 1, `#${fromId} has >=1 rule`);
+              if (rules.length >= 2) {
+                const levelRules = rules.filter((r) => r.minLevel !== undefined);
+                assert(levelRules.length <= 1, `branched #${fromId} has <=1 minLevel rule`);
+                if (levelRules.length === 1) {
+                  assert(rules[0].minLevel !== undefined, `branched #${fromId} keeps minLevel at index 0`);
+                }
+                for (let idx = 1; idx < rules.length; idx++) {
+                  assert(Boolean(rules[idx].item) && rules[idx].minLevel === undefined, `branched #${fromId}[${idx}] item-only`);
+                }
+              }
+              for (const r of rules) {
+                assert(Boolean(SPECIES[r.to]), `evo target #${r.to} exists`);
+                if (r.minLevel !== undefined) assertInRange(r.minLevel, 7, 30, `#${fromId}->#${r.to} minLevel`);
+                if (r.item) assert(Boolean(EVOLUTION_ITEMS[r.item]), `valid evo item ${r.item}`);
+                if (newGemCounts[r.item]) newGemCounts[r.item].push([fromId, r.to]);
+              }
+            }
+            for (const [gemId, pairs] of Object.entries(newGemCounts)) {
+              assert(pairs.length >= 5, `${gemId} powers >=5 evos (got ${pairs.length})`);
+            }
+
+            // Canonical Eeveelutions & cross-gen lines
+            const eeveeIds = EVOLUTIONS[133].map((r) => r.to).sort((a, b) => a - b);
+            assertEqual(JSON.stringify(eeveeIds), JSON.stringify([134, 135, 136, 196, 197, 470, 471, 700]), '8 Eeveelutions incl. #700 Sylveon');
+            assertEqual(EVOLUTIONS[361][0].to, 478, '#361 keeps #478 first');
+            assertEqual(EVOLUTIONS[361][1].to, 362, '#361 keeps #362 second');
+            assertEqual(EVOLUTIONS[281][0].to, 282, '#281 keeps #282 first');
+            assertEqual(EVOLUTIONS[281][1].to, 475, '#281 keeps #475 second');
+            const crossGenPairs = [
+              [234, 899], [123, 900], [217, 901], [550, 902], [215, 903], [211, 904],
+              [57, 979], [194, 980], [203, 981], [206, 982], [625, 983],
+              [884, 1018], [840, 841], [840, 842], [840, 1011], [1011, 1019],
+              [935, 936], [935, 937], [999, 1000], [808, 809], [772, 773],
+              [789, 790], [790, 791], [790, 792], [803, 804], [891, 892],
+            ];
+            for (const [f, t] of crossGenPairs) {
+              assert(EVOLUTIONS[f]?.some((r) => r.to === t), `cross-gen evo #${f} -> #${t}`);
+            }
+
+            // Live StorageManager evolutions for all 4 new gems
+            const TEST_KEY = 'starlight_pokemon_test_s35_gems_v1';
+            try {
+              window.localStorage.removeItem(TEST_KEY);
+              const store = new StorageManager(TEST_KEY);
+              store.selectTrainer('violet');
+              store.chooseStarter(1);
+              store.addRewards({ gems: { pixie_gem: 1, alola_gem: 1, crown_gem: 1, tera_gem: 1 } });
+              const prof = store.getActiveProfile();
+              for (const [gemId, fromId, toId] of [
+                ['pixie_gem', 133, 700],
+                ['alola_gem', 808, 809],
+                ['crown_gem', 123, 900],
+                ['tera_gem', 194, 980],
+              ]) {
+                const mon = createPokemon(fromId, 28, 'crater');
+                store.recordCaught(mon);
+                const evoRes = store.evolvePokemon(mon.uid, toId, gemId);
+                assert(Boolean(evoRes?.evolution), `${gemId} evo #${fromId} -> #${toId} succeeded`);
+                assertEqual(mon.speciesId, toId, `${gemId} evolved species === #${toId}`);
+                assertEqual(prof.bag.gems[gemId], 0, `${gemId} consumed`);
+                assert(Boolean(prof.pokedex.caught[toId]), `#${toId} marked caught`);
+              }
+            } finally {
+              window.localStorage.removeItem(TEST_KEY);
+            }
+
+            // 2. 28 Badges + zero-count safety
+            assertEqual(BADGES.length, 28, '28 BADGES defined');
+            for (const [bId, shrineId] of [
+              ['pixie', 'faeveldt_shrine'],
+              ['kahuna', 'atoll_shrine'],
+              ['sovereign', 'highlands_shrine'],
+              ['terastal', 'crater_shrine'],
+            ]) {
+              const badge = BADGES.find((b) => b.id === bId);
+              assert(Boolean(badge), `badge ${bId} exists`);
+              assertEqual(badge.check({ shrinesCleared: [shrineId], pokedex: { caught: {} } }), true, `${bId} unlocks on ${shrineId}`);
+            }
+            const zeroProf = {
+              pokedex: { caught: Object.fromEntries(Object.keys(SPECIES).map((id) => [id, 0])), seen: [] },
+              shrinesCleared: [],
+              stats: { battlesWon: 0, evolutions: 0, upgrades: 0 },
+              team: [{ bond: 20 }],
+              box: [],
+              biomesVisited: ['village'],
+            };
+            assertEqual(BADGES.filter((b) => b.check(zeroProf)).length, 0, '0/28 badges unlock on zero-count profile');
+            assertEqual(FIELD_QUESTS.filter((q) => q.check(zeroProf)).length, 0, '0/23 quests unlock on zero-count profile');
+
+            // 3. getSpriteUrls(650+) Showdown / PNG / back fallbacks
+            const g9Front = getSpriteUrls(1024, false, false);
+            const g9Back = getSpriteUrls(1024, true, false);
+            assert(g9Front.animated.includes('/other/showdown/1024.gif'), 'Gen 9 front animated uses Showdown GIF');
+            assert(g9Front.static.includes('/pokemon/1024.png'), 'Gen 9 front static uses PokeAPI PNG');
+            assert(g9Front.fallbacks.some((u) => u.includes('official-artwork')), 'Gen 9 front fallbacks include official-artwork');
+            assert(g9Back.animated.includes('/other/showdown/back/1024.gif'), 'Gen 9 back animated uses Showdown back GIF');
+            assert(g9Back.fallbacks.some((u) => u.endsWith('/other/showdown/1024.gif')), 'Gen 9 back fallbacks include front Showdown GIF');
+            assert(g9Back.fallbacks.some((u) => u.endsWith('/pokemon/1024.png')), 'Gen 9 back fallbacks include front PNG');
+
+            // 4. 10 Archetypes across #1..#1025 & distinct SVG geometries
+            assertEqual(SPECIES_ARCHETYPES.length, 10, '10 SPECIES_ARCHETYPES exported');
+            const archetypeExamples = new Map();
+            for (let id = 1; id <= 1025; id++) {
+              const arch = resolveSpeciesArchetype(id);
+              assert(SPECIES_ARCHETYPES.includes(arch), `#${id} resolves valid archetype ${arch}`);
+              if (!archetypeExamples.has(arch)) archetypeExamples.set(arch, id);
+            }
+            assertEqual(archetypeExamples.size, 10, 'all 10 archetypes represented across #1..#1025');
+            const svgBodies = new Set();
+            for (const [arch, sampleId] of archetypeExamples.entries()) {
+              const uri = generateSilhouetteDataUri({ ...SPECIES[sampleId], name: 'Sample', color: '#38bdf8' }, false);
+              const decoded = decodeURIComponent(uri.replace('data:image/svg+xml;utf8,', ''));
+              assert(decoded.includes(`data-archetype="${arch}"`), `silhouette marks data-archetype="${arch}"`);
+              svgBodies.add(decoded);
+            }
+            assertEqual(svgBodies.size, 10, '10 distinct silhouette SVG geometries generated');
+
+            // 5. 100% 1..1025 species reachability BFS
+            const reachable = new Set(STARTER_IDS.map(Number));
+            for (const b of Object.values(BIOMES)) {
+              for (const enc of b.encounters || []) reachable.add(Number(enc.id));
+            }
+            for (const sh of Object.values(SHRINES)) reachable.add(Number(sh.guardianId));
+            for (const rId of [
+              144, 145, 146, 151, 385, 248, 251, 384, 249, 243, 244, 382, 245, 483, 486, 493, 150, 250, 643, 644, 649,
+              717, 718, 719, 720, 721, 792, 800, 801, 802, 807, 808, 889, 890, 893, 898, 905, 1007, 1008, 1009, 1010, 1017, 1025,
+            ]) {
+              reachable.add(rId);
+            }
+            let evoChanged = true;
+            while (evoChanged) {
+              evoChanged = false;
+              for (const [fromKey, rules] of Object.entries(EVOLUTIONS)) {
+                const fromId = Number(fromKey);
+                for (const r of rules) {
+                  if (reachable.has(fromId) && !reachable.has(r.to)) {
+                    reachable.add(r.to);
+                    evoChanged = true;
+                  }
+                }
+              }
+            }
+            const missing = Object.keys(SPECIES).map(Number).filter((id) => !reachable.has(id));
+            assertEqual(missing.length, 0, `100% 1..1025 reachable (missing: ${missing.slice(0, 10).join(',')})`);
+          },
+        },
+      ],
+    },
+    {
+      name: '36. Sprint 8 Worldbuilder: 100x84 Map BFS, 18 Biomes, Tiles 49..60 & Roamers',
+      tests: [
+        {
+          name: '100x84 map, preserved zones, tiles 49..60, 18 biomes, 20 shrines, 36 chests, 23 NPCs/quests, 17 rivals, 20 landmarks, 18 signposts, 15 heals & BFS pass',
+          fn() {
+            assertEqual(WORLD_COLS, 100, 'WORLD_COLS === 100');
+            assertEqual(WORLD_ROWS, 84, 'WORLD_ROWS === 84');
+            assertEqual(WORLD_MAP.length, 84, 'WORLD_MAP has 84 rows');
+            for (let y = 0; y < WORLD_ROWS; y++) {
+              assertEqual(WORLD_MAP[y].length, 100, `row ${y} width === 100`);
+            }
+
+            // Preserved (0..83, 0..71) zones & 4 new Gen 6-9 zones
+            assertEqual(isTileWalkableAt(8, 15), true, '(8,15) spawn walkable');
+            assertEqual(isTileWalkableAt(18, 14), false, '(18,14) solid wall');
+            for (const [x, y, expectedBiome] of [
+              [8, 15, 'village'], [60, 10, 'desert'], [14, 54, 'marsh'], [60, 45, 'sanctum'],
+              [76, 15, 'canyon'], [20, 65, 'reef'], [50, 65, 'ruins'], [76, 45, 'rift'],
+              [90, 20, 'faeveldt'], [25, 76, 'atoll'], [65, 76, 'highlands'], [90, 60, 'crater'],
+            ]) {
+              assertEqual(getBiomeAt(x, y).id, expectedBiome, `getBiomeAt(${x},${y}) === ${expectedBiome}`);
+            }
+
+            // Tiles 49..60 & SOLID_TILES (51, 54, 57, 60)
+            assertEqual(TILE.FAE_GRASS, 49, 'TILE.FAE_GRASS === 49');
+            assertEqual(TILE.FAE_PATH, 50, 'TILE.FAE_PATH === 50');
+            assertEqual(TILE.FAE_WALL, 51, 'TILE.FAE_WALL === 51');
+            assertEqual(TILE.ATOLL_SAND, 52, 'TILE.ATOLL_SAND === 52');
+            assertEqual(TILE.ATOLL_PATH, 53, 'TILE.ATOLL_PATH === 53');
+            assertEqual(TILE.ATOLL_WALL, 54, 'TILE.ATOLL_WALL === 54');
+            assertEqual(TILE.CROWN_GRASS, 55, 'TILE.CROWN_GRASS === 55');
+            assertEqual(TILE.CROWN_PATH, 56, 'TILE.CROWN_PATH === 56');
+            assertEqual(TILE.CROWN_WALL, 57, 'TILE.CROWN_WALL === 57');
+            assertEqual(TILE.TERA_FLOOR, 58, 'TILE.TERA_FLOOR === 58');
+            assertEqual(TILE.TERA_PATH, 59, 'TILE.TERA_PATH === 59');
+            assertEqual(TILE.TERA_WALL, 60, 'TILE.TERA_WALL === 60');
+            for (const wall of [51, 54, 57, 60]) {
+              assert(SOLID_TILES.has(wall), `SOLID_TILES includes ${wall}`);
+            }
+
+            // Exact world fixture totals
+            assertEqual(Object.keys(BIOMES).length, 18, '18 BIOMES');
+            assertEqual(Object.keys(SHRINES).length, 20, '20 SHRINES');
+            assertEqual(Object.keys(CHESTS).length, 36, '36 CHESTS');
+            assertEqual(Object.keys(NPCS).length, 23, '23 NPCS');
+            assertEqual(FIELD_QUESTS.length, 23, '23 FIELD_QUESTS');
+            assertEqual(Object.keys(RIVAL_TRAINERS).length, 17, '17 RIVAL_TRAINERS');
+            assertEqual(Object.keys(LANDMARKS).length, 20, '20 LANDMARKS');
+            assertEqual(Object.keys(SIGNPOSTS).length, 18, '18 SIGNPOSTS');
+
+            for (const [shId, gId] of [
+              ['faeveldt_shrine', 716], ['atoll_shrine', 791], ['highlands_shrine', 888], ['crater_shrine', 1024],
+            ]) {
+              assert(Object.values(SHRINES).some((s) => s.id === shId && s.guardianId === gId), `${shId} guardian #${gId}`);
+            }
+            for (const gemId of ['pixie_gem', 'alola_gem', 'crown_gem', 'tera_gem']) {
+              assert(Object.values(CHESTS).some((c) => (c.rewards?.gems?.[gemId] || 0) > 0), `chest awards ${gemId}`);
+            }
+
+            // Full BFS from (8, 15)
+            const visited = new Set([`${GAME_META.spawn.x},${GAME_META.spawn.y}`]);
+            const queue = [[GAME_META.spawn.x, GAME_META.spawn.y]];
+            for (let head = 0; head < queue.length; head++) {
+              const [cx, cy] = queue[head];
+              for (const [dx, dy] of [[0, 1], [1, 0], [0, -1], [-1, 0]]) {
+                const nx = cx + dx;
+                const ny = cy + dy;
+                const k = `${nx},${ny}`;
+                if (!visited.has(k) && isTileWalkableAt(nx, ny)) {
+                  visited.add(k);
+                  queue.push([nx, ny]);
+                }
+              }
+            }
+            const hasAdj = (coordKey) => {
+              const [x, y] = coordKey.split(',').map(Number);
+              return [[0, 1], [1, 0], [0, -1], [-1, 0]].some(([dx, dy]) => visited.has(`${x + dx},${y + dy}`));
+            };
+
+            for (const [label, map] of [
+              ['shrine', SHRINES], ['chest', CHESTS], ['npc', NPCS],
+              ['rival', RIVAL_TRAINERS], ['landmark', LANDMARKS], ['signpost', SIGNPOSTS],
+            ]) {
+              for (const [k, v] of Object.entries(map)) {
+                assertEqual(hasAdj(k), true, `${label} ${v?.id || k} at ${k} reachable`);
+              }
+            }
+
+            const encTileBiomes = new Map([
+              [TILE.TALL_GRASS, 'forest'], [TILE.CAVE_FLOOR, 'cave'], [TILE.SHALLOW_WATER, 'water'],
+              [TILE.VOLCANO_FLOOR, 'volcano'], [TILE.SNOW_GRASS, 'peak'], [TILE.GROVE_GRASS, 'grove'],
+              [TILE.DUNE_SAND, 'desert'], [TILE.MARSH_GRASS, 'marsh'], [TILE.SANCTUM_FLOOR, 'sanctum'],
+              [TILE.CANYON_GRASS, 'canyon'], [TILE.REEF_WATER, 'reef'], [TILE.RUINS_FLOOR, 'ruins'],
+              [TILE.RIFT_FLOOR, 'rift'], [TILE.FAE_GRASS, 'faeveldt'], [TILE.ATOLL_SAND, 'atoll'],
+              [TILE.CROWN_GRASS, 'highlands'], [TILE.TERA_FLOOR, 'crater'],
+            ]);
+            const reachableEncBiomes = new Set();
+            let healCount = 0;
+            for (let y = 0; y < WORLD_ROWS; y++) {
+              for (let x = 0; x < WORLD_COLS; x++) {
+                const t = WORLD_MAP[y][x];
+                if (t === TILE.HEAL) {
+                  healCount += 1;
+                  assertEqual(visited.has(`${x},${y}`), true, `TILE.HEAL (${x},${y}) reachable`);
+                }
+                if (encTileBiomes.has(t) && visited.has(`${x},${y}`)) {
+                  reachableEncBiomes.add(getBiomeAt(x, y).id);
+                }
+              }
+            }
+            assertEqual(healCount, 15, '15 Healing Fountains reachable');
+            for (const bId of encTileBiomes.values()) {
+              assert(reachableEncBiomes.has(bId), `encounter tiles reachable in ${bId}`);
+            }
+
+            // Compass chain through rift -> faeveldt -> atoll -> highlands -> crater
+            const preFae = [
+              'forest_shrine', 'cave_shrine', 'water_shrine', 'volcano_shrine', 'peak_shrine',
+              'thunder_shrine', 'eclipse_shrine', 'starlight_shrine', 'grove_shrine', 'desert_shrine',
+              'marsh_shrine', 'sanctum_shrine', 'canyon_shrine', 'reef_shrine', 'ruins_shrine', 'rift_shrine',
+            ];
+            assertEqual(getCompassGuidance({ shrinesCleared: preFae, pokedex: { caught: {} } }).targetBiomeId, 'faeveldt', 'Compass -> faeveldt');
+            assertEqual(getCompassGuidance({ shrinesCleared: [...preFae, 'faeveldt_shrine'], pokedex: { caught: {} } }).targetBiomeId, 'atoll', 'Compass -> atoll');
+            assertEqual(getCompassGuidance({ shrinesCleared: [...preFae, 'faeveldt_shrine', 'atoll_shrine'], pokedex: { caught: {} } }).targetBiomeId, 'highlands', 'Compass -> highlands');
+            assertEqual(getCompassGuidance({ shrinesCleared: [...preFae, 'faeveldt_shrine', 'atoll_shrine', 'highlands_shrine'], pokedex: { caught: {} } }).targetBiomeId, 'crater', 'Compass -> crater');
+            const doneGuidance = getCompassGuidance({
+              shrinesCleared: [...preFae, 'faeveldt_shrine', 'atoll_shrine', 'highlands_shrine', 'crater_shrine'],
+              pokedex: { caught: Object.fromEntries(Array.from({ length: 700 }, (_, i) => [i + 1, 1])) },
+            });
+            assert(doneGuidance.title.includes('Dex'), `after 20 shrines w/ 700<1025 caught, Compass directs to Dex, got "${doneGuidance.title}"`);
+          },
+        },
+        {
+          name: 'Post-shrine roamers (without mutating BIOMES), 4-biome overworld render & 10-archetype follower fallbacks hold',
+          fn() {
+            const app = window.__starlightApp;
+            assert(Boolean(app), 'GameApp mounted');
+
+            // 1. Post-shrine roamers without mutating BIOMES
+            const roamerGroups = {
+              faeveldt: ['faeveldt_shrine', [717, 718, 719, 720, 721]],
+              atoll: ['atoll_shrine', [792, 800, 801, 802, 807, 808]],
+              highlands: ['highlands_shrine', [889, 890, 893, 898, 905]],
+              crater: ['crater_shrine', [1007, 1008, 1009, 1010, 1017, 1025]],
+            };
+            const origRand = Math.random;
+            const rollSet = (bId, shrinesCleared) => {
+              const seen = new Set();
+              const prof = { team: [{ level: 34 }], badges: [], shrinesCleared };
+              try {
+                for (let i = 0; i < 600; i++) {
+                  Math.random = () => (i + 0.5) / 600;
+                  seen.add(rollWildPokemon(bId, prof, { forceShiny: false, forceElite: false }).speciesId);
+                }
+              } finally {
+                Math.random = origRand;
+              }
+              return seen;
+            };
+            for (const [bId, [shrineId, roamers]] of Object.entries(roamerGroups)) {
+              const baseLen = BIOMES[bId].encounters.length;
+              const before = rollSet(bId, []);
+              const after = rollSet(bId, [shrineId]);
+              for (const rId of roamers) {
+                assertEqual(before.has(rId), false, `${bId} no roamer #${rId} before ${shrineId}`);
+                assertEqual(after.has(rId), true, `${bId} unlocks roamer #${rId} after ${shrineId}`);
+              }
+              assertEqual(BIOMES[bId].encounters.length, baseLen, `BIOMES.${bId}.encounters not mutated`);
+            }
+
+            // 2. Overworld render across all 4 new biomes & 10-archetype follower fallbacks
+            const prevRawSave = window.localStorage.getItem(STORAGE_KEY);
+            const wasBootHidden = app.bootScreenEl.hidden;
+            const wasStarterHidden = app.starterScreenEl.hidden;
+            const wasShellHidden = app.gameShellEl.hidden;
+            const wasOverworldActive = app.overworld.active;
+            try {
+              window.localStorage.removeItem(STORAGE_KEY);
+              storage.state = storage.load();
+              storage.selectTrainer('violet');
+              storage.chooseStarter(1);
+              const prof = storage.getActiveProfile();
+              app.bootScreenEl.hidden = true;
+              app.starterScreenEl.hidden = true;
+              app.gameShellEl.hidden = false;
+              app.overworld.setActive(true);
+
+              for (const [x, y] of [[90, 20], [25, 76], [65, 76], [90, 60]]) {
+                prof.pos = { x, y, dir: 'down' };
+                app.overworld.followerInitialized = false;
+                app.overworld.syncFromProfile();
+                app.overworld.render(performance.now());
+              }
+
+              // 10-archetype follower fallback distinct pixel drawings
+              const testCanvas = document.createElement('canvas');
+              testCanvas.width = 32;
+              testCanvas.height = 32;
+              const ctx = testCanvas.getContext('2d');
+              const archSamples = new Map();
+              for (let id = 1; id <= 1025 && archSamples.size < 10; id++) {
+                const a = resolveSpeciesArchetype(id);
+                if (!archSamples.has(a)) archSamples.set(a, SPECIES[id]);
+              }
+              assertEqual(archSamples.size, 10, '10 archetype species found');
+              const pixelSignatures = new Set();
+              for (const [arch, sp] of archSamples.entries()) {
+                ctx.clearRect(0, 0, 32, 32);
+                app.overworld._drawMiniCompanionFallback(ctx, 0, 0, { ...sp, color: '#38bdf8' }, 'down');
+                const data = ctx.getImageData(0, 0, 32, 32).data;
+                let nonZero = 0;
+                let sig = '';
+                for (let p = 0; p < data.length; p += 4) {
+                  const on = data[p + 3] > 0 ? '1' : '0';
+                  if (on === '1') nonZero += 1;
+                  sig += on;
+                }
+                assertGreater(nonZero, 20, `follower fallback ${arch} drew pixels`);
+                pixelSignatures.add(sig);
+              }
+              assertEqual(pixelSignatures.size, 10, 'all 10 follower fallback archetypes draw distinct silhouettes');
+            } finally {
+              if (prevRawSave === null) window.localStorage.removeItem(STORAGE_KEY);
+              else window.localStorage.setItem(STORAGE_KEY, prevRawSave);
+              storage.state = storage.load();
+              app.overworld.followerInitialized = false;
+              app.bootScreenEl.hidden = wasBootHidden;
+              app.starterScreenEl.hidden = wasStarterHidden;
+              app.gameShellEl.hidden = wasShellHidden;
+              app.overworld.setActive(wasOverworldActive);
+              if (!wasOverworldActive) app.audio?.stopBGM?.();
+              if (!wasBootHidden) app.showBootScreen();
+              else app.refreshHud();
+              app.syncOverworldPause();
+            }
+          },
+        },
+      ],
+    },
+    {
+      name: '37. Sprint 8 Animator: 28 Moves, 10 Abilities, 4 Arenas/BGMs, Living Motion & 1,025 Cries',
+      tests: [
+        {
+          name: '4 new 64+ step BGMs, 28 playNamedMoveSfx, 10 playAbilityCue & deterministic <=0.12-gain leak-free 1,025 cries hold',
+          async fn() {
+            const newBiomes = ['faeveldt', 'atoll', 'highlands', 'crater'];
+            for (const themeId of newBiomes) {
+              const t = THEMES[themeId];
+              assert(Boolean(t), `THEMES.${themeId} defined`);
+              assert(t.melody.length >= 64, `${themeId} melody >= 64 steps`);
+              assertInRange(t.leadGain, 0, 0.12, `${themeId}.leadGain <= 0.12`);
+              assertInRange(t.arpGain, 0, 0.12, `${themeId}.arpGain <= 0.12`);
+              assertInRange(t.bassGain, 0, 0.12, `${themeId}.bassGain <= 0.12`);
+            }
+
+            const sprint8MoveIds = [
+              'close_combat', 'vacuum_wave', 'collision_course',
+              'brave_bird', 'air_slash', 'tailwind_grace',
+              'sludge_wave', 'poison_jab', 'malignant_chain',
+              'earthquake', 'earth_power', 'headlong_rush',
+              'bug_buzz', 'x_scissor', 'quiver_step',
+              'flash_cannon', 'gigaton_hammer', 'king_shield',
+              'dark_pulse', 'kowtow_cleave', 'lunar_shroud',
+              'dazzling_gleam', 'play_rough', 'geomancy_bloom',
+              'water_shuriken', 'dragon_darts', 'bitter_blade', 'electro_drift',
+            ];
+            const sprint8AbilityIds = [
+              'orichalcum_pulse', 'gale_wings', 'toxic_alchemy', 'stamina_earth', 'swarm_resonance',
+              'corviknight_armor', 'supreme_overlord', 'pixilate_aura', 'disguise_veil', 'tera_prism',
+            ];
+
+            const testAudio = new AudioEngine({ silent: true, attachUnlockListeners: false });
+            try {
+              testAudio.ensureContext();
+              await Promise.race([testAudio.unlock(), new Promise((r) => setTimeout(r, 150))]);
+
+              for (const themeId of newBiomes) testAudio.playBGM(themeId);
+              for (const mvId of sprint8MoveIds) {
+                assertEqual(testAudio.playNamedMoveSfx(mvId), true, `playNamedMoveSfx(${mvId}) === true`);
+              }
+              assertEqual(testAudio.playNamedMoveSfx('nonexistent_move_xyz'), false, 'unknown move returns false');
+              for (const abId of sprint8AbilityIds) {
+                testAudio.playAbilityCue(abId, ABILITIES[abId].type);
+              }
+              testAudio.stopBGM();
+              assertEqual(testAudio.getDiagnostics().activeBgmNodes, 0, '0 leaked BGM nodes');
+
+              // 1,025 deterministic cries + gain <= 0.12 + muted/missing-ctx safety + zero node leaks
+              const origTrigger = testAudio.triggerVoice.bind(testAudio);
+              const voiceGains = [];
+              testAudio.triggerVoice = (opts) => {
+                voiceGains.push(opts.gain);
+                if (voiceGains.length <= 40) return origTrigger(opts);
+                return { mockOsc: true };
+              };
+              const crySignatures = new Set();
+              for (let id = 1; id <= 1025; id++) {
+                const a = testAudio.playPokemonCry(SPECIES[id]);
+                const b = testAudio.playPokemonCry(SPECIES[id]);
+                assertEqual(a.speciesId, id, `cry #${id} speciesId`);
+                assertEqual(a.baseFreq, b.baseFreq, `cry #${id} deterministic baseFreq`);
+                assertEqual(a.wave, b.wave, `cry #${id} deterministic wave`);
+                assertEqual(a.duration, b.duration, `cry #${id} deterministic duration`);
+                assertEqual(a.played, true, `cry #${id} played when unlocked`);
+                crySignatures.add(`${a.wave}:${a.baseFreq}:${a.duration}`);
+              }
+              assertGreater(crySignatures.size, 900, `diverse procedural cries across 1025 species (${crySignatures.size})`);
+              assert(voiceGains.length > 0 && voiceGains.every((g) => g <= 0.12), 'all cry voices maintain gain <= 0.12');
+              testAudio.triggerVoice = origTrigger;
+
+              // Muted safety
+              testAudio.setMuted(true);
+              const mutedRes = testAudio.playPokemonCry(1024);
+              assertEqual(mutedRes.played, false, 'muted cry returns played: false');
+              assertEqual(testAudio.getDiagnostics().activeBgmNodes, 0, 'muted keeps 0 active nodes');
+              testAudio.setMuted(false);
+
+              // Missing AudioContext safety
+              const noCtxAudio = new AudioEngine({ silent: true, attachUnlockListeners: false });
+              noCtxAudio.ensureContext = () => null;
+              const noCtxRes = noCtxAudio.playPokemonCry(716);
+              assertEqual(noCtxRes.played, false, 'missing AudioContext cry returns played: false safely');
+            } finally {
+              await testAudio.destroy();
+            }
+          },
+        },
+        {
+          name: '28 move choreographies, 10 ability spectacles & live hooks, 4 arenas/gem drops, living data-motion & stop() cleanup hold',
+          async fn() {
+            const TEST_KEY = 'starlight_pokemon_test_s37_v1';
+            const cueCalls = [];
+            const cryCalls = [];
+            const noopAudio = {
+              playMenuBlip() {}, playCursorMove() {}, playMoveSelect() {}, playWindup() {},
+              playPhysicalImpact() {}, playElemental() {}, playShieldChime() {}, playHealChime() {},
+              playFaint() {}, playLevelUp() {}, playPokeballThrow() {}, playPokeballAbsorb() {},
+              playPokeballBounce() {}, playPokeballWobble() {}, playCaptureSuccess() {},
+              playStarBallShimmer() {}, playXpTick() {}, playShinySparkle() {},
+              playBuddyCheer() {}, playBuddyEndure() {},
+              playAbilityCue(id, type) { cueCalls.push([id, type]); },
+              playPokemonCry(spOrId) {
+                const id = typeof spOrId === 'number' ? spOrId : (spOrId?.speciesId ?? spOrId?.id);
+                cryCalls.push(id);
+                return { speciesId: id, played: true };
+              },
+            };
+            const waitUntil = async (eng, pred, timeoutMs = 6000) => {
+              const start = performance.now();
+              while (!pred()) {
+                if (eng.typingResolve) eng.finishTypewriter();
+                if (performance.now() - start > timeoutMs) {
+                  throw new Error(`Timed out waiting (state=${eng.state}, busy=${eng.busy})`);
+                }
+                await new Promise((r) => setTimeout(r, 15));
+              }
+            };
+
+            let engine = null;
+            const origRand = Math.random;
+            try {
+              window.localStorage.removeItem(TEST_KEY);
+              const store = new StorageManager(TEST_KEY);
+              store.updateSettings({ battlePace: 'fast' });
+              store.selectTrainer('violet');
+              store.chooseStarter(1);
+              const vp = store.getActiveProfile();
+
+              engine = new BattleEngine({
+                storage: store,
+                audio: noopAudio,
+                onBattleEnd() {},
+                onBadgesUnlocked() {},
+                onHudRefresh() {},
+              });
+
+              // 1. 4 new arenas & living data-motion styles + stop() cleanup
+              const stageEl = document.getElementById('battle-stage');
+              const enemySpriteEl = document.getElementById('enemy-sprite');
+              const playerSpriteEl = document.getElementById('player-sprite');
+              for (const [bId, spId] of [['faeveldt', 716], ['atoll', 791], ['highlands', 888], ['crater', 1024]]) {
+                vp.team[0] = createPokemon(658, 28, bId); // bob (water)
+                const sp = engine.start({ enemy: createPokemon(spId, 28, bId), biomeId: bId });
+                await waitUntil(engine, () => engine.state === BATTLE_STATES.PLAYER_INPUT);
+                await sp;
+                assertEqual(stageEl.dataset.biome, bId, `arena data-biome === ${bId}`);
+                const skyBg = window.getComputedStyle(stageEl.querySelector('.scenery-sky')).backgroundImage;
+                assert(Boolean(skyBg && skyBg !== 'none'), `${bId} scenery-sky rendered`);
+                assertEqual(playerSpriteEl.dataset.motion, resolveSpriteMotionStyle(vp.team[0]), `${bId} player data-motion set`);
+                assertEqual(enemySpriteEl.dataset.motion, resolveSpriteMotionStyle(SPECIES[spId]), `${bId} enemy data-motion set`);
+                assert(enemySpriteEl.classList.contains('is-idle') && playerSpriteEl.classList.contains('is-idle'), 'idle motion class applied');
+                engine.stop({ outcome: 'escaped', faintedAll: false });
+                assertEqual(enemySpriteEl.dataset.motion, undefined, 'stop() clears enemy data-motion');
+                assertEqual(playerSpriteEl.dataset.motion, undefined, 'stop() clears player data-motion');
+                assertEqual(enemySpriteEl.classList.contains('is-idle'), false, 'stop() removes is-idle');
+              }
+              assert(cryCalls.includes(716) && cryCalls.includes(1024), 'start() triggered playPokemonCry for encounter intros');
+
+              // 2. All 10 new ability visuals & cleanup
+              const bannerEl = document.getElementById('battle-ability-banner');
+              vp.team[0] = createPokemon(1, 25, 'crater');
+              const visStart = engine.start({ enemy: createPokemon(10, 12, 'crater'), biomeId: 'crater' });
+              await waitUntil(engine, () => engine.state === BATTLE_STATES.PLAYER_INPUT);
+              await visStart;
+              const sprint8AbilityIds = [
+                'orichalcum_pulse', 'gale_wings', 'toxic_alchemy', 'stamina_earth', 'swarm_resonance',
+                'corviknight_armor', 'supreme_overlord', 'pixilate_aura', 'disguise_veil', 'tera_prism',
+              ];
+              for (const abId of sprint8AbilityIds) {
+                const ab = ABILITIES[abId];
+                const cuesPre = cueCalls.length;
+                const p = engine.playAbilityVisual('player', abId, 'Sprint 8 Test', engine.sessionId);
+                assertEqual(bannerEl.hidden, false, `${abId} banner visible`);
+                assertEqual(bannerEl.dataset.type, ab.type, `${abId} banner type`);
+                assertEqual(stageEl.dataset.abilityAura, ab.type, `${abId} stage aura`);
+                assertGreater(engine.abilityStageFx.length, 0, `${abId} abilityStageFx spawned`);
+                await p;
+                assertEqual(bannerEl.hidden, true, `${abId} banner hidden after`);
+                assertEqual(stageEl.dataset.abilityAura, undefined, `${abId} aura cleared`);
+                assert(cueCalls.slice(cuesPre).some(([id]) => id === abId), `${abId} cue fired`);
+              }
+
+              // 3. All 28 Sprint 8 move choreographies + particle shapes
+              const sprint8MoveIds = [
+                'close_combat', 'vacuum_wave', 'collision_course',
+                'brave_bird', 'air_slash', 'tailwind_grace',
+                'sludge_wave', 'poison_jab', 'malignant_chain',
+                'earthquake', 'earth_power', 'headlong_rush',
+                'bug_buzz', 'x_scissor', 'quiver_step',
+                'flash_cannon', 'gigaton_hammer', 'king_shield',
+                'dark_pulse', 'kowtow_cleave', 'lunar_shroud',
+                'dazzling_gleam', 'play_rough', 'geomancy_bloom',
+                'water_shuriken', 'dragon_darts', 'bitter_blade', 'electro_drift',
+              ];
+              for (const mvId of [
+                'close_combat', 'collision_course', 'brave_bird', 'poison_jab', 'earthquake', 'headlong_rush',
+                'x_scissor', 'gigaton_hammer', 'kowtow_cleave', 'play_rough', 'dragon_darts', 'bitter_blade',
+              ]) {
+                assertEqual(PHYSICAL_MOVE_IDS.has(mvId), true, `PHYSICAL_MOVE_IDS includes ${mvId}`);
+              }
+              assertEqual(resolveMoveParticleShape(MOVES.water_shuriken), 'shuriken', 'water_shuriken shape');
+              assertEqual(resolveMoveParticleShape(MOVES.brave_bird), 'feather', 'brave_bird shape');
+              assertEqual(resolveMoveParticleShape(MOVES.sludge_wave), 'venom', 'sludge_wave shape');
+              assertEqual(resolveMoveParticleShape(MOVES.bug_buzz), 'wave_arc', 'bug_buzz shape');
+              for (const mvId of sprint8MoveIds) {
+                const mv = MOVES[mvId];
+                assert(Boolean(MOVE_FX_CLASS[mvId]), `MOVE_FX_CLASS.${mvId} defined`);
+                const fakeRes = mv.category === 'shield'
+                  ? { category: 'shield', damage: 0, heal: 6, grantShield: true, buffStat: 'def', buffStages: 1, effectiveness: 1, isCrit: false, missed: false }
+                  : mv.category === 'buff'
+                    ? { category: 'buff', damage: 0, heal: 0, grantShield: false, buffStat: mv.buffStat || 'atk', buffStages: 1, effectiveness: 1, isCrit: false, missed: false }
+                    : { category: 'attack', damage: 28, heal: 0, effectiveness: 1, isCrit: false, missed: false };
+                await engine.playAttackVisual('player', 'enemy', mv, fakeRes, engine.enemy, engine.sessionId);
+              }
+              engine.stop({ outcome: 'escaped', faintedAll: false });
+              assertEqual(engine.abilityStageFx.length, 0, 'abilityStageFx empty on stop()');
+              assertEqual(stageEl.dataset.abilityAura, undefined, 'abilityAura cleared on stop()');
+
+              // 4. Live battle hooks for Sprint 8 abilities: disguise_veil entry, toxic_alchemy drain, stamina_earth counter DEF+1, tera_prism turn-end ATK+1
+              const findByAb = (abId) => Object.values(SPECIES).find((s) => s.ability === abId).id;
+              const disguiseMon = createPokemon(findByAb('disguise_veil'), 25, 'faeveldt');
+              vp.team[0] = disguiseMon;
+              const sDis = engine.start({ enemy: createPokemon(10, 12, 'faeveldt'), biomeId: 'faeveldt' });
+              await waitUntil(engine, () => engine.state === BATTLE_STATES.PLAYER_INPUT);
+              await sDis;
+              assertEqual(disguiseMon.abilityEntryTriggered, true, 'disguise_veil entry triggered');
+              assertGreater(disguiseMon.shieldTurns, 0, 'disguise_veil granted shieldTurns');
+              assertEqual(disguiseMon.battleStages.def, 1, 'disguise_veil raised DEF +1');
+              engine.stop({ outcome: 'escaped', faintedAll: false });
+
+              const toxicMon = createPokemon(findByAb('toxic_alchemy'), 26, 'crater');
+              toxicMon.hp = Math.max(1, toxicMon.maxHp - 25);
+              const hpPreToxic = toxicMon.hp;
+              const staminaDef = createPokemon(findByAb('stamina_earth'), 38, 'crater');
+              vp.team[0] = toxicMon;
+              const sTox = engine.start({ enemy: staminaDef, biomeId: 'crater' });
+              await waitUntil(engine, () => engine.state === BATTLE_STATES.PLAYER_INPUT);
+              await sTox;
+              const t1 = setInterval(() => engine.finishTypewriter(), 15);
+              try {
+                Math.random = () => 0.5;
+                await engine.executeMoveAction('player', MOVES.sludge_wave, engine.sessionId);
+              } finally {
+                clearInterval(t1);
+                Math.random = origRand;
+              }
+              assertGreater(toxicMon.hp, hpPreToxic, 'toxic_alchemy healed attacker via drainHeal');
+              assertEqual(staminaDef.battleStages.def, 1, 'stamina_earth raised defender DEF +1');
+              engine.stop({ outcome: 'escaped', faintedAll: false });
+
+              const teraMon = createPokemon(findByAb('tera_prism'), 28, 'crater');
+              vp.team[0] = teraMon;
+              const sTera = engine.start({ enemy: createPokemon(143, 40, 'crater'), biomeId: 'crater' });
+              await waitUntil(engine, () => engine.state === BATTLE_STATES.PLAYER_INPUT);
+              await sTera;
+              const t2 = setInterval(() => engine.finishTypewriter(), 15);
+              try {
+                Math.random = () => 0.5;
+                await engine.executeMoveAction('player', MOVES.tackle, engine.sessionId);
+              } finally {
+                clearInterval(t2);
+                Math.random = origRand;
+              }
+              assertEqual(teraMon.battleStages.atk, 1, 'tera_prism raised ATK +1 at turn end');
+              engine.stop({ outcome: 'escaped', faintedAll: false });
+
+              // 5. Victory gem drops for 4 new biomes
+              for (const [bId, expectedGem] of [
+                ['faeveldt', 'pixie_gem'], ['atoll', 'alola_gem'], ['highlands', 'crown_gem'], ['crater', 'tera_gem'],
+              ]) {
+                vp.bag.gems[expectedGem] = 0;
+                engine.active = true;
+                engine.sessionId += 1;
+                engine.biomeId = bId;
+                engine.isShrine = false;
+                engine.isTrainer = false;
+                engine.shrineData = null;
+                engine.player = createPokemon(1, 35, bId);
+                engine.enemy = createPokemon(716, 15, bId);
+                engine.enemy.hp = 0;
+                const dTimer = setInterval(() => engine.finishTypewriter(), 15);
+                try {
+                  Math.random = () => 0.1;
+                  await engine.handleEnemyDefeated(engine.sessionId);
+                } finally {
+                  clearInterval(dTimer);
+                  Math.random = origRand;
+                }
+                assertEqual(vp.bag.gems[expectedGem], 1, `${bId} victory drop awarded ${expectedGem}`);
+              }
+            } finally {
+              Math.random = origRand;
+              engine?.destroy();
+              window.localStorage.removeItem(TEST_KEY);
+            }
+          },
+        },
+      ],
+    },
+    {
+      name: '38. Sprint 8 Ergonomics & Release Gate: Gen Filter, Cry Buttons, v8 SW, Migration & Zero-Overlap',
+      tests: [
+        {
+          name: 'sw.js v8 (18 SVGs), index.html, README, 18-biome welcome & v1/v2 solid tiles 51/54/57/60 migration hold',
+          async fn() {
+            const swText = await (await fetch('./sw.js')).text();
+            assert(swText.includes('starlight-shell-v8') && swText.includes('starlight-assets-v8'), 'sw.js uses v8 caches');
+            assert(swText.includes('./assets/fallback/pokeball.svg'), 'sw.js precaches pokeball.svg');
+            for (const typeId of Object.keys(TYPES)) {
+              assert(swText.includes(`./assets/fallback/${typeId}.svg`), `sw.js precaches ${typeId}.svg`);
+            }
+
+            const idxText = await (await fetch('./index.html')).text();
+            assert(idxText.includes('1/1025') && idxText.includes('0/28') && idxText.includes('0/20'), 'index.html shows 1/1025, 0/28, 0/20');
+
+            const readmeText = await (await fetch('./README.md')).text();
+            assert(
+              readmeText.includes('1,025') && readmeText.includes('18') && readmeText.includes('20') && readmeText.includes('28') && readmeText.includes('starlight-shell-v8'),
+              'README reflects Sprint 8 1,025 Gen 1-9 edition',
+            );
+
+            // Solid tiles 51, 54, 57, 60 rescue & v1/v2 migration
+            const findFirstTile = (tileId) => {
+              for (let y = 0; y < WORLD_ROWS; y++) {
+                for (let x = 0; x < WORLD_COLS; x++) {
+                  if (WORLD_MAP[y][x] === tileId) return { x, y };
+                }
+              }
+              return null;
+            };
+            const solid51 = findFirstTile(51);
+            const solid54 = findFirstTile(54);
+            const solid57 = findFirstTile(57);
+            const solid60 = findFirstTile(60);
+            assert(Boolean(solid51 && solid54 && solid57 && solid60), 'found solid tiles 51, 54, 57, 60');
+            for (const p of [solid51, solid54, solid57, solid60]) {
+              const safe = sanitizePosition({ ...p, dir: 'down' });
+              assertEqual(isTileWalkableAt(safe.x, safe.y), true, `sanitizePosition rescues off (${p.x},${p.y})`);
+            }
+
+            const MIG_KEY = 'starlight_pokemon_test_s38_mig_v1';
+            try {
+              window.localStorage.setItem(MIG_KEY, JSON.stringify({
+                version: 1,
+                activeTrainerId: 'violet',
+                profiles: {
+                  violet: {
+                    trainerId: 'violet',
+                    starterId: 1,
+                    pos: { x: 90, y: 20, dir: 'right' }, // walkable faeveldt
+                    team: [{ uid: 'm1', speciesId: 700, level: 24, xp: 10, hp: 60 }],
+                    bag: { potions: 4, greatBalls: 2 },
+                  },
+                  ozias: {
+                    trainerId: 'ozias',
+                    starterId: 4,
+                    pos: { ...solid60, dir: 'up' }, // solid TERA_WALL
+                    team: [{ uid: 'm2', speciesId: 1024, level: 35, xp: 0, hp: 100 }],
+                    bag: { potions: 3, greatBalls: 1, starBalls: 2, starShards: 8, gems: { pixie_gem: 1, alola_gem: 2, crown_gem: 1, tera_gem: 3 } },
+                  },
+                },
+              }));
+              const migrated = new StorageManager(MIG_KEY);
+              const mv = migrated.getProfile('violet');
+              const mo = migrated.getProfile('ozias');
+              assertEqual(mv.pos.x, 90, 'walkable faeveldt x preserved');
+              assertEqual(mv.pos.y, 20, 'walkable faeveldt y preserved');
+              for (const g of ['pixie_gem', 'alola_gem', 'crown_gem', 'tera_gem']) {
+                assertEqual(mv.bag.gems[g], 0, `v1 save hydrates ${g}: 0`);
+              }
+              assertEqual(mo.bag.gems.pixie_gem, 1, 'v2 preserves pixie_gem');
+              assertEqual(mo.bag.gems.alola_gem, 2, 'v2 preserves alola_gem');
+              assertEqual(mo.bag.gems.crown_gem, 1, 'v2 preserves crown_gem');
+              assertEqual(mo.bag.gems.tera_gem, 3, 'v2 preserves tera_gem');
+              assertEqual(isTileWalkableAt(mo.pos.x, mo.pos.y), true, 'Ozias rescued off TERA_WALL (60)');
+            } finally {
+              window.localStorage.removeItem(MIG_KEY);
+            }
+          },
+        },
+        {
+          name: '1025-Dex #dex-gen-select, cry buttons (no nested button), focus safety, observer cleanup, Chromebook/Tablet zero-overlap & 60fps hold',
+          async fn() {
+            const app = window.__starlightApp;
+            assert(Boolean(app), 'GameApp mounted');
+
+            const prevRawSave = window.localStorage.getItem(STORAGE_KEY);
+            const wasBootHidden = app.bootScreenEl.hidden;
+            const wasStarterHidden = app.starterScreenEl.hidden;
+            const wasShellHidden = app.gameShellEl.hidden;
+            const wasOverworldActive = app.overworld.active;
+            const origCabinetStyle = app.cabinetEl?.getAttribute('style') ?? null;
+            const origPlayCry = app.audio.playPokemonCry.bind(app.audio);
+            const crySpies = [];
+            app.audio.playPokemonCry = (spOrId) => {
+              const id = typeof spOrId === 'number' ? spOrId : (spOrId?.speciesId ?? spOrId?.id);
+              crySpies.push(id);
+              return { speciesId: id, played: true };
+            };
+
+            try {
+              window.localStorage.removeItem(STORAGE_KEY);
+              storage.state = storage.load();
+              storage.selectTrainer('violet');
+              storage.chooseStarter(1); // Bulbasaur
+              const prof = storage.getActiveProfile();
+
+              // Verify enterOverworld(true) mentions all 4 new biomes
+              app.enterOverworld(true);
+              const introText = document.getElementById('world-dialogue-text')?.textContent || '';
+              for (const bName of ['Pixie Faeveldt Glade', 'Sunburst Alola Atoll', 'Iron Crown Highlands', 'Terastal Crystal Crater']) {
+                assert(introText.includes(bName), `enterOverworld(true) intro names ${bName}`);
+              }
+              app.closeDialogue();
+
+              // Prepare diverse team/box/seen across Gens 1..9 (>24 seen for IntersectionObserver)
+              prof.team[0] = createPokemon(35, 22, 'crater', { upgradeTier: 3 }); // Clefairy tall back-sprite
+              const evoEevee = createPokemon(133, 18, 'faeveldt');
+              prof.team.push(evoEevee);
+              storage.addRewards({ gems: { pixie_gem: 1 } });
+              for (const id of [
+                1, 2, 3, 4, 25, 35, 133, 152, 252, 387, 495, 650, 658, 700, 716,
+                722, 791, 810, 888, 906, 959, 980, 998, 1007, 1018, 1024, 1025,
+              ]) {
+                storage.recordSeen(id, false);
+              }
+              storage.save();
+              app.applyTrainerTheme('violet');
+              app.refreshHud();
+
+              // 1. Open Pokédex -> #dex-gen-select (All + Gen 1-9 exact counts)
+              app.openPokedex('dex');
+              const genSelect = document.getElementById('dex-gen-select');
+              const searchEl = document.getElementById('dex-search-input');
+              const typeSelect = document.getElementById('dex-type-select');
+              const abilitySelect = document.getElementById('dex-ability-select');
+              assert(Boolean(genSelect && searchEl && typeSelect && abilitySelect), 'all 4 Dex filter controls mounted');
+              assertEqual(genSelect.options.length, 10, '#dex-gen-select has All + 9 Gens');
+              assertEqual(genSelect.value, 'all', '#dex-gen-select defaults to all');
+
+              const expectedGenCounts = [
+                ['gen1', 151], ['gen2', 100], ['gen3', 135], ['gen4', 107], ['gen5', 156],
+                ['gen6', 72], ['gen7', 88], ['gen8', 96], ['gen9', 120],
+              ];
+              for (const [val, expectedCount] of expectedGenCounts) {
+                genSelect.value = val;
+                genSelect.dispatchEvent(new Event('change', { bubbles: true }));
+                assertEqual(document.querySelectorAll('.dex-grid .dex-card').length, expectedCount, `${val} renders ${expectedCount} cards`);
+              }
+
+              // Focus safety across all 4 filter controls (including #dex-gen-select)
+              let shortcutLeaked = false;
+              const u1 = app.input.on('navigate', () => { shortcutLeaked = true; });
+              const u2 = app.input.on('moveSlot', () => { shortcutLeaked = true; });
+              const u3 = app.input.on('confirm', () => { shortcutLeaked = true; });
+              for (const el of [searchEl, typeSelect, abilitySelect, genSelect]) {
+                el.focus();
+                el.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyW', key: 'w', bubbles: true }));
+                el.dispatchEvent(new KeyboardEvent('keydown', { code: 'ArrowDown', key: 'ArrowDown', bubbles: true }));
+                el.dispatchEvent(new KeyboardEvent('keydown', { code: 'Space', key: ' ', bubbles: true }));
+                el.dispatchEvent(new KeyboardEvent('keydown', { code: 'Digit1', key: '1', bubbles: true }));
+              }
+              u1(); u2(); u3();
+              assertEqual(shortcutLeaked, false, 'focusing search/type/ability/gen controls never leaks shortcuts');
+
+              // Reset on Show All
+              genSelect.value = 'gen9';
+              genSelect.dispatchEvent(new Event('change', { bubbles: true }));
+              searchEl.value = 'ZZZZ_NOMATCH';
+              searchEl.dispatchEvent(new Event('input', { bubbles: true }));
+              document.querySelector('.dex-reset-filters-btn').click();
+              assertEqual(app.pokedex.dexGenFilter, 'all', 'Show All resets dexGenFilter');
+              assertEqual(document.getElementById('dex-gen-select').value, 'all', 'Show All resets #dex-gen-select');
+              assertEqual(document.querySelectorAll('.dex-grid .dex-card').length, 1025, 'Show All restores 1025 cards');
+
+              // Reset on cross-filter evo chip click (Eevee #133 in Gen 1 -> Sylveon #700 in Gen 6)
+              document.getElementById('dex-gen-select').value = 'gen1';
+              document.getElementById('dex-gen-select').dispatchEvent(new Event('change', { bubbles: true }));
+              document.querySelector('.dex-card[data-species-id="133"]').click();
+              const sylvChip = Array.from(document.querySelectorAll('.dex-evo-chip')).find((c) => c.textContent.includes('Sylveon'));
+              assert(Boolean(sylvChip), 'Eevee detail renders Sylveon evo chip');
+              sylvChip.click();
+              assertEqual(app.pokedex.dexGenFilter, 'all', 'cross-filter evo chip resets dexGenFilter to all');
+              assertEqual(document.getElementById('dex-gen-select').value, 'all', 'cross-filter evo chip resets #dex-gen-select');
+              assertEqual(app.pokedex.selectedSpeciesId, 700, 'selectedSpeciesId updated to #700 Sylveon');
+
+              // Reset on clicking dex tab & reopen
+              document.getElementById('dex-gen-select').value = 'gen6';
+              document.getElementById('dex-gen-select').dispatchEvent(new Event('change', { bubbles: true }));
+              document.getElementById('pokedex-tab-dex').click();
+              assertEqual(app.pokedex.dexGenFilter, 'all', 'clicking dex tab resets dexGenFilter');
+              document.getElementById('dex-gen-select').value = 'gen7';
+              document.getElementById('dex-gen-select').dispatchEvent(new Event('change', { bubbles: true }));
+              app.openPokedex('dex');
+              assertEqual(app.pokedex.dexGenFilter, 'all', 'reopen resets dexGenFilter');
+
+              // 2. Cry buttons on seen cards (and absent on unknown), no nested <button>, stopPropagation & keyboard Enter/Space, #dex-detail-cry-btn
+              const cards = Array.from(document.querySelectorAll('.dex-grid .dex-card'));
+              const unknownCard = cards.find((c) => c.classList.contains('is-unknown'));
+              assert(Boolean(unknownCard) && unknownCard.querySelector('.dex-cry-btn') === null, 'undiscovered ??? card renders NO .dex-cry-btn');
+
+              const card25 = document.querySelector('.dex-card[data-species-id="25"]');
+              const cryBtn25 = card25.querySelector('.dex-cry-btn');
+              assert(Boolean(cryBtn25), 'seen card #25 renders .dex-cry-btn');
+              assertEqual(cryBtn25.tagName, 'SPAN', '.dex-cry-btn is <span>, not nested <button>');
+              assertEqual(card25.querySelector('button'), null, 'zero nested <button> inside .dex-card');
+
+              const selBeforeCry = app.pokedex.selectedSpeciesId;
+              crySpies.length = 0;
+              cryBtn25.click();
+              assert(crySpies.includes(25), 'clicking .dex-cry-btn plays #25 cry');
+              assertEqual(app.pokedex.selectedSpeciesId, selBeforeCry, '.dex-cry-btn click stopPropagation preserves selection');
+              crySpies.length = 0;
+              cryBtn25.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', bubbles: true }));
+              assert(crySpies.includes(25), 'Enter on .dex-cry-btn plays #25 cry');
+
+              // Card click plays cry & opens detail w/ #dex-detail-cry-btn
+              crySpies.length = 0;
+              card25.click();
+              assert(crySpies.includes(25), 'clicking seen card #25 plays cry');
+              const detailCryBtn = document.getElementById('dex-detail-cry-btn');
+              assert(Boolean(detailCryBtn), '#dex-detail-cry-btn rendered for seen species');
+              crySpies.length = 0;
+              detailCryBtn.click();
+              assert(crySpies.includes(25), 'clicking #dex-detail-cry-btn plays #25 cry');
+
+              // Undiscovered detail has NO #dex-detail-cry-btn
+              unknownCard.click();
+              assertEqual(document.getElementById('dex-detail-cry-btn'), null, 'undiscovered detail renders NO #dex-detail-cry-btn');
+
+              // 3. IntersectionObserver active for >24 seen across 1025 cards & disconnected on tab switch/close
+              assert(Boolean(app.pokedex._dexSpriteObserver), 'IntersectionObserver active across 1025 cards');
+              app.openPokedex('team');
+              assertEqual(app.pokedex._dexSpriteObserver, null, 'tab switch disconnects IntersectionObserver');
+
+              // Post-evolution cry via Team tab .evolve-btn
+              crySpies.length = 0;
+              const sylvEvoBtn = Array.from(document.querySelectorAll('.team-card .evolve-btn')).find((b) => b.textContent.includes('Sylveon'));
+              assert(Boolean(sylvEvoBtn), 'Eevee renders Sylveon evolve button');
+              sylvEvoBtn.click();
+              assertEqual(evoEevee.speciesId, 700, 'Eevee evolved to Sylveon #700 in Team tab');
+              assert(crySpies.includes(700), 'triggerInModalEvolution played #700 Sylveon cry');
+
+              app.openPokedex('guide');
+              assertEqual(document.querySelectorAll('.biome-progress-card').length, 18, 'Guide renders 18 biomes');
+              assertEqual(document.querySelectorAll('.quests-list .quest-card').length, 23, 'Guide renders 23 quests');
+              app.openPokedex('badges');
+              assertEqual(document.querySelectorAll('.badges-grid .badge-card').length, 28, 'Badges tab renders 28 badges');
+
+              // 4. Chromebook (1280x720) & Tablet (1024x768) zero-overflow & zero-overlap gates + 60fps
+              app.hudInstallGroupEl.hidden = false;
+              for (const [label, w, h] of [
+                ['Chromebook 1280x720', 940, Math.round(720 * 0.985)],
+                ['Tablet 1024x768', 940, Math.round(768 * 0.985)],
+              ]) {
+                app.cabinetEl.style.width = `${w}px`;
+                app.cabinetEl.style.height = `${h}px`;
+                for (const tab of ['dex', 'guide', 'badges']) {
+                  app.openPokedex(tab);
+                  await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+                  const bodyEl = document.getElementById('pokedex-body');
+                  assert(bodyEl.scrollWidth <= bodyEl.clientWidth + 2, `${label} ${tab}: modal body overflow (${bodyEl.scrollWidth} > ${bodyEl.clientWidth})`);
+                  if (tab === 'dex') {
+                    const searchRow = document.querySelector('.dex-search-row');
+                    assert(searchRow.scrollWidth <= searchRow.clientWidth + 2, `${label} dex: searchRow overflow (${searchRow.scrollWidth} > ${searchRow.clientWidth})`);
+                  }
+                }
+              }
+              app.pokedex.close();
+              assertEqual(app.pokedex._dexSpriteObserver, null, 'close() disconnects IntersectionObserver');
+
+              const startBattleP = app.battle.start({
+                enemy: createPokemon(1024, 36, 'crater', { isElite: true, upgradeTier: 4 }),
+                biomeId: 'crater',
+              });
+              app.syncControlVisibility();
+              const fastTimer = setInterval(() => app.battle.finishTypewriter(), 15);
+              try {
+                await startBattleP;
+              } finally {
+                clearInterval(fastTimer);
+              }
+
+              const overlaps = (a, b) => !(
+                a.right <= b.left || a.left >= b.right || a.bottom <= b.top || a.top >= b.bottom
+              );
+              const bannerEl = document.getElementById('battle-ability-banner');
+              for (const [label, w, h] of [
+                ['Chromebook 1280x720', 940, Math.round(720 * 0.985)],
+                ['Tablet 1024x768', 940, Math.round(768 * 0.985)],
+              ]) {
+                app.cabinetEl.style.width = `${w}px`;
+                app.cabinetEl.style.height = `${h}px`;
+                await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+
+                const hudBar = document.querySelector('.hud-bar');
+                assert(hudBar.scrollWidth <= hudBar.clientWidth + 2, `${label}: HUD overflow`);
+
+                const enemyCard = document.querySelector('.status-card-enemy').getBoundingClientRect();
+                const playerSprite = document.querySelector('.fighter-sprite-player').getBoundingClientRect();
+                const playerCard = document.querySelector('.status-card-player').getBoundingClientRect();
+                const enemySprite = document.querySelector('.fighter-sprite-enemy').getBoundingClientRect();
+                assertEqual(overlaps(enemyCard, playerSprite), false, `${label}: enemyCard vs Clefairy`);
+                assertEqual(overlaps(playerCard, enemySprite), false, `${label}: playerCard vs Terapagos`);
+
+                for (const side of ['player', 'enemy']) {
+                  bannerEl.hidden = false;
+                  bannerEl.dataset.side = side;
+                  bannerEl.dataset.type = 'fairy';
+                  bannerEl.innerHTML = '<span class="ability-banner-icon">💎</span> <span class="ability-banner-text">Terastal Crown — Attack +1!</span>';
+                  await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+                  const bannerRect = bannerEl.getBoundingClientRect();
+                  assertEqual(overlaps(bannerRect, enemyCard), false, `${label} (${side}): banner vs enemyCard`);
+                  assertEqual(overlaps(bannerRect, playerCard), false, `${label} (${side}): banner vs playerCard`);
+                  assertEqual(overlaps(bannerRect, enemySprite), false, `${label} (${side}): banner vs enemySprite`);
+                  assertEqual(overlaps(bannerRect, playerSprite), false, `${label} (${side}): banner vs playerSprite`);
+                }
+                bannerEl.hidden = true;
+              }
+              app.battle.stop({ outcome: 'escaped', faintedAll: false });
+
+              const fpsDeadline = performance.now() + 1400;
+              while (app.getDiagnostics().measuredFps <= 0 && performance.now() < fpsDeadline) {
+                await new Promise((r) => setTimeout(r, 60));
+              }
+              const diag = app.getDiagnostics();
+              assertEqual(diag.loopRafActive, true, 'loopRafActive === true');
+              assertEqual(diag.loopStartCount, 1, 'loopStartCount === 1');
+              assertGreater(diag.measuredFps, 0, `measuredFps > 0 (got ${diag.measuredFps})`);
+            } finally {
+              app.audio.playPokemonCry = origPlayCry;
+              if (origCabinetStyle === null) app.cabinetEl?.removeAttribute('style');
+              else app.cabinetEl?.setAttribute('style', origCabinetStyle);
+              if (app.battle.active) app.battle.stop({ outcome: 'escaped', faintedAll: false });
+              app.closeDialogue();
               app.pokedex.close();
               app.closeSettings();
               app.hudInstallGroupEl.hidden = true;
