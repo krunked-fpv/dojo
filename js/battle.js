@@ -82,6 +82,18 @@ const FALLBACK_ABILITIES = {
   tera_prism: { id: 'tera_prism', name: 'Terastal Crown', icon: '💎', type: 'dragon', trigger: 'turn_end', boostStat: 'atk', boostStages: 1 },
 };
 
+const ENCOUNTER_TRAITS = {
+  curious: { id: 'curious', icon: '✨', label: 'Curious', callout: '✨ Curious', cssClass: 'is-trait-curious', color: '#67e8f9' },
+  treasure: { id: 'treasure', icon: '💎', label: 'Treasure', callout: '💎 Treasure', cssClass: 'is-trait-treasure', color: '#fde047' },
+  spirited: { id: 'spirited', icon: '⚡', label: 'Spirited', callout: '⚡ Spirited', cssClass: 'is-trait-spirited', color: '#fb923c' },
+  apex: { id: 'apex', icon: '👑', label: 'Apex', callout: '👑 Apex', cssClass: 'is-trait-apex', color: '#f472b6' },
+};
+
+function resolveEncounterTraitMeta(traitId) {
+  if (!traitId || typeof traitId !== 'string') return null;
+  return ENCOUNTER_TRAITS[traitId.toLowerCase()] || null;
+}
+
 function getTypesMap() {
   return Config.TYPES || FALLBACK_TYPES;
 }
@@ -903,17 +915,45 @@ export class BattleEngine {
       this.audio?.playShinySparkle?.();
       this.spawnShinyIntroSparkles('enemy');
     }
-    if (leadEnemy.isElite) {
+    if (leadEnemy.isElite || (isShrine && shrineData?.isAstralTrial)) {
       if (!leadEnemy.isShiny) {
         this.audio?.playShinySparkle?.();
       }
       this.spawnEliteIntroAura('enemy');
     }
 
+    const wildTrait = !isShrine && !this.isTrainer ? resolveEncounterTraitMeta(leadEnemy.encounterTrait) : null;
+    if (wildTrait) {
+      const enemyCenter = this.getSpriteCenter('enemy');
+      this.spawnFloatingText(enemyCenter.x, enemyCenter.y - 44, wildTrait.callout, wildTrait.color, 17, 0.08, 1.45);
+      for (let i = 0; i < 8; i++) {
+        const ang = (Math.PI * 2 * i) / 8;
+        this.particles.push({
+          x: enemyCenter.x + Math.cos(ang) * 16,
+          y: enemyCenter.y + Math.sin(ang) * 14,
+          vx: Math.cos(ang) * 44,
+          vy: Math.sin(ang) * 44 - 16,
+          gravity: -12,
+          life: -(i * 0.015),
+          maxLife: 0.65,
+          color: wildTrait.color,
+          size: 4.5,
+          rotation: ang,
+          spin: 6,
+          shape: 'star',
+        });
+      }
+    }
+
     const playerName = this.player.displayName || this.player.name;
+    const traitTag = wildTrait ? ` (${wildTrait.callout})` : '';
     let introMsg = '';
     if (isShrine && shrineData) {
-      introMsg = shrineData.intro;
+      if (shrineData.isAstralTrial) {
+        introMsg = `🌟 Astral Shrine Trial #${shrineData.trialNumber || 1}! Guardian ${leadEnemy.name} appeared! Go, ${playerName}!`;
+      } else {
+        introMsg = shrineData.intro;
+      }
     } else if (this.isTrainer && this.trainerData) {
       const isRematch = Boolean(this.trainerData.id && profile.rivalsDefeated?.includes(this.trainerData.id));
       const line = (isRematch && this.trainerData.rematchIntro) || this.trainerData.intro;
@@ -921,13 +961,13 @@ export class BattleEngine {
         ? `${this.trainerData.name}: "${line}" Sent out ${leadEnemy.name}! Go, ${playerName}!`
         : `${this.trainerData.name} sent out ${leadEnemy.name}! Go, ${playerName}!`;
     } else if (leadEnemy.isElite && leadEnemy.isShiny) {
-      introMsg = `✨ A rare ELITE wild ${leadEnemy.name} appeared! (Starlight Shimmer!) Go, ${playerName}!`;
+      introMsg = `✨ A rare ELITE wild ${leadEnemy.name}${traitTag} appeared! (Starlight Shimmer!) Go, ${playerName}!`;
     } else if (leadEnemy.isElite) {
-      introMsg = `⚡ A rare ELITE wild ${leadEnemy.name} appeared! Go, ${playerName}!`;
+      introMsg = `⚡ A rare ELITE wild ${leadEnemy.name}${traitTag} appeared! Go, ${playerName}!`;
     } else if (leadEnemy.isShiny) {
-      introMsg = `✨ A rare Starlight Shimmer ${leadEnemy.name} appeared! Go, ${playerName}!`;
+      introMsg = `✨ A rare Starlight Shimmer ${leadEnemy.name}${traitTag} appeared! Go, ${playerName}!`;
     } else {
-      introMsg = `A wild ${leadEnemy.name} appeared! Go, ${playerName}!`;
+      introMsg = `A wild ${leadEnemy.name}${traitTag} appeared! Go, ${playerName}!`;
     }
     await this.say(introMsg);
 
@@ -943,6 +983,39 @@ export class BattleEngine {
     this.returnToPlayerInput(sid);
   }
 
+  triggerCelebrationGlow(mode = 'victory', durationMs = 780) {
+    if (!this.stageEl) return;
+    const clsMap = {
+      capture: 'is-celebrating-capture',
+      levelup: 'is-celebrating-levelup',
+      evo: 'is-celebrating-evo',
+      victory: 'is-celebrating-victory',
+    };
+    this.clearCelebrationGlow();
+    this.stageEl.classList.add('is-celebrating', clsMap[mode] || 'is-celebrating-victory');
+    if (durationMs > 0) {
+      const sid = this.sessionId;
+      const timerId = setTimeout(() => {
+        this.pendingTimers.delete(timerId);
+        if (this.sessionId === sid) {
+          this.clearCelebrationGlow();
+        }
+      }, durationMs);
+      this.pendingTimers.set(timerId, () => {});
+    }
+  }
+
+  clearCelebrationGlow() {
+    if (!this.stageEl) return;
+    this.stageEl.classList.remove(
+      'is-celebrating',
+      'is-celebrating-capture',
+      'is-celebrating-levelup',
+      'is-celebrating-evo',
+      'is-celebrating-victory',
+    );
+  }
+
   stop(result = { outcome: 'escaped', faintedAll: false }) {
     this.sessionId += 1;
     this.turnToken += 1;
@@ -951,6 +1024,8 @@ export class BattleEngine {
     this.state = BATTLE_STATES.INACTIVE;
     this.mustSwitchForced = false;
     this.playerBuddyEndured = false;
+    this.isShrine = false;
+    this.shrineData = null;
     this.isTrainer = false;
     this.trainerData = null;
     this.enemyParty = [];
@@ -962,6 +1037,7 @@ export class BattleEngine {
     this.popups = [];
     this.shakeTimer = 0;
     this.hideAbilityBanner();
+    this.clearCelebrationGlow();
     if (this.stageEl) {
       this.stageEl.style.transform = '';
       delete this.stageEl.dataset.abilityAura;
@@ -1055,6 +1131,12 @@ export class BattleEngine {
     const chips = [];
     if (isEnemy && mon.isElite) {
       chips.push('<span class="stage-chip elite-badge is-elite">⚡ ELITE</span>');
+    }
+    if (isEnemy && !this.isShrine && !this.isTrainer) {
+      const trait = resolveEncounterTraitMeta(mon.encounterTrait);
+      if (trait) {
+        chips.push(`<span class="stage-chip is-trait ${trait.cssClass}">${trait.callout}</span>`);
+      }
     }
     if (mon.isShiny) {
       chips.push('<span class="stage-chip is-shiny">✨ SHIMMER</span>');
@@ -5751,6 +5833,76 @@ export class BattleEngine {
     }
   }
 
+  spawnCelebrationConfetti({
+    center = null,
+    colors = null,
+    ringColors = null,
+    rings = true,
+    waves = 2,
+    countPerWave = 28,
+    spreadX = 140,
+  } = {}) {
+    const fallbackW = this.fxCanvas?.width || 480;
+    const fallbackH = this.fxCanvas?.height || 260;
+    const origin = center && Number.isFinite(center.x) && Number.isFinite(center.y)
+      ? center
+      : { x: fallbackW * 0.5, y: fallbackH * 0.48 };
+    const palette = Array.isArray(colors) && colors.length > 0
+      ? colors
+      : ['#fde047', '#38bdf8', '#f472b6', '#4ade80', '#c084fc', '#ffffff'];
+
+    if (rings) {
+      const rPalette = Array.isArray(ringColors) && ringColors.length > 0
+        ? ringColors
+        : ['#fde047', '#38bdf8', '#f472b6'];
+      rPalette.forEach((col, idx) => {
+        this.particles.push({
+          x: origin.x,
+          y: origin.y,
+          vx: 0,
+          vy: 0,
+          gravity: 0,
+          life: -(idx * 0.085),
+          maxLife: 0.58,
+          color: col,
+          size: 16,
+          maxRadius: 96 + idx * 38,
+          lineWidth: 4.0 - idx * 0.7,
+          shape: 'ring',
+        });
+      });
+    }
+
+    const totalWaves = Math.max(1, Math.min(3, Math.round(waves)));
+    for (let wave = 0; wave < totalWaves; wave++) {
+      const waveDelay = wave * 0.19;
+      const count = Math.max(8, countPerWave);
+      for (let i = 0; i < count; i++) {
+        const angle = (Math.PI * 2 * i) / count + (Math.random() - 0.5) * 0.35;
+        const speed = (wave === 0 ? 105 : 135) + Math.random() * 145;
+        const offsetX = wave === 0 ? (Math.random() - 0.5) * 18 : (Math.random() - 0.5) * spreadX;
+        const offsetY = wave === 0 ? (Math.random() - 0.5) * 14 : -12 + (Math.random() - 0.5) * 28;
+        const isStar = i % 3 === 0;
+        this.particles.push({
+          x: origin.x + offsetX,
+          y: origin.y + offsetY,
+          vx: Math.cos(angle) * speed,
+          vy: Math.sin(angle) * speed - (wave === 0 ? 75 : 105),
+          gravity: isStar ? 140 : 185,
+          drag: 0.975,
+          life: -(waveDelay + i * 0.004),
+          maxLife: (isStar ? 0.85 : 1.05) + Math.random() * 0.3,
+          color: palette[(i + wave) % palette.length],
+          size: isStar ? 4.5 + Math.random() * 3.5 : 4.2 + Math.random() * 2.8,
+          rotation: Math.random() * Math.PI * 2,
+          spin: (i % 2 === 0 ? 1 : -1) * (6 + Math.random() * 6),
+          flutterSpeed: 10 + Math.random() * 8,
+          shape: isStar ? 'star' : 'confetti',
+        });
+      }
+    }
+  }
+
   spawnBuddyEndureBurst(side = 'player') {
     const center = this.getSpriteCenter(side);
     const colors = ['#f472b6', '#fb7185', '#fde047', '#ffffff'];
@@ -5903,6 +6055,9 @@ export class BattleEngine {
         p.x += (p.pullTo.x - p.x) * Math.min(1, dt * 8.5);
         p.y += (p.pullTo.y - p.y) * Math.min(1, dt * 8.5);
       } else {
+        if (p.drag) {
+          p.vx *= Math.pow(p.drag, dt * 60);
+        }
         p.x += p.vx * dt;
         p.y += p.vy * dt;
         p.vy += (p.gravity ?? 180) * dt;
@@ -6250,6 +6405,15 @@ export class BattleEngine {
         ctx.closePath();
         ctx.fill();
         ctx.stroke();
+      } else if (p.shape === 'confetti') {
+        ctx.rotate((p.rotation || 0) + p.life * (p.spin || 8));
+        const flutter = Math.cos(p.life * (p.flutterSpeed || 14));
+        const w = p.size * 1.45;
+        const h = Math.max(2, p.size * 0.72 * Math.abs(flutter));
+        ctx.fillStyle = p.color || '#fde047';
+        ctx.fillRect(-w * 0.5, -h * 0.5, w, h);
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.35)';
+        ctx.fillRect(-w * 0.5, -h * 0.5, w, Math.max(1, h * 0.35));
       } else if (p.shape === 'star' || p.star) {
         ctx.rotate(p.rotation || p.life * 6);
         ctx.fillStyle = p.color;
@@ -8170,19 +8334,38 @@ export class BattleEngine {
           shadowAlpha: 0.45,
         };
         this.audio?.playCaptureSuccess?.();
+        this.triggerCelebrationGlow('capture', 850);
         this.spawnStarBurst({ x: hoverPos.x, y: restY });
-        this.spawnFloatingText(hoverPos.x, restY - 36, 'GOTCHA!', '#fde047', 24, 0, 1.45);
+        this.spawnCelebrationConfetti({
+          center: { x: hoverPos.x, y: restY },
+          colors: ['#fde047', '#38bdf8', '#f472b6', '#4ade80', '#ffffff'],
+          ringColors: ['#fde047', '#38bdf8', '#f472b6'],
+        });
+        this.spawnFloatingText(hoverPos.x, restY - 38, '✨ GOTCHA!', '#fde047', 25, 0, 1.55);
+
+        const isCurious = !this.isShrine && !this.isTrainer && this.enemy?.encounterTrait === 'curious';
+        if (isCurious) {
+          this.spawnFloatingText(hoverPos.x, restY - 64, '✨ Curious +4 Bond!', '#67e8f9', 16, 0.14, 1.45);
+        }
         await this.wait(Math.max(480, Math.round(pace.postImpactMs * 1.3)), sid);
         if (!this.isSessionValid(sid) || this.turnToken !== token) return;
         this.pokeballAnim = null;
 
         this.enemy.hp = Math.max(1, this.enemy.hp);
         this.player?.gainBond?.(4);
+        if (isCurious) {
+          this.player?.gainBond?.(4);
+          this.enemy?.gainBond?.(4);
+        }
         const { destination, newBadges } = this.storage.recordCaught(this.enemy);
         const winBadges = this.storage.recordBattleWin();
         const allNewBadges = [...newBadges, ...winBadges];
 
-        await this.say(`Gotcha! ${this.enemy.name} was caught!`);
+        await this.say(
+          isCurious
+            ? `Gotcha! ${this.enemy.name} was caught! (✨ Curious +4 Bonus Bond!)`
+            : `Gotcha! ${this.enemy.name} was caught!`,
+        );
         if (!this.isSessionValid(sid) || this.turnToken !== token) return;
         if (destination === 'box') {
           await this.say(`${this.enemy.name} was sent to your Reserve Box (Team of 6 is full)!`);
@@ -8494,9 +8677,63 @@ export class BattleEngine {
 
     this.player?.gainBond?.(4);
     const badgeList = [...this.storage.recordBattleWin()];
-    if (this.isShrine && this.shrineData) {
-      const shrineBadges = this.storage.markShrineCleared(this.shrineData.id);
-      badgeList.push(...shrineBadges);
+    const wasShrine = this.isShrine;
+    const wasShrineData = this.shrineData;
+    const isAstralTrial = Boolean(wasShrine && wasShrineData?.isAstralTrial);
+    let shrineTrialRecorded = false;
+
+    if (wasShrine && wasShrineData) {
+      const shrineBadges = this.storage.markShrineCleared(wasShrineData.id);
+      if (Array.isArray(shrineBadges)) {
+        badgeList.push(...shrineBadges);
+      }
+      if (isAstralTrial && typeof this.storage.recordShrineTrialWin === 'function') {
+        const trialRes = this.storage.recordShrineTrialWin(wasShrineData.id, { starShards: 3, starBalls: 1 });
+        shrineTrialRecorded = true;
+        const trialBadges = Array.isArray(trialRes?.newBadges)
+          ? trialRes.newBadges
+          : (Array.isArray(trialRes) ? trialRes : []);
+        if (trialBadges.length > 0) {
+          badgeList.push(...trialBadges);
+        }
+      }
+    }
+
+    if (wasShrine || this.isTrainer) {
+      const playerCenter = this.getSpriteCenter('player');
+      const enemyCenter = this.getSpriteCenter('enemy');
+      if (wasShrine) {
+        this.audio?.playBadgeFanfare?.();
+      } else {
+        (this.audio?.playQuestCompleteFanfare || this.audio?.playLevelUp)?.call(this.audio);
+      }
+      this.triggerCelebrationGlow('victory', 900);
+      this.spawnStarBurst(enemyCenter);
+      this.spawnCelebrationConfetti({
+        center: playerCenter,
+        countPerWave: 32,
+        colors: isAstralTrial
+          ? ['#fde047', '#c084fc', '#38bdf8', '#f472b6', '#ffffff']
+          : ['#fde047', '#4ade80', '#38bdf8', '#f472b6', '#ffffff'],
+        ringColors: isAstralTrial ? ['#fde047', '#c084fc', '#38bdf8'] : ['#fde047', '#4ade80', '#38bdf8'],
+      });
+      const calloutText = isAstralTrial
+        ? '🌟 ASTRAL TRIAL WON!'
+        : wasShrine
+          ? '⛩️ SHRINE CLEARED!'
+          : '🏆 RIVAL VICTORY!';
+      this.spawnFloatingText(playerCenter.x, playerCenter.y - 46, calloutText, '#fde047', 22, 0, 1.55);
+      await this.wait(Math.max(260, Math.round(pace.postImpactMs * 0.85)), sid);
+      if (!this.isSessionValid(sid)) return;
+      if (isAstralTrial) {
+        const trialNum = wasShrineData?.trialNumber || 1;
+        await this.say(
+          shrineTrialRecorded
+            ? `🌟 Astral Shrine Trial #${trialNum} Complete! Earned +3 ✨ Star Shards & +1 🌟 Star Ball!`
+            : `🌟 Astral Shrine Trial #${trialNum} Complete!`,
+        );
+        if (!this.isSessionValid(sid)) return;
+      }
     }
 
     const evoBadges = await this.awardVictoryXp(1.0, sid, { deferBadges: true });
@@ -8507,6 +8744,26 @@ export class BattleEngine {
 
     const shards = this.awardBattleStarShards({ caught: false });
     if (shards > 0) {
+      const trait = !wasShrine && !this.isTrainer ? this.enemy?.encounterTrait : null;
+      if (trait === 'treasure' || trait === 'apex') {
+        const enemyCenter = this.getSpriteCenter('enemy');
+        this.spawnCelebrationConfetti({
+          center: enemyCenter,
+          waves: 1,
+          countPerWave: 16,
+          colors: ['#fde047', '#fbbf24', '#ffffff'],
+          rings: false,
+        });
+        this.spawnFloatingText(
+          enemyCenter.x,
+          enemyCenter.y - 32,
+          trait === 'treasure' ? '💎 +1 Treasure Shard!' : '👑 +1 Apex Shard!',
+          '#fde047',
+          17,
+          0,
+          1.35,
+        );
+      }
       await this.say(`+${shards} ✨ Star Shards!`);
       if (!this.isSessionValid(sid)) return;
     }
@@ -8585,7 +8842,9 @@ export class BattleEngine {
     }
     this.stop({
       outcome: 'won',
-      isShrine: this.isShrine,
+      isShrine: wasShrine,
+      shrineData: wasShrineData,
+      shrineTrialRecorded,
       isTrainer: this.isTrainer,
       trainerData: this.trainerData,
     });
@@ -8657,13 +8916,33 @@ export class BattleEngine {
   }
 
   awardBattleStarShards({ caught = false } = {}) {
-    const rawShards = typeof PokemonMod.getBattleShardReward === 'function'
-      ? PokemonMod.getBattleShardReward(this.enemy, {
-          isShrine: this.isShrine,
-          isTrainer: this.isTrainer,
-          caught: Boolean(caught),
-        })
-      : (this.isShrine ? 3 : this.isTrainer ? 2 : this.enemy?.isElite ? 3 : 1);
+    const trait = !this.isShrine && !this.isTrainer ? this.enemy?.encounterTrait : null;
+    const hasShardTrait = trait === 'treasure' || trait === 'apex';
+    let rawShards;
+    if (typeof PokemonMod.getBattleShardReward === 'function') {
+      const withTrait = PokemonMod.getBattleShardReward(this.enemy, {
+        isShrine: this.isShrine,
+        isTrainer: this.isTrainer,
+        caught: Boolean(caught),
+      });
+      const withoutTrait = hasShardTrait
+        ? PokemonMod.getBattleShardReward(
+            { ...this.enemy, encounterTrait: null },
+            {
+              isShrine: this.isShrine,
+              isTrainer: this.isTrainer,
+              caught: Boolean(caught),
+            },
+          )
+        : withTrait;
+      const traitAlreadyCounted = withTrait > withoutTrait;
+      rawShards = (!caught && hasShardTrait && !traitAlreadyCounted)
+        ? withTrait + 1
+        : withTrait;
+    } else {
+      rawShards = (this.isShrine ? 3 : this.isTrainer ? 2 : this.enemy?.isElite ? 3 : 1)
+        + (!caught && hasShardTrait ? 1 : 0);
+    }
     const shards = Math.max(0, Math.round(Number(rawShards) || 0));
     if (shards <= 0 || !this.storage) return 0;
 
@@ -8694,8 +8973,10 @@ export class BattleEngine {
     const startPct = Math.min(100, (prevXp / prevXpToNext) * 100);
 
     const bondMult = PokemonMod.getBondTier?.(this.player.bond)?.xpMult ?? 1.0;
-    const xpGain = Math.max(12, Math.round((this.enemy.level * 14 + 12) * scale * bondMult));
-    await this.say(`${playerName} gained ${xpGain} XP!`);
+    const isSpirited = !this.isShrine && !this.isTrainer && this.enemy?.encounterTrait === 'spirited';
+    const traitMult = isSpirited ? 1.15 : 1.0;
+    const xpGain = Math.max(12, Math.round((this.enemy.level * 14 + 12) * scale * bondMult * traitMult));
+    await this.say(isSpirited ? `${playerName} gained ${xpGain} XP (⚡ Spirited +15%)!` : `${playerName} gained ${xpGain} XP!`);
     if (!this.isSessionValid(sid)) return [];
 
     const levelResult = this.player.gainXp(xpGain);
@@ -8735,9 +9016,15 @@ export class BattleEngine {
       if (!this.isSessionValid(sid)) return [];
 
       this.audio?.playLevelUp?.();
+      this.triggerCelebrationGlow('levelup', 780);
       const center = this.getSpriteCenter('player');
       this.spawnStarBurst(center);
-      this.spawnFloatingText(center.x, center.y - 40, `LEVEL UP! Lv.${levelResult.newLevel}`, '#fde047', 20, 0, 1.45);
+      this.spawnCelebrationConfetti({
+        center,
+        colors: ['#fde047', '#fbbf24', '#38bdf8', '#4ade80', '#ffffff'],
+        ringColors: ['#fde047', '#fb923c', '#38bdf8'],
+      });
+      this.spawnFloatingText(center.x, center.y - 42, `🌟 LEVEL UP! Lv.${levelResult.newLevel}`, '#fde047', 22, 0, 1.55);
       this.renderStatusCards();
       if (this.playerXpFillEl) {
         this.playerXpFillEl.style.width = '0%';
@@ -8843,8 +9130,15 @@ export class BattleEngine {
 
     this.audio?.playEvolutionFanfare?.();
     this.audio?.playPokemonCry?.(this.player);
+    this.triggerCelebrationGlow('evo', 960);
     this.spawnStarBurst(center);
-    this.spawnFloatingText(center.x, center.y - 44, 'EVOLVED!', '#fde047', 24, 0, 1.55);
+    this.spawnCelebrationConfetti({
+      center,
+      countPerWave: 34,
+      colors: ['#fde047', '#f472b6', '#38bdf8', '#c084fc', '#ffffff'],
+      ringColors: ['#fde047', '#c084fc', '#38bdf8'],
+    });
+    this.spawnFloatingText(center.x, center.y - 46, '🌟 EVOLVED!', '#fde047', 26, 0, 1.65);
 
     const movesMap = getMovesMap();
     const unlockedList = Array.isArray(evoRes?.evolution?.unlockedMoves) ? evoRes.evolution.unlockedMoves : [];

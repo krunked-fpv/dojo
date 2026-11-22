@@ -1,5 +1,5 @@
-const SHELL_CACHE = 'starlight-shell-v8';
-const ASSET_CACHE = 'starlight-assets-v8';
+const SHELL_CACHE = 'starlight-shell-v9';
+const ASSET_CACHE = 'starlight-assets-v9';
 const KEEP_CACHES = new Set([SHELL_CACHE, ASSET_CACHE]);
 
 const CORE_SHELL_URLS = [
@@ -19,6 +19,7 @@ const CORE_SHELL_URLS = [
   './js/overworld.js',
   './js/battle.js',
   './js/pokedex.js',
+  './js/minigame.js',
   './assets/icons/icon-192.png',
   './assets/icons/icon-512.png',
   './assets/icons/apple-touch-icon.png',

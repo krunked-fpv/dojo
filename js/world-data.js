@@ -2203,6 +2203,7 @@ export const RIVAL_TRAINERS = {
       { speciesId: 17, level: 7 },
       { speciesId: 44, level: 8 },
     ],
+    rematchPool: [18, 45, 12, 26, 123, 154, 214, 389],
     rewards: { greatBalls: 2, potions: 2, gems: { leaf_gem: 1 } },
     rematchRewards: { greatBalls: 1, potions: 1 },
     intro: 'Hey {trainer}! Ready to test your teamwork under the forest canopy? Let’s battle!',
@@ -2227,6 +2228,7 @@ export const RIVAL_TRAINERS = {
       { speciesId: 64, level: 10 },
       { speciesId: 196, level: 11 },
     ],
+    rematchPool: [65, 94, 197, 282, 306, 429, 526, 208],
     rewards: { greatBalls: 2, gems: { moon_gem: 1 } },
     rematchRewards: { greatBalls: 1 },
     intro: 'The crystals shimmer when strong trainers meet, {trainer}! Show me your sparkle!',
@@ -2251,6 +2253,7 @@ export const RIVAL_TRAINERS = {
       { speciesId: 61, level: 10 },
       { speciesId: 117, level: 12 },
     ],
+    rematchPool: [62, 186, 230, 121, 130, 131, 160, 395],
     rewards: { starBalls: 1, gems: { water_gem: 1 } },
     rematchRewards: { greatBalls: 2 },
     intro: 'Ahoy, {trainer}! Think your crew can ride the Sapphire Lagoon waves? Battle stations!',
@@ -2276,6 +2279,7 @@ export const RIVAL_TRAINERS = {
       { speciesId: 181, level: 15 },
       { speciesId: 471, level: 16 },
     ],
+    rematchPool: [38, 126, 467, 157, 257, 392, 466, 637],
     rewards: { starBalls: 2, gems: { ice_gem: 1 } },
     rematchRewards: { starBalls: 1, potions: 2 },
     intro: 'Welcome to Ember Caldera, {trainer}! Show me if your team can outshine fire, thunder, and frost!',
@@ -2301,6 +2305,7 @@ export const RIVAL_TRAINERS = {
       { speciesId: 365, level: 18 },
       { speciesId: 282, level: 19 },
     ],
+    rematchPool: [149, 473, 461, 478, 359, 227, 460, 584],
     rewards: { starBalls: 2, starShards: 4, gems: { sun_gem: 1 } },
     rematchRewards: { starBalls: 1, starShards: 3 },
     intro: 'The auroras shine brightest for fearless challengers, {trainer}! Ready to face Starfall Peak’s finest?',
@@ -2326,6 +2331,7 @@ export const RIVAL_TRAINERS = {
       { speciesId: 350, level: 19 },
       { speciesId: 448, level: 21 },
     ],
+    rematchPool: [468, 475, 3, 6, 9, 547, 549, 571],
     rewards: { starBalls: 2, starShards: 5, gems: { astral_gem: 1 } },
     rematchRewards: { starBalls: 1, starShards: 4 },
     intro: 'The sakura starlight foretold your arrival, {trainer}! Let’s test our Celestial Grove partners in battle!',
@@ -2351,6 +2357,7 @@ export const RIVAL_TRAINERS = {
       { speciesId: 553, level: 20 },
       { speciesId: 445, level: 22 },
     ],
+    rematchPool: [28, 464, 232, 248, 450, 555, 530, 344],
     rewards: { starBalls: 2, starShards: 5, gems: { prism_gem: 1 } },
     rematchRewards: { starBalls: 1, starShards: 4 },
     intro: 'The desert mirage sharpens every battle instinct, {trainer}! Ready to challenge Sunstone Dunes’ finest?',
@@ -2376,6 +2383,7 @@ export const RIVAL_TRAINERS = {
       { speciesId: 407, level: 22 },
       { speciesId: 609, level: 23 },
     ],
+    rematchPool: [260, 286, 195, 477, 579, 469, 452, 454],
     rewards: { starBalls: 2, starShards: 5, gems: { leaf_gem: 1 } },
     rematchRewards: { starBalls: 1, starShards: 4 },
     intro: 'The lantern spores dance to our rhythm, {trainer}! Step onto the bayou boardwalk and battle me!',
@@ -2401,6 +2409,7 @@ export const RIVAL_TRAINERS = {
       { speciesId: 635, level: 25 },
       { speciesId: 376, level: 26 },
     ],
+    rematchPool: [474, 612, 576, 625, 475, 468, 248, 373],
     rewards: { starBalls: 3, starShards: 6, gems: { astral_gem: 1 } },
     rematchRewards: { starBalls: 2, starShards: 5 },
     intro: 'Only trainers with sky-high resolve ascend Astral Sky Citadel, {trainer}! Show me your ultimate synergy!',
@@ -2426,6 +2435,7 @@ export const RIVAL_TRAINERS = {
       { speciesId: 466, level: 23 },
       { speciesId: 523, level: 24 },
     ],
+    rematchPool: [101, 135, 310, 472, 604, 620, 539, 128],
     rewards: { starBalls: 2, starShards: 6, gems: { chrono_gem: 1 } },
     rematchRewards: { starBalls: 1, starShards: 5 },
     intro: 'The canyon storms answer our speed, {trainer}! Can your team outpace Thundersteppe Canyon’s finest?',
@@ -2451,6 +2461,7 @@ export const RIVAL_TRAINERS = {
       { speciesId: 350, level: 25 },
       { speciesId: 593, level: 26 },
     ],
+    rematchPool: [73, 80, 199, 319, 368, 457, 565, 594],
     rewards: { starBalls: 2, starShards: 6, gems: { nebula_gem: 1 } },
     rematchRewards: { starBalls: 1, starShards: 5 },
     intro: 'Dive deep into the pearl currents, {trainer}! Show me if your team can weather the Abyssal Trench!',
@@ -2476,6 +2487,7 @@ export const RIVAL_TRAINERS = {
       { speciesId: 437, level: 28 },
       { speciesId: 623, level: 29 },
     ],
+    rematchPool: [139, 141, 142, 346, 348, 409, 411, 561],
     rewards: { starBalls: 3, starShards: 7, gems: { chrono_gem: 1 } },
     rematchRewards: { starBalls: 2, starShards: 5 },
     intro: 'Only trainers with timeless resolve unlock Chrono Relic Ruins, {trainer}! Face my ancient guardians!',
@@ -2501,6 +2513,7 @@ export const RIVAL_TRAINERS = {
       { speciesId: 637, level: 31 },
       { speciesId: 635, level: 32 },
     ],
+    rematchPool: [426, 479, 442, 474, 373, 376, 445, 468],
     rewards: { starBalls: 3, starShards: 8, gems: { nebula_gem: 1 } },
     rematchRewards: { starBalls: 2, starShards: 6 },
     intro: 'Beyond the stars lies Mythic Starlight Rift, {trainer}! Show me everything you and your partners have learned!',
@@ -2526,6 +2539,7 @@ export const RIVAL_TRAINERS = {
       { speciesId: 681, level: 27 },
       { speciesId: 700, level: 28 },
     ],
+    rematchPool: [652, 655, 671, 675, 678, 683, 685, 706],
     rewards: { starBalls: 2, starShards: 6, gems: { pixie_gem: 1 } },
     rematchRewards: { starBalls: 1, starShards: 5 },
     intro: 'The pastel meadows shimmer for our showcase, {trainer}! Ready to face Pixie Faeveldt Glade’s finest?',
@@ -2551,6 +2565,7 @@ export const RIVAL_TRAINERS = {
       { speciesId: 745, level: 29 },
       { speciesId: 784, level: 30 },
     ],
+    rematchPool: [727, 730, 743, 750, 752, 760, 763, 778],
     rewards: { starBalls: 2, starShards: 7, gems: { alola_gem: 1 } },
     rematchRewards: { starBalls: 1, starShards: 5 },
     intro: 'Alola, {trainer}! My partners and I love battling on the warm boardwalk—let’s give it our best!',
@@ -2576,6 +2591,7 @@ export const RIVAL_TRAINERS = {
       { speciesId: 849, level: 31 },
       { speciesId: 887, level: 32 },
     ],
+    rematchPool: [812, 815, 818, 851, 861, 879, 884, 901],
     rewards: { starBalls: 3, starShards: 7, gems: { crown_gem: 1 } },
     rematchRewards: { starBalls: 2, starShards: 5 },
     intro: 'Welcome to Iron Crown Highlands, {trainer}! Show me if your team can topple a Champion-time showcase!',
@@ -2601,6 +2617,7 @@ export const RIVAL_TRAINERS = {
       { speciesId: 959, level: 34 },
       { speciesId: 998, level: 35 },
     ],
+    rematchPool: [911, 914, 923, 936, 937, 941, 980, 983],
     rewards: { starBalls: 3, starShards: 8, gems: { tera_gem: 1 } },
     rematchRewards: { starBalls: 2, starShards: 6 },
     intro: 'Ooh, {trainer}! A true treasure hunt in Terastal Crystal Crater deserves an all-out crystal battle!',
@@ -2753,6 +2770,17 @@ export const LANDMARKS = {
   },
 };
 
+export const SECRET_ARCADE_SPOT = {
+  id: 'starlight_arcade',
+  name: 'Starlight Sky-Hop Cabinet',
+  x: 11,
+  y: 12,
+  key: '11,12',
+  icon: '🕹️',
+  biome: 'village',
+  description: 'A cozy glowing Starlight Sky-Hop arcade cabinet tucked beside the red-roofed cottage wall! Knock 3 times—or earn a Badge / catch 5 Pokémon—to power it up!',
+};
+
 export function getBiomeAt(x, y) {
   if (x >= 84) return y <= 41 ? BIOMES.faeveldt : BIOMES.crater;
   if (y >= 72) return x <= 49 ? BIOMES.atoll : BIOMES.highlands;
@@ -2783,6 +2811,73 @@ export function isTileWalkableAt(x, y) {
 }
 
 const DEFAULT_SPAWN = { x: 8, y: 15, dir: 'down' };
+
+let _depthLookupCache = null;
+
+function getDepthLookupCache() {
+  if (_depthLookupCache) return _depthLookupCache;
+  const shrinesByBiome = {};
+  for (const [key, shrine] of Object.entries(SHRINES)) {
+    const [sx, sy] = key.split(',').map(Number);
+    if (!shrinesByBiome[shrine.biome]) shrinesByBiome[shrine.biome] = [];
+    shrinesByBiome[shrine.biome].push([sx, sy]);
+  }
+  const maxDistByBiome = {};
+  for (let ry = 0; ry < WORLD_ROWS; ry++) {
+    for (let rx = 0; rx < WORLD_COLS; rx++) {
+      const bId = getBiomeAt(rx, ry).id;
+      const list = shrinesByBiome[bId];
+      if (!list) continue;
+      let minD = Infinity;
+      for (const [sx, sy] of list) {
+        const d = Math.hypot(rx - sx, ry - sy);
+        if (d < minD) minD = d;
+      }
+      if (!maxDistByBiome[bId] || minD > maxDistByBiome[bId]) {
+        maxDistByBiome[bId] = minD;
+      }
+    }
+  }
+  _depthLookupCache = { shrinesByBiome, maxDistByBiome };
+  return _depthLookupCache;
+}
+
+const DEPTH_ZONE_LABELS = ['Outskirts', 'Heartland', 'Deep Wilds'];
+
+export function getTileDepthInfo(x, y) {
+  const validX = x !== null && x !== undefined && x !== '' && Number.isFinite(Number(x));
+  const validY = y !== null && y !== undefined && y !== '' && Number.isFinite(Number(y));
+  const cx = validX
+    ? Math.max(0, Math.min(WORLD_COLS - 1, Math.round(Number(x))))
+    : DEFAULT_SPAWN.x;
+  const cy = validY
+    ? Math.max(0, Math.min(WORLD_ROWS - 1, Math.round(Number(y))))
+    : DEFAULT_SPAWN.y;
+  const biome = getBiomeAt(cx, cy);
+  const { shrinesByBiome, maxDistByBiome } = getDepthLookupCache();
+  const list = shrinesByBiome[biome.id];
+  if (!list || list.length === 0) {
+    return { biomeId: biome.id, depthTier: 0, zoneLabel: DEPTH_ZONE_LABELS[0] };
+  }
+  let minD = Infinity;
+  for (const [sx, sy] of list) {
+    const d = Math.hypot(cx - sx, cy - sy);
+    if (d < minD) minD = d;
+  }
+  const maxD = maxDistByBiome[biome.id] || 1;
+  const proximity = 1 - minD / maxD;
+  let depthTier = 0;
+  if (minD <= 4.5 || proximity >= 0.67) {
+    depthTier = 2;
+  } else if (proximity >= 0.34) {
+    depthTier = 1;
+  }
+  return {
+    biomeId: biome.id,
+    depthTier,
+    zoneLabel: DEPTH_ZONE_LABELS[depthTier],
+  };
+}
 
 export function findNearestSafePosition(x, y, dir = 'down') {
   const safeDir = ['up', 'down', 'left', 'right'].includes(dir) ? dir : 'down';
