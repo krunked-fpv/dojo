@@ -205,6 +205,51 @@ function resolveFollowerArchetypeFallback(species) {
 
 const QUEST_BY_ID = new Map(FIELD_QUESTS.map((q) => [q.id, q]));
 
+const LANDMARK_ENTRIES = Object.entries(LANDMARKS).map(([key, landmark]) => {
+  const [x, y] = key.split(',').map(Number);
+  return { x, y, landmark };
+});
+
+const NPC_ENTRIES = Object.entries(NPCS).map(([key, npc]) => {
+  const [x, y] = key.split(',').map(Number);
+  return { x, y, npc };
+});
+
+const RIVAL_ENTRIES = Object.entries(RIVAL_TRAINERS).map(([key, rival]) => {
+  const [x, y] = key.split(',').map(Number);
+  return { x, y, rival };
+});
+
+const SHRINE_BY_TILE_INDEX = new Map(
+  Object.entries(SHRINES).map(([key, shrine]) => {
+    const [x, y] = key.split(',').map(Number);
+    return [y * WORLD_COLS + x, shrine];
+  }),
+);
+
+const CHEST_BY_TILE_INDEX = new Map(
+  Object.entries(CHESTS).map(([key, chest]) => {
+    const [x, y] = key.split(',').map(Number);
+    return [y * WORLD_COLS + x, chest];
+  }),
+);
+
+const AURORA_BAND_COLORS = {
+  crater: ['rgba(56, 189, 248, 0.1)', 'rgba(244, 114, 182, 0.09)', 'rgba(250, 204, 21, 0.08)'],
+  faeveldt: ['rgba(249, 168, 212, 0.09)', 'rgba(192, 132, 252, 0.085)', 'rgba(167, 243, 208, 0.075)'],
+  rift: ['rgba(232, 121, 249, 0.095)', 'rgba(56, 189, 248, 0.085)', 'rgba(250, 204, 21, 0.07)'],
+  sanctum: ['rgba(167, 139, 250, 0.095)', 'rgba(103, 232, 249, 0.085)', 'rgba(250, 204, 21, 0.065)'],
+  peak: ['rgba(56, 189, 248, 0.085)', 'rgba(52, 211, 153, 0.09)', 'rgba(192, 132, 252, 0.08)'],
+};
+
+const SPARKLE_COLORS = ['#fef08a', '#67e8f9', '#ffffff', '#e879f9'];
+const MYSTERY_NOTE_COLORS = ['#fde047', '#e879f9'];
+const ANTLER_BLOSSOM_COORDS = [[8, 2], [15, 2], [21, 2]];
+
+function sortActorsByY(a, b) {
+  return a.sortY - b.sortY;
+}
+
 const DIR_VEC = {
   up: { dx: 0, dy: -1 },
   down: { dx: 0, dy: 1 },
@@ -532,11 +577,26 @@ export class OverworldEngine {
     this.autoPath = [];
     this.autoInteractTarget = null;
     this.touchDestination = null;
+    this._touchDestArriveTimer = null;
     this.touchSteerActive = false;
     this.touchSteerDir = null;
     this._pointerState = null;
     this._holdTimer = null;
     this._lastNodeKind = null;
+
+    this._renderActors = [];
+    this._actorPool = [];
+    this._camOut = { px: 0, py: 0, camX: 0, camY: 0 };
+    this._lookTrainerId = null;
+    this._lookStyleId = null;
+    this._lookAccessory = null;
+    this._lookAura = null;
+    this._lookCape = null;
+    this._cachedTrainerLook = null;
+    this._auroraGradBiome = null;
+    this._auroraGradW = 0;
+    this._auroraGradCtx = null;
+    this._auroraGrads = null;
 
     this.followerTrainerId = null;
     this.followerUid = null;
@@ -582,8 +642,14 @@ export class OverworldEngine {
     if (!parent) return;
     const rect = parent.getBoundingClientRect();
     if (rect.width <= 0 || rect.height <= 0) {
-      this.viewW = GAME_META.viewportCols * this.tileSize;
-      this.viewH = GAME_META.viewportRows * this.tileSize;
+      const fallbackW = GAME_META.viewportCols * this.tileSize;
+      const fallbackH = GAME_META.viewportRows * this.tileSize;
+      this.viewW = fallbackW;
+      this.viewH = fallbackH;
+      if (this.canvas && (this.canvas.width !== fallbackW || this.canvas.height !== fallbackH)) {
+        this.canvas.width = fallbackW;
+        this.canvas.height = fallbackH;
+      }
       return;
     }
 
@@ -591,7 +657,7 @@ export class OverworldEngine {
     const nextW = Math.max(288, Math.min(WORLD_COLS * this.tileSize, Math.round(rect.width / zoom)));
     const nextH = Math.max(224, Math.min(WORLD_ROWS * this.tileSize, Math.round(rect.height / zoom)));
 
-    if (nextW !== this.viewW || nextH !== this.viewH) {
+    if (nextW !== this.viewW || nextH !== this.viewH || this.canvas.width !== nextW || this.canvas.height !== nextH) {
       this.viewW = nextW;
       this.viewH = nextH;
       this.canvas.width = nextW;
@@ -660,7 +726,7 @@ export class OverworldEngine {
     };
   }
 
-  syncFollower() {
+  syncFollower(returnState = true) {
     const profile = this.getProfile();
     if (!profile) {
       this.followerUid = null;
@@ -668,7 +734,7 @@ export class OverworldEngine {
       this.followerShiny = false;
       this.followerUpgradeTier = 0;
       this.followerMoving = false;
-      return this.getFollowerState();
+      return returnState ? this.getFollowerState() : null;
     }
 
     if (!this.currentBiomeId && profile.pos) {
@@ -676,30 +742,34 @@ export class OverworldEngine {
     }
 
     const lead = profile.team?.[0] || null;
-    const next = this._readLeadMeta(lead);
+    const nextUid = lead ? (lead.uid ?? null) : null;
+    const rawId = lead ? Number(lead.speciesId) : NaN;
+    const nextSpeciesId = Number.isFinite(rawId) ? rawId : null;
+    const nextShiny = Boolean(lead?.isShiny);
+    const nextUpgradeTier = lead ? Math.max(0, Math.min(5, Number(lead.upgradeTier) || 0)) : 0;
 
     if (!this.followerInitialized || this.followerTrainerId !== profile.trainerId) {
       this._placeFollowerBehind(profile.pos.x, profile.pos.y, profile.pos.dir);
       this.followerTrainerId = profile.trainerId;
-      this.followerUid = next.uid;
-      this.followerSpeciesId = next.speciesId;
-      this.followerShiny = next.isShiny;
-      this.followerUpgradeTier = next.upgradeTier;
-      return this.getFollowerState();
+      this.followerUid = nextUid;
+      this.followerSpeciesId = nextSpeciesId;
+      this.followerShiny = nextShiny;
+      this.followerUpgradeTier = nextUpgradeTier;
+      return returnState ? this.getFollowerState() : null;
     }
 
     const changed = (
-      next.uid !== this.followerUid ||
-      next.speciesId !== this.followerSpeciesId ||
-      next.isShiny !== this.followerShiny ||
-      next.upgradeTier !== this.followerUpgradeTier
+      nextUid !== this.followerUid ||
+      nextSpeciesId !== this.followerSpeciesId ||
+      nextShiny !== this.followerShiny ||
+      nextUpgradeTier !== this.followerUpgradeTier
     );
 
     if (changed) {
-      this.followerUid = next.uid;
-      this.followerSpeciesId = next.speciesId;
-      this.followerShiny = next.isShiny;
-      this.followerUpgradeTier = next.upgradeTier;
+      this.followerUid = nextUid;
+      this.followerSpeciesId = nextSpeciesId;
+      this.followerShiny = nextShiny;
+      this.followerUpgradeTier = nextUpgradeTier;
       if (lead) {
         this._spawnFollowerChangePuff(profile);
       } else {
@@ -707,7 +777,7 @@ export class OverworldEngine {
       }
     }
 
-    return this.getFollowerState();
+    return returnState ? this.getFollowerState() : null;
   }
 
   getFollowerState() {
@@ -791,6 +861,7 @@ export class OverworldEngine {
     this.autoPath = [];
     this.autoInteractTarget = null;
     this.touchDestination = null;
+    this._touchDestArriveTimer = null;
   }
 
   getTouchNavigationState() {
@@ -804,7 +875,8 @@ export class OverworldEngine {
     };
   }
 
-  _getCameraPosition(profile) {
+  _getCameraPosition(profile, out = null) {
+    const ts = this.tileSize;
     const baseX = profile?.pos?.x ?? (GAME_META.spawn?.x ?? 8);
     const baseY = profile?.pos?.y ?? (GAME_META.spawn?.y ?? 15);
     const px = this.moving
@@ -814,10 +886,17 @@ export class OverworldEngine {
       ? this.moveStartY + (this.moveTargetY - this.moveStartY) * this.moveProgress
       : baseY;
 
-    const maxCamX = Math.max(0, WORLD_COLS * this.tileSize - this.viewW);
-    const maxCamY = Math.max(0, WORLD_ROWS * this.tileSize - this.viewH);
-    const camX = Math.max(0, Math.min(maxCamX, Math.round(px * this.tileSize - this.viewW / 2 + 16)));
-    const camY = Math.max(0, Math.min(maxCamY, Math.round(py * this.tileSize - this.viewH / 2 + 16)));
+    const maxCamX = Math.max(0, Math.round(WORLD_COLS * ts - this.viewW));
+    const maxCamY = Math.max(0, Math.round(WORLD_ROWS * ts - this.viewH));
+    const camX = Math.round(Math.max(0, Math.min(maxCamX, Math.round(px * ts - this.viewW / 2 + ts / 2))));
+    const camY = Math.round(Math.max(0, Math.min(maxCamY, Math.round(py * ts - this.viewH / 2 + ts / 2))));
+    if (out) {
+      out.px = px;
+      out.py = py;
+      out.camX = camX;
+      out.camY = camY;
+      return out;
+    }
     return { px, py, camX, camY };
   }
 
@@ -887,6 +966,7 @@ export class OverworldEngine {
     this.autoPath = [];
     this.autoInteractTarget = null;
     this.touchDestination = null;
+    this._touchDestArriveTimer = null;
     this.touchSteerActive = true;
     this.touchSteerDir = this._computeTouchSteerDir(
       this._pointerState.clientX,
@@ -1022,6 +1102,7 @@ export class OverworldEngine {
     this.autoPath = [];
     this.autoInteractTarget = null;
     this.touchDestination = null;
+    this._touchDestArriveTimer = null;
 
     const px = profile.pos.x;
     const py = profile.pos.y;
@@ -1065,6 +1146,45 @@ export class OverworldEngine {
     }
 
     const targetIsWalkable = !interactive && this.isTileWalkable(tx, ty);
+
+    // Forgiving near-edge snapping for solid non-interactive tiles within Manhattan radius 1..2
+    let snapCandidates = null;
+    let snapRankByIdx = null;
+    if (!interactive && !targetIsWalkable) {
+      snapCandidates = [];
+      for (let dy = -2; dy <= 2; dy++) {
+        for (let dx = -2; dx <= 2; dx++) {
+          const targetDist = Math.abs(dx) + Math.abs(dy);
+          if (targetDist < 1 || targetDist > 2) continue;
+          const cx = tx + dx;
+          const cy = ty + dy;
+          if (cx < 0 || cy < 0 || cx >= WORLD_COLS || cy >= WORLD_ROWS) continue;
+          if (!this.isTileWalkable(cx, cy)) continue;
+          const startDist = Math.abs(cx - startX) + Math.abs(cy - startY);
+          snapCandidates.push({
+            x: cx,
+            y: cy,
+            idx: cy * WORLD_COLS + cx,
+            targetDist,
+            startDist,
+          });
+        }
+      }
+      if (snapCandidates.length === 0) {
+        return false;
+      }
+      snapCandidates.sort((a, b) => (
+        a.targetDist - b.targetDist ||
+        a.startDist - b.startDist ||
+        a.y - b.y ||
+        a.x - b.x
+      ));
+      snapRankByIdx = new Map();
+      for (let i = 0; i < snapCandidates.length; i++) {
+        snapRankByIdx.set(snapCandidates[i].idx, i);
+      }
+    }
+
     const maxVisited = 1400;
     const startIdx = startY * WORLD_COLS + startX;
     const visited = new Set([startIdx]);
@@ -1073,54 +1193,75 @@ export class OverworldEngine {
 
     let goalX = null;
     let goalY = null;
-    let bestFallback = null;
+    let bestSnapCand = null;
 
-    for (let head = 0; head < queue.length; head++) {
-      const [cx, cy] = queue[head];
-      if (interactive) {
-        if (Math.abs(cx - tx) + Math.abs(cy - ty) === 1) {
-          goalX = cx;
-          goalY = cy;
-          break;
-        }
-      } else if (targetIsWalkable) {
-        if (cx === tx && cy === ty) {
-          goalX = cx;
-          goalY = cy;
-          break;
-        }
-      } else if (!(cx === startX && cy === startY)) {
-        const tapDist = Math.abs(cx - tx) + Math.abs(cy - ty);
-        if (tapDist >= 1 && tapDist <= 3) {
-          if (!bestFallback || tapDist < bestFallback.tapDist) {
-            bestFallback = { x: cx, y: cy, tapDist };
-            if (tapDist === 1) {
-              goalX = cx;
-              goalY = cy;
-              break;
-            }
-          }
-        }
-      }
-
-      if (visited.size >= maxVisited) continue;
-
-      for (const [dirName, dx, dy] of CARDINAL_STEPS) {
-        const nx = cx + dx;
-        const ny = cy + dy;
-        if (nx < 0 || ny < 0 || nx >= WORLD_COLS || ny >= WORLD_ROWS) continue;
-        const nIdx = ny * WORLD_COLS + nx;
-        if (visited.has(nIdx) || !this.isTileWalkable(nx, ny)) continue;
-        visited.add(nIdx);
-        parent.set(nIdx, { prevIdx: cy * WORLD_COLS + cx, dir: dirName });
-        queue.push([nx, ny]);
-        if (visited.size >= maxVisited) break;
+    if (snapRankByIdx && snapRankByIdx.has(startIdx)) {
+      bestSnapCand = snapCandidates[snapRankByIdx.get(startIdx)];
+      if (
+        bestSnapCand.targetDist === snapCandidates[0].targetDist &&
+        bestSnapCand.startDist === snapCandidates[0].startDist
+      ) {
+        goalX = bestSnapCand.x;
+        goalY = bestSnapCand.y;
       }
     }
 
-    if (goalX === null && bestFallback) {
-      goalX = bestFallback.x;
-      goalY = bestFallback.y;
+    if (goalX === null) {
+      for (let head = 0; head < queue.length; head++) {
+        const [cx, cy] = queue[head];
+        if (interactive) {
+          if (Math.abs(cx - tx) + Math.abs(cy - ty) === 1) {
+            goalX = cx;
+            goalY = cy;
+            break;
+          }
+        } else if (targetIsWalkable) {
+          if (cx === tx && cy === ty) {
+            goalX = cx;
+            goalY = cy;
+            break;
+          }
+        } else if (snapRankByIdx) {
+          const rank = snapRankByIdx.get(cy * WORLD_COLS + cx);
+          if (rank !== undefined) {
+            const cand = snapCandidates[rank];
+            if (
+              !bestSnapCand ||
+              cand.targetDist < bestSnapCand.targetDist ||
+              (cand.targetDist === bestSnapCand.targetDist && cand.startDist < bestSnapCand.startDist)
+            ) {
+              bestSnapCand = cand;
+              if (
+                bestSnapCand.targetDist === snapCandidates[0].targetDist &&
+                bestSnapCand.startDist === snapCandidates[0].startDist
+              ) {
+                goalX = bestSnapCand.x;
+                goalY = bestSnapCand.y;
+                break;
+              }
+            }
+          }
+        }
+
+        if (visited.size >= maxVisited) continue;
+
+        for (const [dirName, dx, dy] of CARDINAL_STEPS) {
+          const nx = cx + dx;
+          const ny = cy + dy;
+          if (nx < 0 || ny < 0 || nx >= WORLD_COLS || ny >= WORLD_ROWS) continue;
+          const nIdx = ny * WORLD_COLS + nx;
+          if (visited.has(nIdx) || !this.isTileWalkable(nx, ny)) continue;
+          visited.add(nIdx);
+          parent.set(nIdx, { prevIdx: cy * WORLD_COLS + cx, dir: dirName });
+          queue.push([nx, ny]);
+          if (visited.size >= maxVisited) break;
+        }
+      }
+    }
+
+    if (goalX === null && bestSnapCand) {
+      goalX = bestSnapCand.x;
+      goalY = bestSnapCand.y;
     }
 
     if (goalX === null || goalY === null) {
@@ -1138,6 +1279,16 @@ export class OverworldEngine {
     steps.reverse();
 
     if (steps.length === 0 && !this.moving && !interactive) {
+      if (!targetIsWalkable && goalX === startX && goalY === startY) {
+        this.touchDestination = {
+          x: goalX,
+          y: goalY,
+          isInteract: false,
+          createdAt: typeof performance !== 'undefined' ? performance.now() : Date.now(),
+        };
+        this._touchDestArriveTimer = 0.22;
+        return true;
+      }
       return false;
     }
 
@@ -1489,7 +1640,7 @@ export class OverworldEngine {
     }
 
     if (this.active || this.followerInitialized) {
-      this.syncFollower();
+      this.syncFollower(false);
     }
 
     if (!this.active || this.paused) return;
@@ -1500,8 +1651,19 @@ export class OverworldEngine {
       this.autoPath = [];
       this.autoInteractTarget = null;
       this.touchDestination = null;
+      this._touchDestArriveTimer = null;
       this.touchSteerActive = false;
       this.touchSteerDir = null;
+    }
+
+    if (this._touchDestArriveTimer !== null) {
+      this._touchDestArriveTimer -= dt;
+      if (this._touchDestArriveTimer <= 0) {
+        this._touchDestArriveTimer = null;
+        if (!this.moving && this.autoPath.length === 0 && !this.autoInteractTarget) {
+          this.touchDestination = null;
+        }
+      }
     }
 
     this.refreshRarePatches(profile, dt);
@@ -1709,9 +1871,53 @@ export class OverworldEngine {
     }
   }
 
+  _pushRenderActor(kind, sortY, sx, sy, npc = null, rival = null, lead = null) {
+    const idx = this._renderActors.length;
+    let slot = this._actorPool[idx];
+    if (!slot) {
+      slot = { kind, sortY, sx, sy, npc, rival, lead };
+      this._actorPool[idx] = slot;
+    } else {
+      slot.kind = kind;
+      slot.sortY = sortY;
+      slot.sx = sx;
+      slot.sy = sy;
+      slot.npc = npc;
+      slot.rival = rival;
+      slot.lead = lead;
+    }
+    this._renderActors.push(slot);
+  }
+
+  _getResolvedTrainerLookCached(trainerId, appearance = null) {
+    const styleId = appearance?.styleId ?? null;
+    const accessory = appearance?.accessory ?? null;
+    const aura = appearance?.aura ?? null;
+    const cape = Boolean(appearance?.cape);
+    if (
+      this._cachedTrainerLook &&
+      this._lookTrainerId === trainerId &&
+      this._lookStyleId === styleId &&
+      this._lookAccessory === accessory &&
+      this._lookAura === aura &&
+      this._lookCape === cape
+    ) {
+      return this._cachedTrainerLook;
+    }
+    const resolved = getResolvedTrainerLook(trainerId, appearance);
+    this._lookTrainerId = trainerId;
+    this._lookStyleId = styleId;
+    this._lookAccessory = accessory;
+    this._lookAura = aura;
+    this._lookCape = cape;
+    this._cachedTrainerLook = resolved;
+    return resolved;
+  }
+
   render(nowMs) {
     const ctx = this.ctx;
     if (!ctx) return;
+    ctx.setTransform?.(1, 0, 0, 1, 0, 0);
     ctx.imageSmoothingEnabled = false;
 
     const profile = this.getProfile();
@@ -1722,22 +1928,25 @@ export class OverworldEngine {
     }
 
     if (this.active || this.followerInitialized) {
-      this.syncFollower();
+      this.syncFollower(false);
     }
 
-    const { px, py, camX, camY } = this._getCameraPosition(profile);
+    const cam = this._getCameraPosition(profile, this._camOut);
+    const { px, py, camX, camY } = cam;
+    const ts = this.tileSize;
 
     ctx.fillStyle = '#0f172a';
     ctx.fillRect(0, 0, this.viewW, this.viewH);
 
-    const startCol = Math.max(0, Math.floor(camX / this.tileSize));
-    const endCol = Math.min(WORLD_COLS - 1, Math.ceil((camX + this.viewW) / this.tileSize));
-    const startRow = Math.max(0, Math.floor(camY / this.tileSize));
-    const endRow = Math.min(WORLD_ROWS - 1, Math.ceil((camY + this.viewH) / this.tileSize));
+    const startCol = Math.max(0, Math.floor(camX / ts));
+    const endCol = Math.min(WORLD_COLS - 1, Math.ceil((camX + this.viewW) / ts));
+    const startRow = Math.max(0, Math.floor(camY / ts));
+    const endRow = Math.min(WORLD_ROWS - 1, Math.ceil((camY + this.viewH) / ts));
 
     for (let row = startRow; row <= endRow; row++) {
+      const sy = Math.round(row * ts - camY);
       for (let col = startCol; col <= endCol; col++) {
-        this.drawTile(ctx, col, row, col * this.tileSize - camX, row * this.tileSize - camY, nowMs, profile);
+        this.drawTile(ctx, col, row, Math.round(col * ts - camX), sy, nowMs, profile);
       }
     }
 
@@ -1748,16 +1957,17 @@ export class OverworldEngine {
     this.drawTouchWayfinding(ctx, camX, camY, px, py, nowMs, profile, false);
 
     // Draw glowing rare-spawn / discovery nodes on encounter tiles
-    for (const patch of this.rarePatches) {
+    for (let i = 0; i < this.rarePatches.length; i++) {
+      const patch = this.rarePatches[i];
       if (patch.x < startCol || patch.x > endCol || patch.y < startRow || patch.y > endRow) continue;
-      this.drawRarePatchOverlay(ctx, patch.x * this.tileSize - camX, patch.y * this.tileSize - camY, nowMs, patch.kind);
+      this.drawRarePatchOverlay(ctx, Math.round(patch.x * ts - camX), Math.round(patch.y * ts - camY), nowMs, patch.kind);
     }
 
     // Draw environmental landmarks
-    for (const [key, landmark] of Object.entries(LANDMARKS)) {
-      const [lx, ly] = key.split(',').map(Number);
-      if (lx < startCol || lx > endCol || ly < startRow || ly > endRow) continue;
-      this.drawLandmark(ctx, lx * this.tileSize - camX, ly * this.tileSize - camY, landmark, nowMs);
+    for (let i = 0; i < LANDMARK_ENTRIES.length; i++) {
+      const entry = LANDMARK_ENTRIES[i];
+      if (entry.x < startCol || entry.x > endCol || entry.y < startRow || entry.y > endRow) continue;
+      this.drawLandmark(ctx, Math.round(entry.x * ts - camX), Math.round(entry.y * ts - camY), entry.landmark, nowMs);
     }
 
     // Draw Secret Starlight Sky-Hop Arcade Cabinet
@@ -1770,8 +1980,8 @@ export class OverworldEngine {
     ) {
       this.drawSecretArcadeCabinet(
         ctx,
-        SECRET_ARCADE_SPOT.x * this.tileSize - camX,
-        SECRET_ARCADE_SPOT.y * this.tileSize - camY,
+        Math.round(SECRET_ARCADE_SPOT.x * ts - camX),
+        Math.round(SECRET_ARCADE_SPOT.y * ts - camY),
         nowMs,
         profile,
       );
@@ -1821,36 +2031,20 @@ export class OverworldEngine {
       ctx.restore();
     }
 
-    // Collect visible NPCs, rivals, follower & player for clean Y-sorted rendering
-    const actors = [];
-    for (const [key, npc] of Object.entries(NPCS)) {
-      const [nx, ny] = key.split(',').map(Number);
-      if (nx < startCol - 1 || nx > endCol + 1 || ny < startRow - 1 || ny > endRow + 1) continue;
-      actors.push({
-        kind: 'npc',
-        sortY: ny,
-        sx: nx * this.tileSize - camX,
-        sy: ny * this.tileSize - camY,
-        npc,
-      });
+    // Collect visible NPCs, rivals, follower & player into pooled list for zero-alloc Y-sorted rendering
+    const actors = this._renderActors;
+    actors.length = 0;
+    for (let i = 0; i < NPC_ENTRIES.length; i++) {
+      const entry = NPC_ENTRIES[i];
+      if (entry.x < startCol - 1 || entry.x > endCol + 1 || entry.y < startRow - 1 || entry.y > endRow + 1) continue;
+      this._pushRenderActor('npc', entry.y, Math.round(entry.x * ts - camX), Math.round(entry.y * ts - camY), entry.npc, null, null);
     }
-    for (const [key, rival] of Object.entries(RIVAL_TRAINERS)) {
-      const [rx, ry] = key.split(',').map(Number);
-      if (rx < startCol - 1 || rx > endCol + 1 || ry < startRow - 1 || ry > endRow + 1) continue;
-      actors.push({
-        kind: 'rival',
-        sortY: ry,
-        sx: rx * this.tileSize - camX,
-        sy: ry * this.tileSize - camY,
-        rival,
-      });
+    for (let i = 0; i < RIVAL_ENTRIES.length; i++) {
+      const entry = RIVAL_ENTRIES[i];
+      if (entry.x < startCol - 1 || entry.x > endCol + 1 || entry.y < startRow - 1 || entry.y > endRow + 1) continue;
+      this._pushRenderActor('rival', entry.y, Math.round(entry.x * ts - camX), Math.round(entry.y * ts - camY), null, entry.rival, null);
     }
-    actors.push({
-      kind: 'player',
-      sortY: py,
-      sx: Math.round(px * this.tileSize - camX),
-      sy: Math.round(py * this.tileSize - camY),
-    });
+    this._pushRenderActor('player', py, Math.round(px * ts - camX), Math.round(py * ts - camY), null, null, null);
 
     const lead = profile.team?.[0] || null;
     if (lead) {
@@ -1861,18 +2055,13 @@ export class OverworldEngine {
       const fy = followerActiveMove
         ? this.followerStartY + (this.followerTargetY - this.followerStartY) * this.moveProgress
         : this.followerY;
-      actors.push({
-        kind: 'follower',
-        sortY: fy - 0.001,
-        sx: Math.round(fx * this.tileSize - camX),
-        sy: Math.round(fy * this.tileSize - camY),
-        lead,
-      });
+      this._pushRenderActor('follower', fy - 0.001, Math.round(fx * ts - camX), Math.round(fy * ts - camY), null, null, lead);
     }
 
-    actors.sort((a, b) => a.sortY - b.sortY);
+    actors.sort(sortActorsByY);
 
-    for (const actor of actors) {
+    for (let i = 0; i < actors.length; i++) {
+      const actor = actors[i];
       if (actor.kind === 'player') {
         this.drawPlayer(ctx, actor.sx, actor.sy, profile.trainerId, profile.pos.dir, nowMs, profile.appearance);
       } else if (actor.kind === 'follower') {
@@ -1891,7 +2080,8 @@ export class OverworldEngine {
     this.drawTouchWayfinding(ctx, camX, camY, px, py, nowMs, profile, true);
 
     // Draw particles
-    for (const p of this.particles) {
+    for (let i = 0; i < this.particles.length; i++) {
+      const p = this.particles[i];
       const alpha = Math.max(0, 1 - p.life / p.maxLife);
       ctx.globalAlpha = alpha;
       ctx.fillStyle = p.color;
@@ -1905,37 +2095,44 @@ export class OverworldEngine {
   drawStepRipples(ctx, camX, camY) {
     if (!this.ripples.length) return;
     ctx.save();
-    for (const r of this.ripples) {
+    for (let i = 0; i < this.ripples.length; i++) {
+      const r = this.ripples[i];
       const progress = Math.min(1, r.life / r.maxLife);
       const alpha = Math.max(0, 1 - progress);
-      const cx = r.x * this.tileSize + 16 - camX;
-      const cy = r.y * this.tileSize + 24 - camY;
+      const cx = Math.round(r.x * this.tileSize + 16 - camX);
+      const cy = Math.round(r.y * this.tileSize + 24 - camY);
       if (r.kind === 'water') {
-        ctx.strokeStyle = `rgba(224, 242, 254, ${(alpha * 0.85).toFixed(3)})`;
+        ctx.globalAlpha = alpha * 0.85;
+        ctx.strokeStyle = '#e0f2fe';
         ctx.lineWidth = 1.4;
         ctx.beginPath();
         ctx.ellipse(cx, cy, 4 + progress * 9, 2 + progress * 4, 0, 0, Math.PI * 2);
         ctx.stroke();
         if (progress > 0.25) {
-          ctx.strokeStyle = `rgba(103, 232, 249, ${(alpha * 0.65).toFixed(3)})`;
+          ctx.globalAlpha = alpha * 0.65;
+          ctx.strokeStyle = '#67e8f9';
           ctx.beginPath();
           ctx.ellipse(cx, cy, 2 + progress * 5, 1 + progress * 2.2, 0, 0, Math.PI * 2);
           ctx.stroke();
         }
       } else if (r.kind === 'sand') {
-        ctx.fillStyle = `rgba(146, 64, 14, ${(alpha * 0.36).toFixed(3)})`;
-        ctx.fillRect(Math.round(cx - 5), Math.round(cy - 1), 3, 2);
-        ctx.fillRect(Math.round(cx + 2), Math.round(cy + 1), 3, 2);
-        ctx.strokeStyle = `rgba(254, 240, 138, ${(alpha * 0.55).toFixed(3)})`;
+        ctx.globalAlpha = alpha * 0.36;
+        ctx.fillStyle = '#92400e';
+        ctx.fillRect(cx - 5, cy - 1, 3, 2);
+        ctx.fillRect(cx + 2, cy + 1, 3, 2);
+        ctx.globalAlpha = alpha * 0.55;
+        ctx.strokeStyle = '#fef08a';
         ctx.lineWidth = 1;
         ctx.beginPath();
         ctx.ellipse(cx, cy + 1, 4 + progress * 5, 2 + progress * 2, 0, 0, Math.PI * 2);
         ctx.stroke();
       } else {
-        ctx.fillStyle = `rgba(100, 116, 139, ${(alpha * 0.4).toFixed(3)})`;
-        ctx.fillRect(Math.round(cx - 5), Math.round(cy - 1), 3, 2);
-        ctx.fillRect(Math.round(cx + 2), Math.round(cy + 1), 3, 2);
-        ctx.strokeStyle = `rgba(248, 250, 252, ${(alpha * 0.72).toFixed(3)})`;
+        ctx.globalAlpha = alpha * 0.4;
+        ctx.fillStyle = '#64748b';
+        ctx.fillRect(cx - 5, cy - 1, 3, 2);
+        ctx.fillRect(cx + 2, cy + 1, 3, 2);
+        ctx.globalAlpha = alpha * 0.72;
+        ctx.strokeStyle = '#f8fafc';
         ctx.lineWidth = 1;
         ctx.beginPath();
         ctx.ellipse(cx, cy + 1, 5 + progress * 5, 2.5 + progress * 2, 0, 0, Math.PI * 2);
@@ -1947,26 +2144,31 @@ export class OverworldEngine {
 
   drawBiomeWeather(ctx, biomeId, nowMs) {
     ctx.save();
-    if (biomeId === 'peak' || biomeId === 'sanctum' || biomeId === 'rift' || biomeId === 'crater' || biomeId === 'faeveldt') {
+    const bandColors = AURORA_BAND_COLORS[biomeId];
+    if (bandColors) {
       // Soft dancing northern aurora ribbons (or cosmic/Terastal/pastel ribbons)
-      const bandColors = biomeId === 'crater'
-        ? ['rgba(56, 189, 248, 0.1)', 'rgba(244, 114, 182, 0.09)', 'rgba(250, 204, 21, 0.08)']
-        : biomeId === 'faeveldt'
-          ? ['rgba(249, 168, 212, 0.09)', 'rgba(192, 132, 252, 0.085)', 'rgba(167, 243, 208, 0.075)']
-          : biomeId === 'rift'
-            ? ['rgba(232, 121, 249, 0.095)', 'rgba(56, 189, 248, 0.085)', 'rgba(250, 204, 21, 0.07)']
-            : biomeId === 'sanctum'
-              ? ['rgba(167, 139, 250, 0.095)', 'rgba(103, 232, 249, 0.085)', 'rgba(250, 204, 21, 0.065)']
-              : ['rgba(56, 189, 248, 0.085)', 'rgba(52, 211, 153, 0.09)', 'rgba(192, 132, 252, 0.08)'];
+      const canGrad = typeof ctx.createLinearGradient === 'function';
+      if (
+        canGrad &&
+        (!this._auroraGrads || this._auroraGradBiome !== biomeId || this._auroraGradW !== this.viewW || this._auroraGradCtx !== ctx)
+      ) {
+        this._auroraGrads = [];
+        for (let b = 0; b < bandColors.length; b++) {
+          const grad = ctx.createLinearGradient(0, 0, this.viewW, 0);
+          grad.addColorStop(0, 'rgba(56, 189, 248, 0)');
+          grad.addColorStop(0.3 + b * 0.1, bandColors[b]);
+          grad.addColorStop(0.75, bandColors[(b + 1) % bandColors.length]);
+          grad.addColorStop(1, 'rgba(192, 132, 252, 0)');
+          this._auroraGrads.push(grad);
+        }
+        this._auroraGradBiome = biomeId;
+        this._auroraGradW = this.viewW;
+        this._auroraGradCtx = ctx;
+      }
       for (let b = 0; b < bandColors.length; b++) {
         const waveY = 14 + b * 14 + Math.sin(nowMs * 0.0014 + b * 1.7) * 8;
         const shiftX = Math.sin(nowMs * 0.0009 + b * 2.1) * 28;
-        const grad = ctx.createLinearGradient(0, waveY - 12, this.viewW, waveY + 26);
-        grad.addColorStop(0, 'rgba(56, 189, 248, 0)');
-        grad.addColorStop(0.3 + b * 0.1, bandColors[b]);
-        grad.addColorStop(0.75, bandColors[(b + 1) % bandColors.length]);
-        grad.addColorStop(1, 'rgba(192, 132, 252, 0)');
-        ctx.fillStyle = grad;
+        ctx.fillStyle = canGrad ? this._auroraGrads[b] : bandColors[b];
         ctx.beginPath();
         ctx.moveTo(0, waveY + 8);
         ctx.quadraticCurveTo(this.viewW * 0.35 + shiftX, waveY - 14, this.viewW * 0.7, waveY + 12);
@@ -2305,16 +2507,15 @@ export class OverworldEngine {
   }
 
   drawTile(ctx, tx, ty, sx, sy, nowMs, profile) {
+    sx = Math.round(sx);
+    sy = Math.round(sy);
     const tile = WORLD_MAP[ty][tx];
     const ts = this.tileSize;
     const h = hash2d(tx, ty);
     const tileBiomeId = getBiomeAt(tx, ty).id;
 
-    // Base ground layer
-    if (tile === TILE.CAVE_WALL || tile === TILE.CAVE_FLOOR || tile === TILE.CAVE_PATH) {
-      ctx.fillStyle = '#2b2640';
-      ctx.fillRect(sx, sy, ts, ts);
-    } else if (tile === TILE.SAND || tile === TILE.SHALLOW_WATER || tile === TILE.WATER || tile === TILE.BRIDGE) {
+    // Base ground layer (only for tiles that don't fill the full ts x ts bounds in their switch case)
+    if (tile === TILE.SHALLOW_WATER) {
       ctx.fillStyle = tileBiomeId === 'volcano'
         ? '#3b1f1e'
         : tileBiomeId === 'marsh'
@@ -2323,46 +2524,34 @@ export class OverworldEngine {
             ? '#1e1b4b'
             : '#f3d999';
       ctx.fillRect(sx, sy, ts, ts);
-    } else if (tile === TILE.LAVA || tile === TILE.VOLCANO_FLOOR || tile === TILE.VOLCANO_PATH) {
-      ctx.fillStyle = '#3b1f1e';
-      ctx.fillRect(sx, sy, ts, ts);
-    } else if (tile === TILE.ICE_WALL || tile === TILE.SNOW_GRASS || tile === TILE.SNOW_PATH) {
+    } else if (tile === TILE.SNOW_GRASS) {
       ctx.fillStyle = '#dbeafe';
       ctx.fillRect(sx, sy, ts, ts);
-    } else if (tile === TILE.DUNE_SAND || tile === TILE.DUNE_PATH || tile === TILE.SANDSTONE_WALL) {
-      ctx.fillStyle = '#d99b42';
-      ctx.fillRect(sx, sy, ts, ts);
-    } else if (tile === TILE.MARSH_GRASS || tile === TILE.MARSH_PATH || tile === TILE.MARSH_WALL) {
+    } else if (tile === TILE.MARSH_GRASS || tile === TILE.MARSH_WALL) {
       ctx.fillStyle = '#114239';
       ctx.fillRect(sx, sy, ts, ts);
-    } else if (tile === TILE.SANCTUM_FLOOR || tile === TILE.SANCTUM_PATH || tile === TILE.SANCTUM_WALL) {
-      ctx.fillStyle = '#1a1642';
-      ctx.fillRect(sx, sy, ts, ts);
-    } else if (tile === TILE.CANYON_GRASS || tile === TILE.CANYON_PATH || tile === TILE.CANYON_WALL) {
+    } else if (tile === TILE.CANYON_GRASS) {
       ctx.fillStyle = '#b9772c';
       ctx.fillRect(sx, sy, ts, ts);
-    } else if (tile === TILE.REEF_WATER || tile === TILE.REEF_PATH || tile === TILE.REEF_WALL) {
-      ctx.fillStyle = '#073c56';
-      ctx.fillRect(sx, sy, ts, ts);
-    } else if (tile === TILE.RUINS_FLOOR || tile === TILE.RUINS_PATH || tile === TILE.RUINS_WALL) {
-      ctx.fillStyle = '#4a3520';
-      ctx.fillRect(sx, sy, ts, ts);
-    } else if (tile === TILE.RIFT_FLOOR || tile === TILE.RIFT_PATH || tile === TILE.RIFT_WALL) {
-      ctx.fillStyle = '#130924';
-      ctx.fillRect(sx, sy, ts, ts);
-    } else if (tile === TILE.FAE_GRASS || tile === TILE.FAE_PATH || tile === TILE.FAE_WALL) {
+    } else if (tile === TILE.FAE_GRASS || tile === TILE.FAE_WALL) {
       ctx.fillStyle = '#382a54';
       ctx.fillRect(sx, sy, ts, ts);
-    } else if (tile === TILE.ATOLL_SAND || tile === TILE.ATOLL_PATH || tile === TILE.ATOLL_WALL) {
-      ctx.fillStyle = '#e7b36a';
-      ctx.fillRect(sx, sy, ts, ts);
-    } else if (tile === TILE.CROWN_GRASS || tile === TILE.CROWN_PATH || tile === TILE.CROWN_WALL) {
+    } else if (tile === TILE.CROWN_GRASS) {
       ctx.fillStyle = '#293548';
       ctx.fillRect(sx, sy, ts, ts);
-    } else if (tile === TILE.TERA_FLOOR || tile === TILE.TERA_PATH || tile === TILE.TERA_WALL) {
-      ctx.fillStyle = '#0c1c33';
-      ctx.fillRect(sx, sy, ts, ts);
-    } else {
+    } else if (
+      tile === TILE.GRASS ||
+      tile === TILE.TALL_GRASS ||
+      tile === TILE.TREE ||
+      tile === TILE.FLOWER ||
+      tile === TILE.SIGN ||
+      tile === TILE.SHRINE ||
+      tile === TILE.CHEST ||
+      tile === TILE.RUNE_TRAIL ||
+      tile === TILE.LANTERN ||
+      tile === TILE.GROVE_GRASS ||
+      (tile === TILE.HEAL && tileBiomeId !== 'village')
+    ) {
       this.drawBaseGround(ctx, sx, sy, ts, h, tileBiomeId);
     }
 
@@ -2379,13 +2568,14 @@ export class OverworldEngine {
       case TILE.TALL_GRASS: {
         ctx.fillStyle = '#2d8a47';
         ctx.fillRect(sx + 1, sy + 1, ts - 2, ts - 2);
-        const sway = Math.sin(nowMs * 0.0045 + tx * 0.7 + ty * 0.5) * 1.8;
-        const rustle = this.rustleTile && this.rustleTile.x === tx && this.rustleTile.y === ty ? 3.2 : 0;
+        const sway = Math.round(Math.sin(nowMs * 0.0045 + tx * 0.7 + ty * 0.5) * 1.8);
+        const sway2 = Math.round(sway * 0.7);
+        const rustle = this.rustleTile && this.rustleTile.x === tx && this.rustleTile.y === ty ? 3 : 0;
         ctx.fillStyle = '#4ade80';
         for (let i = 0; i < 4; i++) {
           const bx = sx + 4 + i * 7;
           ctx.fillRect(bx + sway + (i % 2 ? rustle : -rustle), sy + 6, 4, 10);
-          ctx.fillRect(bx - sway * 0.7, sy + 18, 4, 10);
+          ctx.fillRect(bx - sway2, sy + 18, 4, 10);
         }
         ctx.fillStyle = '#166534';
         ctx.fillRect(sx + 3, sy + 15, ts - 6, 2);
@@ -2419,7 +2609,7 @@ export class OverworldEngine {
       case TILE.WATER: {
         ctx.fillStyle = '#0284c7';
         ctx.fillRect(sx, sy, ts, ts);
-        const wave = Math.sin(nowMs * 0.004 + tx * 0.8 + ty * 0.6) * 2.5;
+        const wave = Math.round(Math.sin(nowMs * 0.004 + tx * 0.8 + ty * 0.6) * 2.5);
         ctx.fillStyle = '#38bdf8';
         ctx.fillRect(sx + 4 + wave, sy + 9, 10, 3);
         ctx.fillRect(sx + 15 - wave, sy + 22, 11, 3);
@@ -2446,7 +2636,7 @@ export class OverworldEngine {
         ctx.fillRect(sx + 2, sy + 2, ts - 4, ts - 4);
         ctx.fillStyle = '#67e8f9';
         ctx.fillRect(sx + 4, sy + 4, ts - 8, ts - 8);
-        const shimmer = Math.sin(nowMs * 0.005 + tx * 1.1 + ty) * 2;
+        const shimmer = Math.round(Math.sin(nowMs * 0.005 + tx * 1.1 + ty) * 2);
         ctx.fillStyle = '#ecfeff';
         ctx.fillRect(sx + 8 + shimmer, sy + 11, 10, 2);
         ctx.fillRect(sx + 12 - shimmer, sy + 21, 9, 2);
@@ -2545,11 +2735,12 @@ export class OverworldEngine {
       case TILE.LAVA: {
         ctx.fillStyle = '#b91c1c';
         ctx.fillRect(sx, sy, ts, ts);
-        const flow = Math.sin(nowMs * 0.0038 + tx * 0.9 + ty * 0.7) * 3;
+        const flow = Math.round(Math.sin(nowMs * 0.0038 + tx * 0.9 + ty * 0.7) * 3);
+        const halfFlow = Math.round(flow * 0.5);
         const glow = 0.7 + 0.3 * Math.sin(nowMs * 0.005 + tx + ty * 1.3);
         ctx.fillStyle = '#ea580c';
-        ctx.fillRect(sx + 3 + flow * 0.5, sy + 5, 13, 6);
-        ctx.fillRect(sx + 13 - flow * 0.5, sy + 19, 14, 6);
+        ctx.fillRect(sx + 3 + halfFlow, sy + 5, 13, 6);
+        ctx.fillRect(sx + 13 - halfFlow, sy + 19, 14, 6);
         ctx.globalAlpha = glow;
         ctx.fillStyle = '#fb923c';
         ctx.fillRect(sx + 5 + flow, sy + 7, 9, 3);
@@ -2604,13 +2795,14 @@ export class OverworldEngine {
       case TILE.SNOW_GRASS: {
         ctx.fillStyle = '#bae6fd';
         ctx.fillRect(sx + 1, sy + 1, ts - 2, ts - 2);
-        const sway = Math.sin(nowMs * 0.004 + tx * 0.8 + ty * 0.6) * 1.5;
-        const rustle = this.rustleTile && this.rustleTile.x === tx && this.rustleTile.y === ty ? 3.0 : 0;
+        const sway = Math.round(Math.sin(nowMs * 0.004 + tx * 0.8 + ty * 0.6) * 1.5);
+        const sway2 = Math.round(sway * 0.7);
+        const rustle = this.rustleTile && this.rustleTile.x === tx && this.rustleTile.y === ty ? 3 : 0;
         ctx.fillStyle = '#38bdf8';
         for (let i = 0; i < 4; i++) {
           const bx = sx + 4 + i * 7;
           ctx.fillRect(bx + sway + (i % 2 ? rustle : -rustle), sy + 6, 4, 9);
-          ctx.fillRect(bx - sway * 0.7, sy + 18, 4, 9);
+          ctx.fillRect(bx - sway2, sy + 18, 4, 9);
         }
         ctx.fillStyle = '#f8fafc';
         ctx.fillRect(sx + 5, sy + 5, 3, 3);
@@ -2628,7 +2820,6 @@ export class OverworldEngine {
       }
 
       case TILE.RUNE_TRAIL: {
-        this.drawBaseGround(ctx, sx, sy, ts, h, tileBiomeId);
         ctx.fillStyle = '#334155';
         ctx.fillRect(sx + 3, sy + 3, ts - 6, ts - 6);
         ctx.fillStyle = '#475569';
@@ -2659,9 +2850,7 @@ export class OverworldEngine {
                               ? '#fb923c'
                               : tileBiomeId === 'highlands'
                                 ? '#cbd5e1'
-                                : tileBiomeId === 'crater'
-                                  ? '#38bdf8'
-                                  : '#38bdf8';
+                                : '#38bdf8';
         ctx.fillRect(sx + 11, sy + 14, 10, 4);
         ctx.fillRect(sx + 14, sy + 11, 4, 10);
         ctx.fillStyle = '#fef08a';
@@ -2671,14 +2860,13 @@ export class OverworldEngine {
       }
 
       case TILE.LANTERN: {
-        this.drawBaseGround(ctx, sx, sy, ts, h, tileBiomeId);
         const haloPulse = 0.24 + 0.12 * Math.sin(nowMs * 0.005 + tx * 0.9 + ty);
-        ctx.save();
-        ctx.fillStyle = `rgba(250, 204, 21, ${haloPulse.toFixed(3)})`;
+        ctx.globalAlpha = haloPulse;
+        ctx.fillStyle = '#facc15';
         ctx.beginPath();
         ctx.arc(sx + 16, sy + 13, 14, 0, Math.PI * 2);
         ctx.fill();
-        ctx.restore();
+        ctx.globalAlpha = 1;
         // Stone base & iron post
         ctx.fillStyle = '#334155';
         ctx.fillRect(sx + 11, sy + 24, 10, 6);
@@ -2709,7 +2897,13 @@ export class OverworldEngine {
         ctx.fillRect(sx, sy, ts, ts);
         ctx.fillStyle = '#cbd5e1';
         ctx.fillRect(sx, sy + ts - 4, ts, 4);
-        if (tx === 4 || tx === 13) {
+        if (SECRET_ARCADE_SPOT && tx === SECRET_ARCADE_SPOT.x && ty === SECRET_ARCADE_SPOT.y) {
+          // Cozy timber alcove recess behind the Secret Starlight Arcade Cabinet
+          ctx.fillStyle = '#78350f';
+          ctx.fillRect(sx + 3, sy + 1, ts - 6, ts - 1);
+          ctx.fillStyle = '#fef3c7';
+          ctx.fillRect(sx + 4, sy + 2, ts - 8, ts - 6);
+        } else if (tx === 4 || tx === 13) {
           ctx.fillStyle = '#78350f';
           ctx.fillRect(sx + 9, sy + 8, 14, 24);
           ctx.fillStyle = '#fbbf24';
@@ -2724,7 +2918,7 @@ export class OverworldEngine {
       }
 
       case TILE.FLOWER: {
-        const sway = Math.sin(nowMs * 0.005 + tx) * 1.2;
+        const sway = Math.round(Math.sin(nowMs * 0.005 + tx) * 1.2);
         ctx.fillStyle = '#f472b6';
         ctx.fillRect(sx + 7 + sway, sy + 8, 6, 6);
         ctx.fillStyle = '#facc15';
@@ -2737,7 +2931,6 @@ export class OverworldEngine {
       }
 
       case TILE.SIGN: {
-        this.drawBaseGround(ctx, sx, sy, ts, h, tileBiomeId);
         ctx.fillStyle = '#78350f';
         ctx.fillRect(sx + 14, sy + 18, 4, 11);
         ctx.fillStyle = '#b45309';
@@ -2752,8 +2945,6 @@ export class OverworldEngine {
         if (tileBiomeId === 'village') {
           ctx.fillStyle = '#e7c68b';
           ctx.fillRect(sx, sy, ts, ts);
-        } else {
-          this.drawBaseGround(ctx, sx, sy, ts, h, tileBiomeId);
         }
         const glow = 0.72 + Math.sin(nowMs * 0.006) * 0.25;
         ctx.fillStyle = '#06b6d4';
@@ -2773,14 +2964,13 @@ export class OverworldEngine {
       }
 
       case TILE.SHRINE: {
-        const shrine = SHRINES[`${tx},${ty}`];
+        const shrine = SHRINE_BY_TILE_INDEX.get(ty * WORLD_COLS + tx);
         const cleared = shrine && profile.shrinesCleared.includes(shrine.id);
-        this.drawBaseGround(ctx, sx, sy, ts, h, tileBiomeId);
         ctx.fillStyle = '#475569';
         ctx.fillRect(sx + 4, sy + 18, 24, 12);
         ctx.fillStyle = '#94a3b8';
         ctx.fillRect(sx + 7, sy + 14, 18, 6);
-        const bob = Math.sin(nowMs * 0.006) * 2.5;
+        const bob = Math.round(Math.sin(nowMs * 0.006) * 2.5);
         ctx.fillStyle = cleared
           ? '#facc15'
           : shrine?.id === 'thunder_shrine'
@@ -2871,9 +3061,8 @@ export class OverworldEngine {
       }
 
       case TILE.CHEST: {
-        const chest = CHESTS[`${tx},${ty}`];
+        const chest = CHEST_BY_TILE_INDEX.get(ty * WORLD_COLS + tx);
         const opened = chest && profile.chestsOpened.includes(chest.id);
-        this.drawBaseGround(ctx, sx, sy, ts, h, tileBiomeId);
         ctx.fillStyle = opened ? '#64748b' : '#b45309';
         ctx.fillRect(sx + 6, sy + 10, 20, 16);
         ctx.fillStyle = opened ? '#94a3b8' : '#f59e0b';
@@ -2886,22 +3075,24 @@ export class OverworldEngine {
       case TILE.GROVE_GRASS: {
         ctx.fillStyle = '#157056';
         ctx.fillRect(sx + 1, sy + 1, ts - 2, ts - 2);
-        const sway = Math.sin(nowMs * 0.0042 + tx * 0.75 + ty * 0.55) * 1.7;
-        const rustle = this.rustleTile && this.rustleTile.x === tx && this.rustleTile.y === ty ? 3.2 : 0;
+        const sway = Math.round(Math.sin(nowMs * 0.0042 + tx * 0.75 + ty * 0.55) * 1.7);
+        const sway2 = Math.round(sway * 0.7);
+        const swaySmall = Math.round(sway * 0.4);
+        const rustle = this.rustleTile && this.rustleTile.x === tx && this.rustleTile.y === ty ? 3 : 0;
         ctx.fillStyle = '#34d399';
         for (let i = 0; i < 4; i++) {
           const bx = sx + 4 + i * 7;
           ctx.fillRect(bx + sway + (i % 2 ? rustle : -rustle), sy + 6, 4, 9);
-          ctx.fillRect(bx - sway * 0.7, sy + 18, 4, 9);
+          ctx.fillRect(bx - sway2, sy + 18, 4, 9);
         }
         ctx.fillStyle = '#065f46';
         ctx.fillRect(sx + 3, sy + 15, ts - 6, 2);
         ctx.fillStyle = h > 0.45 ? '#f9a8d4' : '#fbcfe8';
-        ctx.fillRect(sx + 6 + sway * 0.4, sy + 8, 3, 3);
-        ctx.fillRect(sx + 20 - sway * 0.4, sy + 20, 3, 3);
+        ctx.fillRect(sx + 6 + swaySmall, sy + 8, 3, 3);
+        ctx.fillRect(sx + 20 - swaySmall, sy + 20, 3, 3);
         ctx.fillStyle = '#fef08a';
-        ctx.fillRect(sx + 7 + sway * 0.4, sy + 9, 1, 1);
-        ctx.fillRect(sx + 21 - sway * 0.4, sy + 21, 1, 1);
+        ctx.fillRect(sx + 7 + swaySmall, sy + 9, 1, 1);
+        ctx.fillRect(sx + 21 - swaySmall, sy + 21, 1, 1);
         break;
       }
 
@@ -2915,10 +3106,11 @@ export class OverworldEngine {
         ctx.fillRect(sx + 17, sy + 1, 14, 14);
         ctx.fillRect(sx + 1, sy + 17, 14, 14);
         // Subtle starlight seam glint
-        const glint = 0.35 + 0.3 * Math.sin(nowMs * 0.004 + tx * 0.9 + ty * 1.1);
-        ctx.fillStyle = `rgba(103, 232, 249, ${glint.toFixed(2)})`;
+        ctx.globalAlpha = 0.35 + 0.3 * Math.sin(nowMs * 0.004 + tx * 0.9 + ty * 1.1);
+        ctx.fillStyle = '#67e8f9';
         ctx.fillRect(sx + 15, sy + 3, 2, 26);
         ctx.fillRect(sx + 3, sy + 15, 26, 2);
+        ctx.globalAlpha = 1;
         if (h > 0.65) {
           ctx.fillStyle = '#f5d0fe';
           ctx.fillRect(sx + 6, sy + 7, 3, 2);
@@ -2933,8 +3125,8 @@ export class OverworldEngine {
         // Sunlit golden dune ripples (desert wild encounter tile)
         ctx.fillStyle = h > 0.5 ? '#e5a93b' : '#dc9b2e';
         ctx.fillRect(sx, sy, ts, ts);
-        const shift = Math.sin(nowMs * 0.0035 + tx * 0.7 + ty * 0.4) * 1.4;
-        const rustle = this.rustleTile && this.rustleTile.x === tx && this.rustleTile.y === ty ? 2.8 : 0;
+        const shift = Math.round(Math.sin(nowMs * 0.0035 + tx * 0.7 + ty * 0.4) * 1.4);
+        const rustle = this.rustleTile && this.rustleTile.x === tx && this.rustleTile.y === ty ? 3 : 0;
         ctx.fillStyle = '#c27820';
         ctx.fillRect(sx + 2, sy + 9, 13, 3);
         ctx.fillRect(sx + 16, sy + 21, 13, 3);
@@ -2994,13 +3186,14 @@ export class OverworldEngine {
         // Glowing bioluminescent bayou turf (marsh wild encounter tile)
         ctx.fillStyle = '#0f5247';
         ctx.fillRect(sx + 1, sy + 1, ts - 2, ts - 2);
-        const sway = Math.sin(nowMs * 0.0044 + tx * 0.7 + ty * 0.6) * 1.6;
-        const rustle = this.rustleTile && this.rustleTile.x === tx && this.rustleTile.y === ty ? 3.2 : 0;
+        const sway = Math.round(Math.sin(nowMs * 0.0044 + tx * 0.7 + ty * 0.6) * 1.6);
+        const sway2 = Math.round(sway * 0.7);
+        const rustle = this.rustleTile && this.rustleTile.x === tx && this.rustleTile.y === ty ? 3 : 0;
         ctx.fillStyle = '#2dd4bf';
         for (let i = 0; i < 4; i++) {
           const bx = sx + 4 + i * 7;
           ctx.fillRect(bx + sway + (i % 2 ? rustle : -rustle), sy + 6, 4, 9);
-          ctx.fillRect(bx - sway * 0.7, sy + 18, 4, 9);
+          ctx.fillRect(bx - sway2, sy + 18, 4, 9);
         }
         ctx.fillStyle = '#064e3b';
         ctx.fillRect(sx + 3, sy + 15, ts - 6, 2);
@@ -3088,10 +3281,11 @@ export class OverworldEngine {
         ctx.fillStyle = h > 0.5 ? '#ddd6fe' : '#e2e8f0';
         ctx.fillRect(sx + 17, sy + 1, 14, 14);
         ctx.fillRect(sx + 1, sy + 17, 14, 14);
-        const glint = 0.45 + 0.35 * Math.sin(nowMs * 0.0045 + tx + ty);
-        ctx.fillStyle = `rgba(250, 204, 21, ${glint.toFixed(2)})`;
+        ctx.globalAlpha = 0.45 + 0.35 * Math.sin(nowMs * 0.0045 + tx + ty);
+        ctx.fillStyle = '#facc15';
         ctx.fillRect(sx + 15, sy + 2, 2, 28);
         ctx.fillRect(sx + 2, sy + 15, 28, 2);
+        ctx.globalAlpha = 1;
         break;
       }
 
@@ -3122,18 +3316,19 @@ export class OverworldEngine {
         // Golden savannah grass with swaying ochre blades & static electric sparks
         ctx.fillStyle = h > 0.5 ? '#a16207' : '#854d0e';
         ctx.fillRect(sx + 1, sy + 1, ts - 2, ts - 2);
-        const sway = Math.sin(nowMs * 0.0048 + tx * 0.75 + ty * 0.5) * 1.8;
-        const rustle = this.rustleTile && this.rustleTile.x === tx && this.rustleTile.y === ty ? 3.2 : 0;
+        const sway = Math.round(Math.sin(nowMs * 0.0048 + tx * 0.75 + ty * 0.5) * 1.8);
+        const sway2 = Math.round(sway * 0.7);
+        const rustle = this.rustleTile && this.rustleTile.x === tx && this.rustleTile.y === ty ? 3 : 0;
         ctx.fillStyle = '#eab308';
         for (let i = 0; i < 4; i++) {
           const bx = sx + 4 + i * 7;
           ctx.fillRect(bx + sway + (i % 2 ? rustle : -rustle), sy + 6, 4, 10);
-          ctx.fillRect(bx - sway * 0.7, sy + 18, 4, 10);
+          ctx.fillRect(bx - sway2, sy + 18, 4, 10);
         }
         ctx.fillStyle = '#fde047';
         for (let i = 0; i < 4; i++) {
           const bx = sx + 5 + i * 7;
-          ctx.fillRect(bx + sway * 1.1, sy + 6, 2, 4);
+          ctx.fillRect(bx + sway, sy + 6, 2, 4);
         }
         const spark = 0.35 + 0.65 * Math.sin(nowMs * 0.009 + tx * 1.9 + ty * 1.1);
         if (spark > 0.72) {
@@ -3190,8 +3385,8 @@ export class OverworldEngine {
         ctx.fillRect(sx, sy, ts, ts);
         ctx.fillStyle = '#0284c7';
         ctx.fillRect(sx + 2, sy + 2, ts - 4, ts - 4);
-        const wave = Math.sin(nowMs * 0.0046 + tx * 0.9 + ty * 0.7) * 2.2;
-        const rustle = this.rustleTile && this.rustleTile.x === tx && this.rustleTile.y === ty ? 2.5 : 0;
+        const wave = Math.round(Math.sin(nowMs * 0.0046 + tx * 0.9 + ty * 0.7) * 2.2);
+        const rustle = this.rustleTile && this.rustleTile.x === tx && this.rustleTile.y === ty ? 3 : 0;
         ctx.fillStyle = '#38bdf8';
         ctx.fillRect(sx + 5 + wave + rustle, sy + 8, 10, 3);
         ctx.fillRect(sx + 14 - wave - rustle, sy + 21, 11, 3);
@@ -3333,10 +3528,11 @@ export class OverworldEngine {
         ctx.fillStyle = h > 0.5 ? '#fbcfe8' : '#bae6fd';
         ctx.fillRect(sx + 17, sy + 1, 14, 14);
         ctx.fillRect(sx + 1, sy + 17, 14, 14);
-        const shimmer = 0.55 + 0.4 * Math.sin(nowMs * 0.0055 + tx + ty);
-        ctx.fillStyle = `rgba(232, 121, 249, ${shimmer.toFixed(2)})`;
+        ctx.globalAlpha = 0.55 + 0.4 * Math.sin(nowMs * 0.0055 + tx + ty);
+        ctx.fillStyle = '#e879f9';
         ctx.fillRect(sx + 15, sy + 2, 2, 28);
         ctx.fillRect(sx + 2, sy + 15, 28, 2);
+        ctx.globalAlpha = 1;
         ctx.fillStyle = '#fde047';
         ctx.fillRect(sx + 14, sy + 14, 4, 4);
         break;
@@ -3367,22 +3563,24 @@ export class OverworldEngine {
         // Luminous pastel fae meadow turf with glowing fairy blossoms (faeveldt wild encounter tile)
         ctx.fillStyle = h > 0.5 ? '#352957' : '#2e224d';
         ctx.fillRect(sx + 1, sy + 1, ts - 2, ts - 2);
-        const sway = Math.sin(nowMs * 0.0044 + tx * 0.8 + ty * 0.55) * 1.7;
-        const rustle = this.rustleTile && this.rustleTile.x === tx && this.rustleTile.y === ty ? 3.2 : 0;
+        const sway = Math.round(Math.sin(nowMs * 0.0044 + tx * 0.8 + ty * 0.55) * 1.7);
+        const sway2 = Math.round(sway * 0.7);
+        const swaySmall = Math.round(sway * 0.4);
+        const rustle = this.rustleTile && this.rustleTile.x === tx && this.rustleTile.y === ty ? 3 : 0;
         ctx.fillStyle = '#6ee7b7';
         for (let i = 0; i < 4; i++) {
           const bx = sx + 4 + i * 7;
           ctx.fillRect(bx + sway + (i % 2 ? rustle : -rustle), sy + 6, 4, 9);
-          ctx.fillRect(bx - sway * 0.7, sy + 18, 4, 9);
+          ctx.fillRect(bx - sway2, sy + 18, 4, 9);
         }
         const bloom = 0.6 + 0.4 * Math.sin(nowMs * 0.0055 + tx + ty);
         ctx.globalAlpha = bloom;
         ctx.fillStyle = h > 0.5 ? '#f9a8d4' : '#e879f9';
-        ctx.fillRect(sx + 6 + sway * 0.4, sy + 8, 4, 3);
-        ctx.fillRect(sx + 20 - sway * 0.4, sy + 20, 4, 3);
+        ctx.fillRect(sx + 6 + swaySmall, sy + 8, 4, 3);
+        ctx.fillRect(sx + 20 - swaySmall, sy + 20, 4, 3);
         ctx.fillStyle = '#fef08a';
-        ctx.fillRect(sx + 7 + sway * 0.4, sy + 9, 2, 1);
-        ctx.fillRect(sx + 21 - sway * 0.4, sy + 21, 2, 1);
+        ctx.fillRect(sx + 7 + swaySmall, sy + 9, 2, 1);
+        ctx.fillRect(sx + 21 - swaySmall, sy + 21, 2, 1);
         ctx.globalAlpha = 1;
         break;
       }
@@ -3397,10 +3595,11 @@ export class OverworldEngine {
         ctx.fillStyle = h > 0.5 ? '#f5d0fe' : '#e9d5ff';
         ctx.fillRect(sx + 17, sy + 1, 14, 14);
         ctx.fillRect(sx + 1, sy + 17, 14, 14);
-        const glint = 0.4 + 0.35 * Math.sin(nowMs * 0.0045 + tx + ty);
-        ctx.fillStyle = `rgba(244, 114, 182, ${glint.toFixed(2)})`;
+        ctx.globalAlpha = 0.4 + 0.35 * Math.sin(nowMs * 0.0045 + tx + ty);
+        ctx.fillStyle = '#f472b6';
         ctx.fillRect(sx + 15, sy + 2, 2, 28);
         ctx.fillRect(sx + 2, sy + 15, 28, 2);
+        ctx.globalAlpha = 1;
         break;
       }
 
@@ -3433,8 +3632,8 @@ export class OverworldEngine {
         // Sunlit warm coral Alola beach sand with hibiscus petals (atoll wild encounter tile)
         ctx.fillStyle = h > 0.5 ? '#f5b963' : '#eba94f';
         ctx.fillRect(sx, sy, ts, ts);
-        const shift = Math.sin(nowMs * 0.0038 + tx * 0.7 + ty * 0.5) * 1.4;
-        const rustle = this.rustleTile && this.rustleTile.x === tx && this.rustleTile.y === ty ? 2.8 : 0;
+        const shift = Math.round(Math.sin(nowMs * 0.0038 + tx * 0.7 + ty * 0.5) * 1.4);
+        const rustle = this.rustleTile && this.rustleTile.x === tx && this.rustleTile.y === ty ? 3 : 0;
         ctx.fillStyle = '#d97706';
         ctx.fillRect(sx + 3, sy + 10, 12, 2);
         ctx.fillRect(sx + 17, sy + 22, 12, 2);
@@ -3492,17 +3691,19 @@ export class OverworldEngine {
         // Highland slate-emerald heather turf with silver thistles (highlands wild encounter tile)
         ctx.fillStyle = h > 0.5 ? '#1e4e4a' : '#19423f';
         ctx.fillRect(sx + 1, sy + 1, ts - 2, ts - 2);
-        const sway = Math.sin(nowMs * 0.0046 + tx * 0.75 + ty * 0.5) * 1.7;
-        const rustle = this.rustleTile && this.rustleTile.x === tx && this.rustleTile.y === ty ? 3.2 : 0;
+        const sway = Math.round(Math.sin(nowMs * 0.0046 + tx * 0.75 + ty * 0.5) * 1.7);
+        const sway2 = Math.round(sway * 0.7);
+        const swaySmall = Math.round(sway * 0.4);
+        const rustle = this.rustleTile && this.rustleTile.x === tx && this.rustleTile.y === ty ? 3 : 0;
         ctx.fillStyle = '#2dd4bf';
         for (let i = 0; i < 4; i++) {
           const bx = sx + 4 + i * 7;
           ctx.fillRect(bx + sway + (i % 2 ? rustle : -rustle), sy + 6, 4, 10);
-          ctx.fillRect(bx - sway * 0.7, sy + 18, 4, 10);
+          ctx.fillRect(bx - sway2, sy + 18, 4, 10);
         }
         ctx.fillStyle = h > 0.5 ? '#c084fc' : '#e2e8f0';
-        ctx.fillRect(sx + 6 + sway * 0.4, sy + 7, 3, 3);
-        ctx.fillRect(sx + 21 - sway * 0.4, sy + 19, 3, 3);
+        ctx.fillRect(sx + 6 + swaySmall, sy + 7, 3, 3);
+        ctx.fillRect(sx + 21 - swaySmall, sy + 19, 3, 3);
         break;
       }
 
@@ -3571,10 +3772,11 @@ export class OverworldEngine {
         ctx.fillStyle = h > 0.5 ? '#fbcfe8' : '#fef08a';
         ctx.fillRect(sx + 17, sy + 1, 14, 14);
         ctx.fillRect(sx + 1, sy + 17, 14, 14);
-        const shimmer = 0.55 + 0.4 * Math.sin(nowMs * 0.0055 + tx + ty);
-        ctx.fillStyle = `rgba(56, 189, 248, ${shimmer.toFixed(2)})`;
+        ctx.globalAlpha = 0.55 + 0.4 * Math.sin(nowMs * 0.0055 + tx + ty);
+        ctx.fillStyle = '#38bdf8';
         ctx.fillRect(sx + 15, sy + 2, 2, 28);
         ctx.fillRect(sx + 2, sy + 15, 28, 2);
+        ctx.globalAlpha = 1;
         break;
       }
 
@@ -3605,6 +3807,8 @@ export class OverworldEngine {
   }
 
   drawRarePatchOverlay(ctx, sx, sy, nowMs, kind = 'shimmer') {
+    sx = Math.round(sx);
+    sy = Math.round(sy);
     const ts = this.tileSize;
     const pulse = 0.55 + 0.45 * Math.sin(nowMs * 0.01);
     const aurora = 0.5 + 0.5 * Math.cos(nowMs * 0.007 + sx * 0.05);
@@ -3612,18 +3816,21 @@ export class OverworldEngine {
 
     if (kind === 'starfall') {
       // Sparkling fallen meteor crystal node
-      ctx.fillStyle = `rgba(56, 189, 248, ${(0.12 + aurora * 0.14).toFixed(2)})`;
+      ctx.globalAlpha = 0.12 + aurora * 0.14;
+      ctx.fillStyle = '#38bdf8';
       ctx.beginPath();
       ctx.arc(sx + 16, sy + 16, 13, 0, Math.PI * 2);
       ctx.fill();
 
-      ctx.strokeStyle = `rgba(103, 232, 249, ${(0.6 + pulse * 0.35).toFixed(2)})`;
+      ctx.globalAlpha = 0.6 + pulse * 0.35;
+      ctx.strokeStyle = '#67e8f9';
       ctx.lineWidth = 1.8;
       ctx.beginPath();
       ctx.arc(sx + 16, sy + 16, 11 + pulse * 1.6, 0, Math.PI * 2);
       ctx.stroke();
 
-      const bob = Math.sin(nowMs * 0.0065 + sx * 0.1) * 2.2;
+      ctx.globalAlpha = 1;
+      const bob = Math.round(Math.sin(nowMs * 0.0065 + sx * 0.1) * 2.2);
       ctx.fillStyle = '#0284c7';
       ctx.beginPath();
       ctx.moveTo(sx + 16, sy + 6 + bob);
@@ -3655,22 +3862,24 @@ export class OverworldEngine {
 
     if (kind === 'mystery_cry') {
       // Musical glowing rustle node
-      ctx.fillStyle = `rgba(192, 132, 252, ${(0.14 + aurora * 0.12).toFixed(2)})`;
+      ctx.globalAlpha = 0.14 + aurora * 0.12;
+      ctx.fillStyle = '#c084fc';
       ctx.fillRect(sx + 3, sy + 3, ts - 6, ts - 6);
 
-      ctx.strokeStyle = `rgba(232, 121, 249, ${(0.55 + pulse * 0.4).toFixed(2)})`;
+      ctx.globalAlpha = 0.55 + pulse * 0.4;
+      ctx.strokeStyle = '#e879f9';
       ctx.lineWidth = 2;
       ctx.beginPath();
       ctx.ellipse(sx + 16, sy + 17, 11 + pulse * 1.5, 9 + pulse * 1.2, 0, 0, Math.PI * 2);
       ctx.stroke();
 
+      ctx.globalAlpha = 1;
       // Floating pixel music notes
-      const noteColors = ['#fde047', '#e879f9'];
       for (let i = 0; i < 2; i++) {
         const phase = nowMs * 0.0055 + i * 2.1;
         const nx = Math.round(sx + 10 + i * 11 + Math.sin(phase) * 2);
         const ny = Math.round(sy + 18 - ((phase % 2.4) / 2.4) * 11);
-        ctx.fillStyle = noteColors[i];
+        ctx.fillStyle = MYSTERY_NOTE_COLORS[i];
         ctx.fillRect(nx, ny + 4, 4, 3);
         ctx.fillRect(nx + 3, ny - 2, 2, 7);
         ctx.fillRect(nx + 3, ny - 2, 5, 2);
@@ -3682,25 +3891,28 @@ export class OverworldEngine {
       return;
     }
 
-    ctx.fillStyle = `rgba(103, 232, 249, ${(0.08 + aurora * 0.1).toFixed(2)})`;
+    ctx.globalAlpha = 0.08 + aurora * 0.1;
+    ctx.fillStyle = '#67e8f9';
     ctx.fillRect(sx + 3, sy + 3, ts - 6, ts - 6);
 
-    ctx.strokeStyle = `rgba(250, 204, 21, ${(0.55 + pulse * 0.42).toFixed(2)})`;
+    ctx.globalAlpha = 0.55 + pulse * 0.42;
+    ctx.strokeStyle = '#facc15';
     ctx.lineWidth = 2;
     ctx.strokeRect(sx + 2, sy + 2, ts - 4, ts - 4);
 
     // Subtle aurora corner glints
-    ctx.fillStyle = `rgba(103, 232, 249, ${(0.45 + aurora * 0.45).toFixed(2)})`;
+    ctx.globalAlpha = 0.45 + aurora * 0.45;
+    ctx.fillStyle = '#67e8f9';
     ctx.fillRect(sx + 2, sy + 2, 3, 3);
     ctx.fillRect(sx + ts - 5, sy + 2, 3, 3);
+    ctx.globalAlpha = 1;
 
     // Shimmering gold & aurora star sparkles dancing over the rustling patch
-    const sparkleColors = ['#fef08a', '#67e8f9', '#ffffff', '#e879f9'];
     for (let i = 0; i < 4; i++) {
       const phase = nowMs * 0.0065 + i * 1.65;
       const rx = Math.round(sx + 7 + ((i * 7 + Math.sin(phase) * 4) % 18));
       const ry = Math.round(sy + 20 - Math.abs(Math.cos(phase * 1.15)) * 15);
-      ctx.fillStyle = sparkleColors[i];
+      ctx.fillStyle = SPARKLE_COLORS[i];
       ctx.fillRect(rx - 1, ry, 3, 1);
       ctx.fillRect(rx, ry - 1, 1, 3);
       ctx.fillStyle = '#ffffff';
@@ -3709,78 +3921,141 @@ export class OverworldEngine {
     ctx.restore();
   }
 
-  drawSecretArcadeCabinet(ctx, sx, sy, nowMs, profile) {
-    const unlocked = Boolean(
-      profile?.arcade?.unlocked ||
+  drawSecretArcadeCabinet(ctx, sx, sy, nowMs = 0, profile = null) {
+    sx = Math.round(sx);
+    sy = Math.round(sy);
+    const badgeUnlocked = Boolean(profile?.arcade?.unlocked);
+    const powered = Boolean(
+      badgeUnlocked ||
       (profile?.badges?.length || 0) >= 1 ||
       Object.keys(profile?.pokedex?.caught || {}).length >= 5,
     );
     const pulse = 0.55 + 0.45 * Math.sin(nowMs * 0.006);
     ctx.save();
 
-    // Soft ambient arcade glow
-    ctx.fillStyle = unlocked
-      ? `rgba(103, 232, 249, ${(0.18 + pulse * 0.16).toFixed(2)})`
-      : `rgba(250, 204, 21, ${(0.14 + pulse * 0.12).toFixed(2)})`;
+    // Soft ambient arcade glow halo behind facade
+    ctx.globalAlpha = powered ? (0.18 + pulse * 0.16) : (0.14 + pulse * 0.12);
+    ctx.fillStyle = powered ? '#67e8f9' : '#facc15';
     ctx.beginPath();
-    ctx.arc(sx + 16, sy + 18, 15, 0, Math.PI * 2);
+    ctx.arc(sx + 16, sy + 17, 15, 0, Math.PI * 2);
     ctx.fill();
 
-    // Base shadow
-    ctx.fillStyle = 'rgba(15, 23, 42, 0.36)';
-    ctx.fillRect(sx + 6, sy + 27, 20, 4);
+    // Cozy timber alcove frame tucked into cottage wall
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = '#78350f';
+    ctx.fillRect(sx + 4, sy + 2, 24, 28);
+    ctx.fillStyle = '#92400e';
+    ctx.fillRect(sx + 5, sy + 3, 22, 26);
 
-    // Cabinet body
-    ctx.fillStyle = '#1e1b4b';
-    ctx.fillRect(sx + 7, sy + 5, 18, 24);
-    ctx.fillStyle = '#312e81';
-    ctx.fillRect(sx + 8, sy + 6, 16, 22);
-
-    // Top marquee header
-    ctx.fillStyle = '#facc15';
-    ctx.fillRect(sx + 7, sy + 5, 18, 5);
-    ctx.fillStyle = unlocked ? '#38bdf8' : '#fb923c';
-    ctx.fillRect(sx + 9, sy + 6, 14, 3);
-    ctx.fillStyle = '#ffffff';
-    ctx.fillRect(sx + 11, sy + 7, 2, 1);
-    ctx.fillRect(sx + 15, sy + 7, 2, 1);
-    ctx.fillRect(sx + 19, sy + 7, 2, 1);
-
-    // CRT screen
+    // Base ground shadow
+    ctx.globalAlpha = 0.36;
     ctx.fillStyle = '#0f172a';
-    ctx.fillRect(sx + 9, sy + 11, 14, 9);
-    ctx.fillStyle = unlocked ? '#0891b2' : '#4338ca';
-    ctx.fillRect(sx + 10, sy + 12, 12, 7);
+    ctx.fillRect(sx + 5, sy + 28, 22, 4);
+    ctx.globalAlpha = 1;
+
+    // Arcade cabinet silhouette & side molding
+    ctx.fillStyle = '#1e1b4b';
+    ctx.fillRect(sx + 6, sy + 4, 20, 25);
+    ctx.fillStyle = '#312e81';
+    ctx.fillRect(sx + 7, sy + 5, 18, 23);
+
+    // Top Glowing Marquee Header (brass bezel + animated starlight marquee strip)
+    ctx.fillStyle = '#eab308';
+    ctx.fillRect(sx + 6, sy + 4, 20, 6);
+    ctx.fillStyle = '#facc15';
+    ctx.fillRect(sx + 7, sy + 4, 18, 5);
+
+    ctx.globalAlpha = 0.25 + pulse * 0.28;
+    ctx.fillStyle = powered ? '#38bdf8' : '#fb923c';
+    ctx.fillRect(sx + 6, sy + 3, 20, 8);
+    ctx.globalAlpha = 1;
+
+    ctx.fillStyle = powered ? '#0284c7' : '#c2410c';
+    ctx.fillRect(sx + 8, sy + 5, 16, 4);
+    ctx.fillStyle = powered ? '#38bdf8' : '#fb923c';
+    ctx.fillRect(sx + 9, sy + 6, 14, 2);
+
+    // Crisp pixel marquee title lettering & star emblem
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(sx + 10, sy + 6, 2, 2);
+    ctx.fillRect(sx + 13, sy + 6, 2, 1);
+    ctx.fillRect(sx + 16, sy + 6, 2, 2);
+    ctx.fillRect(sx + 19, sy + 6, 3, 1);
+    ctx.fillStyle = '#fef08a';
+    ctx.fillRect(sx + 15, sy + 5, 2, 1);
+
+    // Recessed CRT Screen Bezel + Live Sky-Hop Attract Animation
+    ctx.fillStyle = '#0f172a';
+    ctx.fillRect(sx + 8, sy + 11, 16, 9);
+    ctx.fillStyle = powered ? '#0e7490' : '#3730a3';
+    ctx.fillRect(sx + 9, sy + 12, 14, 7);
+    ctx.fillStyle = powered ? '#0891b2' : '#4338ca';
+    ctx.fillRect(sx + 10, sy + 13, 12, 5);
+
+    // Subtle CRT glass reflection glint
+    ctx.globalAlpha = 0.35;
+    ctx.fillStyle = '#e0f2fe';
+    ctx.fillRect(sx + 10, sy + 12, 4, 1);
+    ctx.fillRect(sx + 10, sy + 13, 1, 2);
+    ctx.globalAlpha = 1;
 
     // Animated starlight pixel sprite on cabinet screen
-    const hopY = Math.round(Math.sin(nowMs * 0.008) * 1.5);
+    const hopY = Math.round(Math.sin(nowMs * 0.008) * 1.4);
     ctx.fillStyle = '#fde047';
-    ctx.fillRect(sx + 13, sy + 14 + hopY, 3, 3);
-    ctx.fillStyle = unlocked ? '#f472b6' : '#fef08a';
-    ctx.fillRect(sx + 18, sy + 13 - hopY, 2, 2);
+    ctx.fillRect(sx + 12, sy + 15 + hopY, 3, 2);
+    ctx.fillStyle = powered ? '#f472b6' : '#fef08a';
+    ctx.fillRect(sx + 18, sy + 14 - hopY, 2, 2);
 
-    // Control deck with joystick & buttons
+    // Angled Control Deck with Joystick & Glowing Arcade Buttons
     ctx.fillStyle = '#4338ca';
-    ctx.fillRect(sx + 8, sy + 20, 16, 3);
+    ctx.fillRect(sx + 7, sy + 20, 18, 4);
+    ctx.fillStyle = '#6366f1';
+    ctx.fillRect(sx + 8, sy + 20, 16, 1);
+    ctx.fillStyle = '#cbd5e1';
+    ctx.fillRect(sx + 10, sy + 20, 1, 2);
     ctx.fillStyle = '#f43f5e';
-    ctx.fillRect(sx + 10, sy + 19, 2, 2);
+    ctx.fillRect(sx + 9, sy + 19, 3, 2);
     ctx.fillStyle = '#4ade80';
-    ctx.fillRect(sx + 18, sy + 21, 2, 1);
+    ctx.fillRect(sx + 16, sy + 21, 2, 2);
     ctx.fillStyle = '#fde047';
-    ctx.fillRect(sx + 21, sy + 21, 2, 1);
+    ctx.fillRect(sx + 19, sy + 21, 2, 2);
+    ctx.fillStyle = '#38bdf8';
+    ctx.fillRect(sx + 22, sy + 21, 2, 2);
 
-    // Cabinet coin door trim
+    // Cabinet Coin Door & Illuminated Star Slot
+    ctx.fillStyle = '#1e1b4b';
+    ctx.fillRect(sx + 8, sy + 24, 16, 5);
     ctx.fillStyle = '#f59e0b';
-    ctx.fillRect(sx + 13, sy + 24, 6, 3);
+    ctx.fillRect(sx + 12, sy + 25, 8, 3);
+    ctx.fillStyle = '#78350f';
+    ctx.fillRect(sx + 13, sy + 26, 6, 1);
     ctx.fillStyle = '#fef08a';
-    ctx.fillRect(sx + 15, sy + 25, 2, 1);
+    ctx.fillRect(sx + 15, sy + 26, 2, 1);
 
-    // Floating star spark above cabinet
-    const sparkY = Math.round(sy + 1 - Math.abs(Math.sin(nowMs * 0.005)) * 2);
-    ctx.globalAlpha = 0.55 + pulse * 0.45;
-    ctx.fillStyle = unlocked ? '#67e8f9' : '#fde047';
-    ctx.fillRect(sx + 15, sparkY, 3, 1);
-    ctx.fillRect(sx + 16, sparkY - 1, 1, 3);
+    // Subtle Golden Starlight Badge once profile.arcade?.unlocked is true
+    if (badgeUnlocked) {
+      const bx = sx + 22;
+      const by = sy + 1;
+      ctx.fillStyle = '#b45309';
+      ctx.fillRect(bx, by, 7, 7);
+      ctx.fillStyle = '#facc15';
+      ctx.fillRect(bx + 1, by + 1, 5, 5);
+      ctx.fillStyle = '#fef08a';
+      ctx.fillRect(bx + 2, by + 2, 3, 3);
+      ctx.globalAlpha = 0.7 + pulse * 0.3;
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(bx + 2, by + 3, 3, 1);
+      ctx.fillRect(bx + 3, by + 2, 1, 3);
+      ctx.globalAlpha = 1;
+    } else {
+      // Subtle mystery spark above locked cabinet
+      const sparkY = Math.round(sy + 1 - Math.abs(Math.sin(nowMs * 0.005)) * 2);
+      ctx.globalAlpha = 0.5 + pulse * 0.4;
+      ctx.fillStyle = powered ? '#67e8f9' : '#fde047';
+      ctx.fillRect(sx + 15, sparkY, 3, 1);
+      ctx.fillRect(sx + 16, sparkY - 1, 1, 3);
+      ctx.globalAlpha = 1;
+    }
 
     ctx.restore();
   }
@@ -3790,18 +4065,18 @@ export class OverworldEngine {
     if (!overlayLayer) {
       if (!this.touchDestination) return;
       const pulse = 0.5 + 0.5 * Math.sin(nowMs * 0.009);
+      const ringHex = this.touchDestination.isInteract ? '#facc15' : '#67e8f9';
       ctx.save();
 
       // Breadcrumb dots along autoPath
       if (this.autoPath.length > 0) {
         let bx = this.moving ? this.moveTargetX : profile.pos.x;
         let by = this.moving ? this.moveTargetY : profile.pos.y;
-        ctx.fillStyle = this.touchDestination.isInteract
-          ? 'rgba(250, 204, 21, 0.72)'
-          : 'rgba(103, 232, 249, 0.72)';
+        ctx.globalAlpha = 0.72;
+        ctx.fillStyle = ringHex;
         if (this.moving) {
           ctx.beginPath();
-          ctx.arc(bx * ts + 16 - camX, by * ts + 16 - camY, 2.2, 0, Math.PI * 2);
+          ctx.arc(Math.round(bx * ts + 16 - camX), Math.round(by * ts + 16 - camY), 2.2, 0, Math.PI * 2);
           ctx.fill();
         }
         for (let i = 0; i < this.autoPath.length - 1; i++) {
@@ -3810,31 +4085,33 @@ export class OverworldEngine {
           bx += vec.dx;
           by += vec.dy;
           ctx.beginPath();
-          ctx.arc(bx * ts + 16 - camX, by * ts + 16 - camY, 2.2, 0, Math.PI * 2);
+          ctx.arc(Math.round(bx * ts + 16 - camX), Math.round(by * ts + 16 - camY), 2.2, 0, Math.PI * 2);
           ctx.fill();
         }
       }
 
       // Pulsing Starlight Destination Ring
-      const destX = this.touchDestination.x * ts + 16 - camX;
-      const destY = this.touchDestination.y * ts + 16 - camY;
-      const ringColor = this.touchDestination.isInteract ? '250, 204, 21' : '103, 232, 249';
-      ctx.strokeStyle = `rgba(${ringColor}, ${(0.58 + pulse * 0.38).toFixed(2)})`;
+      const destX = Math.round(this.touchDestination.x * ts + 16 - camX);
+      const destY = Math.round(this.touchDestination.y * ts + 16 - camY);
+      ctx.globalAlpha = 0.58 + pulse * 0.38;
+      ctx.strokeStyle = ringHex;
       ctx.lineWidth = 2;
       ctx.beginPath();
       ctx.arc(destX, destY, 9 + pulse * 3, 0, Math.PI * 2);
       ctx.stroke();
 
-      ctx.fillStyle = `rgba(${ringColor}, ${(0.16 + pulse * 0.12).toFixed(2)})`;
+      ctx.globalAlpha = 0.16 + pulse * 0.12;
+      ctx.fillStyle = ringHex;
       ctx.beginPath();
       ctx.arc(destX, destY, 6 + pulse * 1.5, 0, Math.PI * 2);
       ctx.fill();
 
       // Subtle golden focus corners on autoInteractTarget
       if (this.autoInteractTarget) {
-        const ix = this.autoInteractTarget.x * ts - camX;
-        const iy = this.autoInteractTarget.y * ts - camY;
-        ctx.strokeStyle = `rgba(253, 224, 71, ${(0.65 + pulse * 0.35).toFixed(2)})`;
+        const ix = Math.round(this.autoInteractTarget.x * ts - camX);
+        const iy = Math.round(this.autoInteractTarget.y * ts - camY);
+        ctx.globalAlpha = 0.65 + pulse * 0.35;
+        ctx.strokeStyle = '#fde047';
         ctx.lineWidth = 2;
         ctx.strokeRect(ix + 3, iy + 3, ts - 6, ts - 6);
       }
@@ -3846,15 +4123,16 @@ export class OverworldEngine {
     // Overlay layer: hold/drag-steering reticle & directional chevron
     if (!this.touchSteerActive) return;
     ctx.save();
-    const playerCx = px * ts + 16 - camX;
-    const playerCy = py * ts + 16 - camY;
+    const playerCx = Math.round(px * ts + 16 - camX);
+    const playerCy = Math.round(py * ts + 16 - camY);
     const pulse = 0.55 + 0.45 * Math.sin(nowMs * 0.012);
 
     if (this.touchSteerDir && DIR_VEC[this.touchSteerDir]) {
       const vec = DIR_VEC[this.touchSteerDir];
       const chevX = playerCx + vec.dx * 19;
       const chevY = playerCy + vec.dy * 19;
-      ctx.fillStyle = `rgba(103, 232, 249, ${(0.65 + pulse * 0.3).toFixed(2)})`;
+      ctx.globalAlpha = 0.65 + pulse * 0.3;
+      ctx.fillStyle = '#67e8f9';
       ctx.strokeStyle = '#0f172a';
       ctx.lineWidth = 1.5;
       ctx.beginPath();
@@ -3878,6 +4156,7 @@ export class OverworldEngine {
       ctx.closePath();
       ctx.fill();
       ctx.stroke();
+      ctx.globalAlpha = 1;
     }
 
     if (this._pointerState) {
@@ -3885,13 +4164,15 @@ export class OverworldEngine {
         this._pointerState.clientX,
         this._pointerState.clientY,
       );
-      ctx.strokeStyle = `rgba(253, 224, 71, ${(0.48 + pulse * 0.35).toFixed(2)})`;
+      ctx.globalAlpha = 0.48 + pulse * 0.35;
+      ctx.strokeStyle = '#fde047';
       ctx.lineWidth = 1.6;
       ctx.beginPath();
       ctx.arc(canvasX, canvasY, 11 + pulse * 2, 0, Math.PI * 2);
       ctx.stroke();
 
-      ctx.fillStyle = 'rgba(103, 232, 249, 0.25)';
+      ctx.globalAlpha = 0.25;
+      ctx.fillStyle = '#67e8f9';
       ctx.beginPath();
       ctx.arc(canvasX, canvasY, 4, 0, Math.PI * 2);
       ctx.fill();
@@ -4282,8 +4563,10 @@ export class OverworldEngine {
       const floatY = Math.round(y - 10 + Math.sin(nowMs * 0.008) * 2.4);
       const pulse = 0.45 + 0.35 * Math.sin(nowMs * 0.009);
       ctx.save();
-      ctx.fillStyle = `rgba(250, 204, 21, ${pulse.toFixed(2)})`;
+      ctx.globalAlpha = pulse;
+      ctx.fillStyle = '#facc15';
       ctx.fillRect(sx + 8, floatY - 1, 16, 13);
+      ctx.globalAlpha = 1;
       ctx.fillStyle = '#facc15';
       ctx.fillRect(sx + 9, floatY, 14, 11);
       ctx.strokeStyle = '#78350f';
@@ -4545,7 +4828,8 @@ export class OverworldEngine {
       ctx.fillStyle = '#4ade80';
       ctx.fillRect(sx + 12, y + 3, 2, 2);
       ctx.fillRect(sx + 18, y + 3, 2, 2);
-      for (const [bx, by] of [[8, 2], [15, 2], [21, 2]]) {
+      for (let i = 0; i < ANTLER_BLOSSOM_COORDS.length; i++) {
+        const [bx, by] = ANTLER_BLOSSOM_COORDS[i];
         ctx.fillStyle = '#f472b6';
         ctx.fillRect(sx + bx, y + by, 3, 3);
         ctx.fillStyle = '#fbcfe8';
@@ -4577,15 +4861,16 @@ export class OverworldEngine {
     if (!look.aura || look.aura === 'none') return;
     const pulse = 0.25 + 0.16 * Math.sin(nowMs * 0.006);
     ctx.save();
+    ctx.globalAlpha = pulse;
     ctx.strokeStyle = look.aura === 'hearts'
-      ? `rgba(244, 114, 182, ${pulse.toFixed(2)})`
+      ? '#f472b6'
       : look.aura === 'lightning'
-        ? `rgba(56, 189, 248, ${pulse.toFixed(2)})`
+        ? '#38bdf8'
         : look.aura === 'blossom'
-          ? `rgba(251, 113, 133, ${pulse.toFixed(2)})`
+          ? '#fb7185'
           : look.aura === 'cosmic'
-            ? `rgba(45, 212, 191, ${pulse.toFixed(2)})`
-            : `rgba(250, 204, 21, ${pulse.toFixed(2)})`;
+            ? '#2dd4bf'
+            : '#facc15';
     ctx.lineWidth = 1.6;
     ctx.beginPath();
     ctx.ellipse(sx + 16, sy + 28, 12, 5.2, 0, 0, Math.PI * 2);
@@ -4664,7 +4949,7 @@ export class OverworldEngine {
   }
 
   drawPlayer(ctx, sx, sy, trainerId, dir, nowMs, appearance = null) {
-    const look = getResolvedTrainerLook(trainerId, appearance);
+    const look = this._getResolvedTrainerLookCached(trainerId, appearance);
     const bob = this.moving ? Math.abs(Math.sin(this.moveProgress * Math.PI)) * 3 : Math.sin(nowMs * 0.004) * 0.6;
     const stepShift = this.moving ? (this.walkFrame === 0 ? 2 : -2) : 0;
     const capeSway = Math.round(Math.sin(nowMs * 0.008 + (this.moving ? this.moveProgress * Math.PI : 0)) * (this.moving ? 2 : 1));
@@ -5062,13 +5347,14 @@ export class OverworldEngine {
     if (upgradeTier > 0 || shiny) {
       const pulse = 0.3 + 0.18 * Math.sin(nowMs * 0.006);
       ctx.save();
+      ctx.globalAlpha = shiny ? (pulse + 0.15) : pulse;
       ctx.strokeStyle = shiny
-        ? `rgba(250, 204, 21, ${(pulse + 0.15).toFixed(2)})`
+        ? '#facc15'
         : upgradeTier >= 4
-          ? `rgba(250, 204, 21, ${pulse.toFixed(2)})`
+          ? '#facc15'
           : upgradeTier >= 2
-            ? `rgba(192, 132, 252, ${pulse.toFixed(2)})`
-            : `rgba(103, 232, 249, ${pulse.toFixed(2)})`;
+            ? '#c084fc'
+            : '#67e8f9';
       ctx.lineWidth = upgradeTier >= 4 || shiny ? 1.6 : 1.2;
       ctx.beginPath();
       ctx.ellipse(sx + 16, sy + 28, 10, 4.4, 0, 0, Math.PI * 2);
