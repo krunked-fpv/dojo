@@ -368,6 +368,19 @@ function normalizeBallStyle(ballType) {
   return 'pokeball';
 }
 
+function toNonNegIntSafe(value) {
+  const num = Number(value);
+  return Number.isFinite(num) ? Math.max(0, Math.floor(num)) : 0;
+}
+
+function consumeUsableBagItem(storage, itemKey) {
+  const profile = storage?.getActiveProfile?.();
+  if (profile?.bag && typeof profile.bag === 'object' && toNonNegIntSafe(profile.bag[itemKey]) <= 0) {
+    return false;
+  }
+  return Boolean(storage?.useItem?.(itemKey));
+}
+
 export function resolveMoveParticleShape(move) {
   if (!move) return 'circle';
   if (move.id === 'star_melody') return 'note';
@@ -1546,25 +1559,27 @@ export class BattleEngine {
     if (!profile || !this.player) return;
 
     const locked = this.busy || this.state !== BATTLE_STATES.PLAYER_INPUT;
-    const starBalls = Math.max(0, Number(profile.bag?.starBalls) || 0);
+    const greatBalls = toNonNegIntSafe(profile.bag?.greatBalls);
+    const starBalls = toNonNegIntSafe(profile.bag?.starBalls);
+    const potions = toNonNegIntSafe(profile.bag?.potions);
     if (this.btnBall) {
       this.btnBall.textContent = this.isShrine ? '🛡️ Guardian' : '🔴 Poké Ball ∞';
       this.btnBall.disabled = locked;
     }
     if (this.btnGreat) {
-      this.btnGreat.textContent = `🔵 Great Ball (${profile.bag.greatBalls})`;
-      this.btnGreat.disabled = locked || this.isShrine || this.isTrainer || profile.bag.greatBalls <= 0;
+      this.btnGreat.textContent = `🔵 Great Ball (${greatBalls})`;
+      this.btnGreat.disabled = locked || this.isShrine || this.isTrainer || greatBalls <= 0;
     }
     if (this.btnStar) {
       this.btnStar.textContent = `🌟 Star Ball (${starBalls})`;
       this.btnStar.disabled = locked || this.isShrine || this.isTrainer || starBalls <= 0;
     }
     if (this.btnPotion) {
-      this.btnPotion.textContent = `🍓 Potion (${profile.bag.potions})`;
-      this.btnPotion.disabled = locked || profile.bag.potions <= 0 || this.player.hp >= this.player.maxHp;
+      this.btnPotion.textContent = `🍓 Potion (${potions})`;
+      this.btnPotion.disabled = locked || potions <= 0 || this.player.isFainted || this.player.hp >= this.player.maxHp;
     }
     if (this.btnTeam) {
-      this.btnTeam.disabled = locked || profile.team.length <= 1;
+      this.btnTeam.disabled = locked || (Array.isArray(profile.team) ? profile.team.length <= 1 : true);
     }
     if (this.btnRun) {
       this.btnRun.disabled = locked;
@@ -8199,8 +8214,18 @@ export class BattleEngine {
 
   async handleUsePotion() {
     if (!this.canAcceptPlayerAction()) return;
-    if (!this.player || this.player.isFainted || this.player.hp >= this.player.maxHp) return;
-    if (!this.storage.useItem('potions')) return;
+    const hp = Number(this.player?.hp);
+    const maxHp = Number(this.player?.maxHp);
+    if (!this.player || this.player.isFainted || !Number.isFinite(hp) || !Number.isFinite(maxHp) || hp >= maxHp) {
+      this.audio?.playMenuBlip?.(280);
+      this.renderActionButtons();
+      return;
+    }
+    if (!consumeUsableBagItem(this.storage, 'potions')) {
+      this.audio?.playMenuBlip?.(280);
+      this.renderActionButtons();
+      return;
+    }
 
     const sid = this.sessionId;
     const pace = this.getPaceConfig();
@@ -8270,10 +8295,14 @@ export class BattleEngine {
     const isGreat = ballStyle === 'great';
     const isStar = ballStyle === 'star';
 
-    if (isGreat && !this.storage.useItem('greatBalls')) {
+    if (isGreat && !consumeUsableBagItem(this.storage, 'greatBalls')) {
+      this.audio?.playMenuBlip?.(280);
+      this.renderActionButtons();
       return;
     }
-    if (isStar && !this.storage.useItem('starBalls')) {
+    if (isStar && !consumeUsableBagItem(this.storage, 'starBalls')) {
+      this.audio?.playMenuBlip?.(280);
+      this.renderActionButtons();
       return;
     }
 
@@ -8394,6 +8423,7 @@ export class BattleEngine {
           this.enemy?.gainBond?.(4);
         }
         const { destination, newBadges } = this.storage.recordCaught(this.enemy);
+        const cheersBeforeWin = this._getCheerSnapshot().charges;
         const winBadges = this.storage.recordBattleWin();
         const allNewBadges = [...newBadges, ...winBadges];
 
@@ -8405,6 +8435,7 @@ export class BattleEngine {
         if (!this.isSessionValid(sid) || this.turnToken !== token) return;
         if (destination === 'box') {
           await this.say(`${this.enemy.name} was sent to your Reserve Box (Team of 6 is full)!`);
+          if (!this.isSessionValid(sid) || this.turnToken !== token) return;
         }
 
         const evoBadges = await this.awardVictoryXp(0.6, sid, {
@@ -8416,8 +8447,20 @@ export class BattleEngine {
           allNewBadges.push(...evoBadges);
         }
         const shards = this.awardBattleStarShards({ caught: true });
-        if (shards > 0) {
+        const cheersAfterWin = this._getCheerSnapshot();
+        let catchCheersAdded = Math.max(0, Math.min(1, cheersAfterWin.charges - cheersBeforeWin));
+        if (catchCheersAdded === 0 && cheersAfterWin.charges < cheersAfterWin.maxCharges) {
+          const cheerRes = this.storage?.addCheerCharges?.(1);
+          catchCheersAdded = toNonNegIntSafe(cheerRes?.added);
+        }
+        if (shards > 0 && catchCheersAdded > 0) {
+          await this.say(`+${shards} ✨ Star Shards & +${catchCheersAdded} 💖 Cheer Heart!`);
+          if (!this.isSessionValid(sid) || this.turnToken !== token) return;
+        } else if (shards > 0) {
           await this.say(`+${shards} ✨ Star Shards!`);
+          if (!this.isSessionValid(sid) || this.turnToken !== token) return;
+        } else if (catchCheersAdded > 0) {
+          await this.say(`+${catchCheersAdded} 💖 Cheer Heart!`);
           if (!this.isSessionValid(sid) || this.turnToken !== token) return;
         }
         this.onHudRefresh?.();
@@ -8951,6 +8994,24 @@ export class BattleEngine {
     });
   }
 
+  _getCheerSnapshot() {
+    const state = this.storage?.getCheerState?.();
+    const maxCharges = Number.isFinite(Number(state?.maxCharges))
+      ? Math.max(1, Math.floor(Number(state.maxCharges)))
+      : 3;
+    if (state && Number.isFinite(Number(state.charges))) {
+      return {
+        charges: Math.max(0, Math.floor(Number(state.charges))),
+        maxCharges,
+      };
+    }
+    const profile = this.storage?.getActiveProfile?.();
+    return {
+      charges: toNonNegIntSafe(profile?.bag?.cheerCharges),
+      maxCharges,
+    };
+  }
+
   awardBattleStarShards({ caught = false } = {}) {
     const trait = !this.isShrine && !this.isTrainer ? this.enemy?.encounterTrait : null;
     const hasShardTrait = trait === 'treasure' || trait === 'apex';
@@ -8979,19 +9040,19 @@ export class BattleEngine {
       rawShards = (this.isShrine ? 3 : this.isTrainer ? 2 : this.enemy?.isElite ? 3 : 1)
         + (!caught && hasShardTrait ? 1 : 0);
     }
-    const shards = Math.max(0, Math.round(Number(rawShards) || 0));
+    const shards = Number.isFinite(Number(rawShards)) ? Math.max(0, Math.round(Number(rawShards))) : 0;
     if (shards <= 0 || !this.storage) return 0;
 
     if (typeof this.storage.addStarShards === 'function') {
       this.storage.addStarShards(shards);
     } else {
       const profile = this.storage.getActiveProfile?.();
-      const before = Number(profile?.bag?.starShards) || 0;
+      const before = toNonNegIntSafe(profile?.bag?.starShards);
       this.storage.addRewards?.({ starShards: shards });
-      const after = Number(profile?.bag?.starShards) || 0;
+      const after = toNonNegIntSafe(profile?.bag?.starShards);
       if (after === before && profile) {
         if (!profile.bag || typeof profile.bag !== 'object') {
-          profile.bag = { potions: 0, greatBalls: 0, starBalls: 0, gems: {}, starShards: 0 };
+          profile.bag = { potions: 0, greatBalls: 0, starBalls: 0, gems: {}, starShards: 0, cheerCharges: 0 };
         }
         profile.bag.starShards = before + shards;
         this.storage.save?.();
