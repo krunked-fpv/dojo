@@ -1816,6 +1816,34 @@
   color: #fecaca;
 }
 
+.stage-chip.is-trait-curious {
+  background: linear-gradient(90deg, rgba(14, 165, 233, 0.34), rgba(45, 212, 191, 0.28));
+  border-color: #67e8f9;
+  color: #cffafe;
+  box-shadow: 0 0 8px rgba(103, 232, 249, 0.36);
+}
+
+.stage-chip.is-trait-treasure {
+  background: linear-gradient(90deg, rgba(245, 158, 11, 0.38), rgba(250, 204, 21, 0.34));
+  border-color: #fde047;
+  color: #fef9c3;
+  box-shadow: 0 0 9px rgba(253, 224, 71, 0.42);
+}
+
+.stage-chip.is-trait-spirited {
+  background: linear-gradient(90deg, rgba(249, 115, 22, 0.38), rgba(239, 68, 68, 0.3));
+  border-color: #fb923c;
+  color: #ffedd5;
+  box-shadow: 0 0 9px rgba(251, 146, 60, 0.42);
+}
+
+.stage-chip.is-trait-apex {
+  background: linear-gradient(90deg, rgba(236, 72, 153, 0.42), rgba(168, 85, 247, 0.42));
+  border-color: #f9a8d4;
+  color: #fdf2f8;
+  box-shadow: 0 0 10px rgba(244, 114, 182, 0.48);
+}
+
 /* Compact status cards on ultra-short stages so sprite clearance holds >= 20px */
 @container battle-stage (max-height: 360px) {
   .status-card {
@@ -3625,4 +3653,54 @@
     padding: 6px 4px;
     font-size: 0.69rem;
   }
+}
+
+/* --- Sprint 9 Stage Celebration Glow & Radiant Overlays --- */
+.battle-stage.is-celebrating::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 11;
+  pointer-events: none;
+  animation: battle-stage-celebrate-pulse 760ms ease-out forwards;
+}
+
+.battle-stage.is-celebrating-capture::before {
+  background:
+    radial-gradient(circle at 74% 38%, rgba(253, 224, 71, 0.36), transparent 52%),
+    radial-gradient(ellipse 90% 70% at 50% 50%, rgba(56, 189, 248, 0.24), transparent 72%);
+  box-shadow: inset 0 0 42px rgba(253, 224, 71, 0.42), inset 0 0 18px rgba(56, 189, 248, 0.38);
+}
+
+.battle-stage.is-celebrating-levelup::before {
+  background:
+    radial-gradient(circle at 26% 68%, rgba(253, 224, 71, 0.4), transparent 52%),
+    radial-gradient(ellipse 90% 70% at 50% 50%, rgba(251, 146, 60, 0.2), transparent 72%);
+  box-shadow: inset 0 0 44px rgba(250, 204, 21, 0.48), inset 0 0 18px rgba(255, 255, 255, 0.32);
+}
+
+.battle-stage.is-celebrating-evo::before {
+  background:
+    radial-gradient(circle at 28% 64%, rgba(244, 114, 182, 0.38), transparent 54%),
+    radial-gradient(circle at 52% 46%, rgba(103, 232, 249, 0.32), transparent 64%),
+    radial-gradient(ellipse 90% 75% at 50% 50%, rgba(192, 132, 252, 0.28), transparent 76%);
+  box-shadow: inset 0 0 54px rgba(244, 114, 182, 0.52), inset 0 0 24px rgba(253, 224, 71, 0.46);
+}
+
+.battle-stage.is-celebrating-victory::before {
+  background:
+    radial-gradient(circle at 50% 45%, rgba(253, 224, 71, 0.32), transparent 58%),
+    radial-gradient(ellipse 95% 75% at 50% 50%, rgba(52, 211, 153, 0.22), transparent 74%);
+  box-shadow: inset 0 0 46px rgba(253, 224, 71, 0.46), inset 0 0 20px rgba(74, 222, 128, 0.34);
+}
+
+.battle-stage.is-celebrating .fighter-sprite-player {
+  filter: brightness(1.12) drop-shadow(0 0 14px rgba(253, 224, 71, 0.65)) drop-shadow(0 8px 10px rgba(0, 0, 0, 0.42));
+}
+
+@keyframes battle-stage-celebrate-pulse {
+  0% { opacity: 0; }
+  22% { opacity: 1; }
+  75% { opacity: 0.82; }
+  100% { opacity: 0.35; }
 }

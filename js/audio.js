@@ -895,6 +895,46 @@ export const THEMES = {
     bassGain: 0.100,
     drumGain: 0.048,
   },
+  arcade: {
+    // Upbeat 128-step retro Starlight Sky-Hop arcade chiptune loop (C Major / G Mixolydian)
+    stepSec: 0.132,
+    leadWave: 'pulse25',
+    arpWave: 'pulse12',
+    melody: [
+      E5, 0, G5, 0, C6, -1, B5, G5, A5, 0, G5, E5, D5, -1, E5, 0,
+      F5, 0, A5, 0, G5, -1, E5, C5, D5, 0, E5, F5, G5, -1, 0, 0,
+      E5, 0, G5, 0, C6, -1, D6, C6, B5, 0, A5, G5, A5, -1, E5, 0,
+      F5, 0, G5, A5, G5, -1, E5, C5, D5, 0, B4, 0, C5, -1, 0, 0,
+      A5, -1, G5, F5, E5, 0, G5, C6, B5, -1, A5, G5, A5, -1, E5, 0,
+      F5, 0, A5, C6, B5, 0, G5, D5, E5, 0, G5, C6, D6, -1, 0, 0,
+      E6, -1, D6, C6, B5, 0, A5, G5, F5, 0, A5, C6, B5, -1, G5, 0,
+      A5, 0, B5, C6, D6, 0, G5, B5, C6, -1, -1, 0, 0, 0, 0, 0,
+    ],
+    arp: [
+      C4, 0, E4, G4, C5, 0, G4, E4, A3, 0, C4, E4, G4, 0, E4, C4,
+      F4, 0, A4, C5, C4, 0, E4, G4, D4, 0, F4, A4, G4, 0, B4, D5,
+      C4, 0, E4, G4, C5, 0, G4, E4, G4, 0, B4, D5, A4, 0, C5, E5,
+      F4, 0, A4, C5, G4, 0, B4, D5, G3, 0, B3, D4, C4, 0, E4, G4,
+    ],
+    bass: [
+      C2, 0, C3, 0, G2, 0, C3, 0, A2, 0, E3, 0, G2, 0, D3, 0,
+      F2, 0, C3, 0, C2, 0, G2, 0, G2, 0, D3, 0, G2, 0, B2, 0,
+      C2, 0, C3, 0, E2, 0, G2, 0, G2, 0, D3, 0, A2, 0, E3, 0,
+      F2, 0, C3, 0, G2, 0, D3, 0, G2, 0, D3, 0, C3, 0, G2, 0,
+      F2, 0, F3, 0, C2, 0, C3, 0, G2, 0, G3, 0, A2, 0, E3, 0,
+      D2, 0, D3, 0, G2, 0, D3, 0, C2, 0, G2, 0, B2, 0, G2, 0,
+      C2, 0, C3, 0, E2, 0, B2, 0, F2, 0, C3, 0, G2, 0, D3, 0,
+      F2, 0, C3, 0, G2, 0, D3, 0, C2, 0, G2, 0, C3, 0, 0, 0,
+    ],
+    drums: [
+      'K', 0, 'h', 0, 'S', 0, 'h', 'K',
+      'K', 0, 'h', 'K', 'S', 0, 'h', 'S',
+    ],
+    leadGain: 0.060,
+    arpGain: 0.034,
+    bassGain: 0.102,
+    drumGain: 0.048,
+  },
 };
 
 export class AudioEngine {
@@ -902,6 +942,7 @@ export class AudioEngine {
     this.ctx = null;
     this.masterFilter = null;
     this.masterGain = null;
+    this.compressor = null;
     this.bgmBus = null;
     this.silentSink = null;
     this.silent = Boolean(silent);
@@ -914,6 +955,10 @@ export class AudioEngine {
     this.muted = false;
     this.unlocked = false;
     this._unlockPromise = null;
+    this._resumeCount = 0;
+    this._wakeBufferPlayed = false;
+    this._pausedByVisibility = false;
+    this._pendingVoices = [];
 
     this.currentTheme = null;
     this.schedulerTimer = null;
@@ -927,30 +972,183 @@ export class AudioEngine {
     this.bgmStepsSinceSync = 0;
     this._lastCursorAt = 0;
 
-    this._boundUnlock = () => this.unlock();
+    this._boundGesture = () => this._handleGesture();
+    this._boundUnlock = this._boundGesture;
+    this._boundVisibility = () => this._handleVisibilityChange();
+    this._boundLifecycleResume = () => this._handleLifecycleResume();
     this._unlockListenersAttached = false;
+    this._lifecycleListenersAttached = false;
+
     if (attachUnlockListeners && typeof window !== 'undefined') {
       const opts = { capture: true, passive: true };
-      window.addEventListener('pointerdown', this._boundUnlock, opts);
-      window.addEventListener('pointerup', this._boundUnlock, opts);
-      window.addEventListener('touchstart', this._boundUnlock, opts);
-      window.addEventListener('touchend', this._boundUnlock, opts);
-      window.addEventListener('keydown', this._boundUnlock, opts);
-      window.addEventListener('click', this._boundUnlock, opts);
+      window.addEventListener('pointerdown', this._boundGesture, opts);
+      window.addEventListener('pointerup', this._boundGesture, opts);
+      window.addEventListener('touchstart', this._boundGesture, opts);
+      window.addEventListener('touchend', this._boundGesture, opts);
+      window.addEventListener('mousedown', this._boundGesture, opts);
+      window.addEventListener('keydown', this._boundGesture, opts);
+      window.addEventListener('click', this._boundGesture, opts);
       this._unlockListenersAttached = true;
+    }
+
+    if (typeof document !== 'undefined' || typeof window !== 'undefined') {
+      if (typeof document !== 'undefined') {
+        document.addEventListener('visibilitychange', this._boundVisibility);
+      }
+      if (typeof window !== 'undefined') {
+        window.addEventListener('pageshow', this._boundLifecycleResume);
+        window.addEventListener('focus', this._boundLifecycleResume);
+      }
+      this._lifecycleListenersAttached = true;
     }
   }
 
   _removeUnlockListeners() {
     if (!this._unlockListenersAttached || typeof window === 'undefined') return;
     const opts = { capture: true, passive: true };
-    window.removeEventListener('pointerdown', this._boundUnlock, opts);
-    window.removeEventListener('pointerup', this._boundUnlock, opts);
-    window.removeEventListener('touchstart', this._boundUnlock, opts);
-    window.removeEventListener('touchend', this._boundUnlock, opts);
-    window.removeEventListener('keydown', this._boundUnlock, opts);
-    window.removeEventListener('click', this._boundUnlock, opts);
+    window.removeEventListener('pointerdown', this._boundGesture, opts);
+    window.removeEventListener('pointerup', this._boundGesture, opts);
+    window.removeEventListener('touchstart', this._boundGesture, opts);
+    window.removeEventListener('touchend', this._boundGesture, opts);
+    window.removeEventListener('mousedown', this._boundGesture, opts);
+    window.removeEventListener('keydown', this._boundGesture, opts);
+    window.removeEventListener('click', this._boundGesture, opts);
     this._unlockListenersAttached = false;
+  }
+
+  _removeLifecycleListeners() {
+    if (!this._lifecycleListenersAttached) return;
+    if (typeof document !== 'undefined') {
+      document.removeEventListener('visibilitychange', this._boundVisibility);
+    }
+    if (typeof window !== 'undefined') {
+      window.removeEventListener('pageshow', this._boundLifecycleResume);
+      window.removeEventListener('focus', this._boundLifecycleResume);
+    }
+    this._lifecycleListenersAttached = false;
+  }
+
+  _handleGesture() {
+    if (this.ctx?.state === 'running' && this.unlocked) return;
+    this.unlock();
+  }
+
+  _applyAudioSession() {
+    try {
+      if (typeof navigator !== 'undefined' && navigator.audioSession) {
+        navigator.audioSession.type = 'playback';
+      }
+    } catch {
+      // Ignore unsupported audioSession API
+    }
+  }
+
+  _playSilentWakeBuffer(ctx) {
+    if (!ctx || this._wakeBufferPlayed) return;
+    if (typeof ctx.createBuffer !== 'function' || typeof ctx.createBufferSource !== 'function' || !ctx.destination) {
+      return;
+    }
+    try {
+      const buf = ctx.createBuffer(1, 1, 22050);
+      const src = ctx.createBufferSource();
+      src.buffer = buf;
+      src.connect(ctx.destination);
+      src.onended = () => {
+        try {
+          src.disconnect();
+        } catch {
+          // Ignore
+        }
+      };
+      src.start(0);
+      this._wakeBufferPlayed = true;
+    } catch {
+      // Ignore hardware/mock rejection
+    }
+  }
+
+  _handleStateChange() {
+    const ctx = this.ctx;
+    if (!ctx) return;
+    if (ctx.state === 'running') {
+      this._handleRunningState();
+    } else {
+      this.unlocked = false;
+      this._wakeBufferPlayed = false;
+      if (this.schedulerTimer !== null) {
+        this.bgmGeneration += 1;
+        this.stopScheduler();
+        this._haltActiveBgmNodes();
+      }
+    }
+  }
+
+  _handleVisibilityChange() {
+    if (typeof document !== 'undefined' && document.hidden) {
+      this._pausedByVisibility = true;
+      this._wakeBufferPlayed = false;
+      this.bgmGeneration += 1;
+      this.stopScheduler();
+      this._haltActiveBgmNodes();
+      return;
+    }
+    this._handleLifecycleResume();
+  }
+
+  _handleLifecycleResume() {
+    if (typeof document !== 'undefined' && document.hidden) return;
+    const ctx = this.ctx;
+    if (!ctx) return;
+    if (ctx.state !== 'running') {
+      this.unlock();
+      return;
+    }
+    this._handleRunningState();
+  }
+
+  _handleRunningState() {
+    const ctx = this.ctx;
+    if (!ctx || ctx.state !== 'running') {
+      this.unlocked = false;
+      this._wakeBufferPlayed = false;
+      return false;
+    }
+    this.unlocked = true;
+    this._pausedByVisibility = false;
+    if (!this._wakeBufferPlayed) {
+      this._playSilentWakeBuffer(ctx);
+    }
+    this._flushPendingVoices();
+    const isHidden = typeof document !== 'undefined' && document.hidden === true;
+    if (this.currentTheme && !this.muted && !this.schedulerTimer && !isHidden) {
+      this.startScheduler();
+    }
+    return true;
+  }
+
+  _queuePendingVoice(kind, opts) {
+    const nowMs = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    this._pendingVoices = this._pendingVoices.filter((entry) => nowMs - entry.createdAt <= 400);
+    while (this._pendingVoices.length >= 8) {
+      this._pendingVoices.shift();
+    }
+    this._pendingVoices.push({ kind, opts, createdAt: nowMs });
+  }
+
+  _flushPendingVoices() {
+    if (this.muted || !this.ctx || this.ctx.state !== 'running' || this._pendingVoices.length === 0) {
+      return;
+    }
+    const nowMs = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    const queued = this._pendingVoices.splice(0, this._pendingVoices.length);
+    for (const entry of queued) {
+      if (nowMs - entry.createdAt > 400) continue;
+      if (entry.kind === 'noise') {
+        this.playNoise(entry.opts);
+      } else {
+        this.triggerVoice(entry.opts);
+      }
+    }
   }
 
   buildPulseWave(ctx, duty = 0.25) {
@@ -988,31 +1186,49 @@ export class AudioEngine {
       this.masterFilter.Q.value = 0.65;
 
       this.masterGain = this.ctx.createGain();
-      this.masterGain.gain.value = this.muted ? 0 : 0.34;
+      this.masterGain.gain.value = this.muted ? 0 : 0.52;
+
+      this.compressor = null;
+      if (typeof this.ctx.createDynamicsCompressor === 'function') {
+        const comp = this.ctx.createDynamicsCompressor();
+        if (comp.threshold) comp.threshold.value = -16;
+        if (comp.knee) comp.knee.value = 14;
+        if (comp.ratio) comp.ratio.value = 3;
+        if (comp.attack) comp.attack.value = 0.003;
+        if (comp.release) comp.release.value = 0.15;
+        this.compressor = comp;
+      }
 
       this.bgmBus = this.ctx.createGain();
       this.bgmBus.gain.value = 1.0;
 
       this.bgmBus.connect(this.masterFilter);
       this.masterFilter.connect(this.masterGain);
+      let outputNode = this.masterGain;
+      if (this.compressor) {
+        this.masterGain.connect(this.compressor);
+        outputNode = this.compressor;
+      }
       if (this.silent) {
         this.silentSink = this.ctx.createGain();
         this.silentSink.gain.value = 0;
-        this.masterGain.connect(this.silentSink);
+        outputNode.connect(this.silentSink);
         this.silentSink.connect(this.ctx.destination);
       } else {
-        this.masterGain.connect(this.ctx.destination);
+        outputNode.connect(this.ctx.destination);
       }
 
+      this.ctx.onstatechange = () => this._handleStateChange();
       this.pulse12Wave = this.buildPulseWave(this.ctx, 0.125);
       this.pulse25Wave = this.buildPulseWave(this.ctx, 0.25);
       this.warmPulseWave = this.pulse25Wave;
-      this.noiseBuffer = this.buildNoiseBuffer(this.ctx);
+      this.noiseBuffer = typeof this.ctx.createBuffer === 'function' ? this.buildNoiseBuffer(this.ctx) : null;
       return this.ctx;
     } catch {
       this.ctx = null;
       this.masterFilter = null;
       this.masterGain = null;
+      this.compressor = null;
       this.bgmBus = null;
       this.silentSink = null;
       return null;
@@ -1022,12 +1238,24 @@ export class AudioEngine {
   async destroy() {
     this.stopBGM();
     this._removeUnlockListeners();
+    this._removeLifecycleListeners();
     this.unlocked = false;
     this._unlockPromise = null;
+    this._wakeBufferPlayed = false;
+    this._pausedByVisibility = false;
+    this._pendingVoices = [];
     const ctx = this.ctx;
+    if (ctx) {
+      try {
+        ctx.onstatechange = null;
+      } catch {
+        // Ignore
+      }
+    }
     this.ctx = null;
     this.masterFilter = null;
     this.masterGain = null;
+    this.compressor = null;
     this.bgmBus = null;
     this.silentSink = null;
     if (ctx && typeof ctx.close === 'function') {
@@ -1048,39 +1276,50 @@ export class AudioEngine {
   unlock() {
     const ctx = this.ensureContext();
     if (!ctx) return Promise.resolve(false);
-    if (this.unlocked && ctx.state === 'running') {
-      this._removeUnlockListeners();
+    this._applyAudioSession();
+
+    if (ctx.state === 'running' && this.unlocked) {
+      this._flushPendingVoices();
+      const isHidden = typeof document !== 'undefined' && document.hidden === true;
+      if (this.currentTheme && !this.muted && !this.schedulerTimer && !isHidden) {
+        this.startScheduler();
+      }
       return Promise.resolve(true);
     }
-    if (this._unlockPromise) return this._unlockPromise;
 
-    const onReady = () => {
-      this._unlockPromise = null;
-      this.unlocked = ctx.state === 'running';
-      if (this.unlocked) {
-        this._removeUnlockListeners();
-        if (this.currentTheme && !this.schedulerTimer && !this.muted) {
-          this.startScheduler();
-        }
-      }
-      return this.unlocked;
-    };
+    if (ctx.state === 'running') {
+      return Promise.resolve(this._handleRunningState());
+    }
 
-    if (ctx.state === 'suspended' && typeof ctx.resume === 'function') {
+    this._wakeBufferPlayed = false;
+    this._playSilentWakeBuffer(ctx);
+
+    if (typeof ctx.resume === 'function') {
+      this._resumeCount += 1;
       try {
-        this._unlockPromise = Promise.resolve(ctx.resume())
-          .then(onReady)
+        const resumePromise = Promise.resolve(ctx.resume())
+          .then(() => {
+            if (this.ctx !== ctx) return false;
+            if (ctx.state === 'running') {
+              return this._handleRunningState();
+            }
+            this.unlocked = false;
+            return false;
+          })
           .catch(() => {
-            this._unlockPromise = null;
+            if (this.ctx === ctx && ctx.state === 'running') {
+              return this._handleRunningState();
+            }
             return false;
           });
-        return this._unlockPromise;
+        this._unlockPromise = resumePromise;
+        return resumePromise;
       } catch {
         this._unlockPromise = null;
         return Promise.resolve(false);
       }
     }
-    return Promise.resolve(onReady());
+    return Promise.resolve(this._handleRunningState());
   }
 
   _haltActiveBgmNodes() {
@@ -1127,13 +1366,19 @@ export class AudioEngine {
     if (this.masterGain && this.ctx) {
       const now = this.ctx.currentTime;
       this.masterGain.gain.cancelScheduledValues(now);
-      this.masterGain.gain.setTargetAtTime(this.muted ? 0 : 0.34, now, 0.015);
+      this.masterGain.gain.setTargetAtTime(this.muted ? 0 : 0.52, now, 0.015);
     }
     if (this.muted) {
+      this._pendingVoices = [];
       this.bgmGeneration += 1;
       this.stopScheduler();
       this._haltActiveBgmNodes();
-    } else if (this.currentTheme && this.ctx && this.ctx.state === 'running') {
+    } else if (
+      this.currentTheme &&
+      this.ctx &&
+      this.ctx.state === 'running' &&
+      !(typeof document !== 'undefined' && document.hidden === true)
+    ) {
       this.startScheduler();
     }
   }
@@ -1179,7 +1424,30 @@ export class AudioEngine {
     if (this.muted) return null;
     const ctx = this.ensureContext();
     const dest = destination || this.masterFilter;
-    if (!ctx || !dest || ctx.state !== 'running') return null;
+    if (!ctx || !dest) return null;
+    if (ctx.state !== 'running') {
+      if (startTime === null && !trackBgm) {
+        this._queuePendingVoice('voice', {
+          freq,
+          endFreq,
+          midFreq,
+          wave,
+          useWarmPulse,
+          attack,
+          decay,
+          sustain,
+          duration,
+          gain,
+          delay,
+          startTime: null,
+          destination,
+          trackBgm: false,
+        });
+        this.unlock();
+        return { queued: true };
+      }
+      return null;
+    }
 
     const dur = Math.max(0.025, duration);
     const start = startTime !== null ? startTime : ctx.currentTime + Math.max(0, delay);
@@ -1262,7 +1530,28 @@ export class AudioEngine {
     if (this.muted) return null;
     const ctx = this.ensureContext();
     const dest = destination || this.masterFilter;
-    if (!ctx || !dest || ctx.state !== 'running' || !this.noiseBuffer) return null;
+    if (!ctx || !dest) return null;
+    if (ctx.state !== 'running') {
+      if (startTime === null && !trackBgm) {
+        this._queuePendingVoice('noise', {
+          duration,
+          gain,
+          filterType,
+          startFreq,
+          endFreq,
+          q,
+          attack,
+          delay,
+          startTime: null,
+          destination,
+          trackBgm: false,
+        });
+        this.unlock();
+        return { queued: true };
+      }
+      return null;
+    }
+    if (!this.noiseBuffer) return null;
 
     const dur = Math.max(0.02, duration);
     const start = startTime !== null ? startTime : ctx.currentTime + Math.max(0, delay);
@@ -1384,7 +1673,8 @@ export class AudioEngine {
     this.stepIndex = 0;
 
     const ctx = this.ensureContext();
-    if (!ctx || this.muted || ctx.state !== 'running') return;
+    const isHidden = typeof document !== 'undefined' && document.hidden === true;
+    if (!ctx || this.muted || ctx.state !== 'running' || isHidden) return;
     this.startScheduler();
   }
 
@@ -1530,6 +1820,9 @@ export class AudioEngine {
       currentTheme: this.currentTheme,
       unlocked: this.unlocked,
       muted: this.muted,
+      contextState: this.ctx?.state || 'none',
+      queuedVoices: this._pendingVoices.length,
+      resumeCount: this._resumeCount,
       schedulerActive: this.schedulerTimer !== null,
       schedulerStartCount: this.schedulerStartCount,
       activeBgmNodes: this.activeBgmNodes.size,
@@ -3325,6 +3618,197 @@ export class AudioEngine {
         gain: 0.062,
         delay,
       });
+    });
+  }
+
+  playChestFanfare() {
+    // Bright shimmering treasure arpeggio
+    const arp = [523.25, 659.25, 783.99, 987.77, 1174.66, 1567.98];
+    arp.forEach((freq, i) => {
+      const isLast = i === arp.length - 1;
+      const delay = i * 0.058;
+      this.triggerVoice({
+        freq,
+        endFreq: freq * 1.015,
+        wave: i % 2 === 0 ? 'pulse12' : 'sine',
+        duration: isLast ? 0.42 : 0.13,
+        attack: 0.004,
+        decay: 0.035,
+        sustain: 0.55,
+        gain: isLast ? 0.105 : 0.088,
+        delay,
+      });
+      this.triggerVoice({
+        freq: freq * 0.5,
+        wave: 'triangle',
+        duration: isLast ? 0.38 : 0.12,
+        gain: 0.06,
+        delay,
+      });
+    });
+    [523.25, 783.99, 1046.5].forEach((freq) => {
+      this.triggerVoice({
+        freq,
+        wave: 'sine',
+        duration: 0.44,
+        attack: 0.01,
+        sustain: 0.52,
+        gain: 0.072,
+        delay: 0.29,
+      });
+    });
+  }
+
+  playQuestCompleteFanfare() {
+    // Warm uplifting hero chord fanfare
+    const lead = [392.0, 523.25, 659.25, 783.99, 1046.5, 1318.51];
+    const timings = [0, 0.075, 0.15, 0.225, 0.31, 0.41];
+    const durs = [0.11, 0.11, 0.11, 0.13, 0.15, 0.46];
+    lead.forEach((freq, i) => {
+      this.triggerVoice({
+        freq,
+        endFreq: freq * 1.01,
+        wave: i >= 4 ? 'pulse25' : 'triangle',
+        duration: durs[i],
+        attack: 0.005,
+        decay: 0.04,
+        sustain: 0.58,
+        gain: i === lead.length - 1 ? 0.105 : 0.09,
+        delay: timings[i],
+      });
+    });
+    [261.63, 392.0, 523.25, 659.25].forEach((freq, i) => {
+      this.triggerVoice({
+        freq,
+        wave: i === 0 ? 'triangle' : 'sine',
+        duration: 0.5,
+        attack: 0.012,
+        sustain: 0.55,
+        gain: 0.078,
+        delay: 0.41,
+      });
+    });
+  }
+
+  playArcadeUnlockFanfare() {
+    // Cosmic secret discovery chime
+    this.playNoise({
+      duration: 0.28,
+      gain: 0.09,
+      filterType: 'bandpass',
+      startFreq: 680,
+      endFreq: 1620,
+      q: 1.5,
+    });
+    const cosmic = [440.0, 554.37, 659.25, 880.0, 1108.73, 1318.51, 1760.0];
+    cosmic.forEach((freq, i) => {
+      const isLast = i === cosmic.length - 1;
+      const delay = i * 0.062;
+      this.triggerVoice({
+        freq,
+        endFreq: freq * 1.025,
+        wave: i % 2 === 0 ? 'pulse12' : 'sine',
+        duration: isLast ? 0.48 : 0.15,
+        attack: 0.005,
+        decay: 0.04,
+        sustain: 0.56,
+        gain: isLast ? 0.1 : 0.082,
+        delay,
+      });
+      if (i % 2 === 0) {
+        this.triggerVoice({
+          freq: freq * 0.5,
+          wave: 'triangle',
+          duration: isLast ? 0.42 : 0.14,
+          gain: 0.058,
+          delay,
+        });
+      }
+    });
+  }
+
+  playArcadeStar(combo = 1) {
+    // Ascending combo pitch star chime
+    const safeCombo = Math.max(1, Math.min(16, Math.round(Number(combo) || 1)));
+    const scale = [
+      523.25, 587.33, 659.25, 783.99, 880.0,
+      1046.5, 1174.66, 1318.51, 1567.98, 1760.0,
+    ];
+    const baseFreq = scale[Math.min(scale.length - 1, safeCombo - 1)];
+    const extraSemitones = safeCombo > scale.length ? Math.min(5, safeCombo - scale.length) : 0;
+    const freq = Number((baseFreq * Math.pow(2, extraSemitones / 12)).toFixed(2));
+    this.triggerVoice({
+      freq,
+      endFreq: Math.min(2400, freq * 1.24),
+      wave: 'pulse12',
+      duration: 0.11,
+      attack: 0.003,
+      decay: 0.03,
+      sustain: 0.45,
+      gain: 0.088,
+    });
+    this.triggerVoice({
+      freq: Math.min(2600, freq * 1.5),
+      wave: 'sine',
+      duration: 0.14,
+      attack: 0.004,
+      sustain: 0.4,
+      gain: 0.068,
+      delay: 0.032,
+    });
+  }
+
+  playArcadeBoost() {
+    // Punchy star-dash whoosh chime
+    this.playNoise({
+      duration: 0.2,
+      gain: 0.14,
+      filterType: 'bandpass',
+      startFreq: 480,
+      endFreq: 1280,
+      q: 1.4,
+    });
+    this.triggerVoice({
+      freq: 329.63,
+      midFreq: 659.25,
+      endFreq: 1318.51,
+      wave: 'pulse25',
+      duration: 0.18,
+      attack: 0.003,
+      decay: 0.05,
+      sustain: 0.48,
+      gain: 0.095,
+    });
+    this.triggerVoice({
+      freq: 220.0,
+      endFreq: 440.0,
+      wave: 'triangle',
+      duration: 0.16,
+      gain: 0.08,
+      delay: 0.02,
+    });
+  }
+
+  playArcadeBump() {
+    // Soft non-jarring shield bump
+    this.triggerVoice({
+      freq: 185,
+      endFreq: 88,
+      wave: 'triangle',
+      duration: 0.11,
+      attack: 0.003,
+      decay: 0.04,
+      sustain: 0.25,
+      gain: 0.12,
+    });
+    this.playNoise({
+      duration: 0.075,
+      gain: 0.085,
+      filterType: 'lowpass',
+      startFreq: 380,
+      endFreq: 120,
+      q: 0.7,
+      attack: 0.002,
     });
   }
 
