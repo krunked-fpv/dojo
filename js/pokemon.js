@@ -1,3 +1,4 @@
+import * as Config from './config.js';
 import {
   ABILITIES,
   ENCOUNTER_TRAITS,
@@ -6,6 +7,7 @@ import {
   TYPE_CHART,
   TYPES,
   BIOMES,
+  SHRINES,
   EVOLUTIONS,
   EVOLUTION_ITEMS,
   getSpriteUrls,
@@ -744,6 +746,236 @@ export function getTrainerPowerLevel(profile = null) {
   const badgesCount = Array.isArray(profile?.badges) ? profile.badges.length : 0;
   const raw = 0.68 * top1 + 0.32 * top2 + badgesCount * 0.45;
   return Math.max(1, Math.min(50, Number(raw.toFixed(2))));
+}
+
+const FALLBACK_FARMING_BIOME_ORDER = [
+  'forest',
+  'cave',
+  'water',
+  'volcano',
+  'peak',
+  'desert',
+  'grove',
+  'marsh',
+  'faeveldt',
+  'canyon',
+  'sanctum',
+  'atoll',
+  'reef',
+  'highlands',
+  'ruins',
+  'crater',
+  'rift',
+];
+
+const FALLBACK_BIOME_WARP_POINTS = {
+  village: { x: 8, y: 15, dir: 'down' },
+  forest: { x: 4, y: 5, dir: 'up' },
+  cave: { x: 21, y: 5, dir: 'right' },
+  water: { x: 15, y: 31, dir: 'down' },
+  volcano: { x: 39, y: 11, dir: 'up' },
+  peak: { x: 47, y: 23, dir: 'down' },
+  grove: { x: 25, y: 44, dir: 'up' },
+  desert: { x: 56, y: 16, dir: 'down' },
+  marsh: { x: 13, y: 55, dir: 'down' },
+  sanctum: { x: 46, y: 53, dir: 'right' },
+  canyon: { x: 73, y: 17, dir: 'down' },
+  reef: { x: 16, y: 64, dir: 'down' },
+  ruins: { x: 51, y: 64, dir: 'down' },
+  rift: { x: 78, y: 42, dir: 'down' },
+  faeveldt: { x: 90, y: 14, dir: 'right' },
+  atoll: { x: 25, y: 77, dir: 'down' },
+  highlands: { x: 60, y: 77, dir: 'down' },
+  crater: { x: 88, y: 46, dir: 'down' },
+};
+
+function extractSortedPartyLevels(mons) {
+  return mons
+    .map((mon) => {
+      if (!mon || typeof mon !== 'object') return NaN;
+      const raw = mon.level;
+      if (isInvalidNumericInput(raw) || (typeof raw === 'string' && raw.trim() === '')) return NaN;
+      return Number(raw);
+    })
+    .filter((lv) => Number.isFinite(lv) && lv > 0)
+    .map((lv) => Math.max(1, Math.min(50, Math.round(lv))))
+    .sort((a, b) => b - a);
+}
+
+/**
+ * Compute the party's effective farming level (1..50), preferring healthy team
+ * members before falling back to fainted members, or normalize a scalar level.
+ */
+export function getPartyFarmingLevel(profileOrLevel = null) {
+  if (typeof profileOrLevel === 'number') {
+    if (profileOrLevel === -Infinity) return 1;
+    if (profileOrLevel === Infinity) return 50;
+    if (!Number.isFinite(profileOrLevel)) return 5;
+    return Math.max(1, Math.min(50, Math.round(profileOrLevel)));
+  }
+
+  const rawTeam = Array.isArray(profileOrLevel)
+    ? profileOrLevel
+    : (profileOrLevel && typeof profileOrLevel === 'object' && Array.isArray(profileOrLevel.team)
+      ? profileOrLevel.team
+      : null);
+
+  if (!rawTeam) return 5;
+
+  const validMons = rawTeam.filter((mon) => mon && typeof mon === 'object');
+  const healthyMons = validMons.filter((mon) => {
+    if (mon.isFainted) return false;
+    if (mon.hp === undefined || mon.hp === null) return true;
+    return !isInvalidNumericInput(mon.hp) && Number.isFinite(Number(mon.hp)) && Number(mon.hp) > 0;
+  });
+
+  let levels = extractSortedPartyLevels(healthyMons);
+  if (levels.length === 0) {
+    levels = extractSortedPartyLevels(validMons);
+  }
+  if (levels.length === 0) return 5;
+  if (levels.length === 1) return levels[0];
+  return Math.max(1, Math.min(50, Math.round(0.68 * levels[0] + 0.32 * levels[1])));
+}
+
+function fallbackGetBiomeWarpPoint(biomeId) {
+  const biome = (BIOMES && BIOMES[biomeId]) || BIOMES.forest;
+  const preset = FALLBACK_BIOME_WARP_POINTS[biome.id];
+  if (
+    preset
+    && (typeof Config.isTileWalkableAt !== 'function' || Config.isTileWalkableAt(preset.x, preset.y))
+    && (typeof Config.getBiomeAt !== 'function' || Config.getBiomeAt(preset.x, preset.y)?.id === biome.id)
+  ) {
+    return { biomeId: biome.id, x: preset.x, y: preset.y, dir: preset.dir || 'down' };
+  }
+  const rows = Number(Config.WORLD_ROWS) || 0;
+  const cols = Number(Config.WORLD_COLS) || 0;
+  if (typeof Config.isTileWalkableAt === 'function' && typeof Config.getBiomeAt === 'function') {
+    for (let y = 0; y < rows; y += 1) {
+      for (let x = 0; x < cols; x += 1) {
+        if (Config.isTileWalkableAt(x, y) && Config.getBiomeAt(x, y)?.id === biome.id) {
+          return { biomeId: biome.id, x, y, dir: preset?.dir || 'down' };
+        }
+      }
+    }
+  }
+  const safe = typeof Config.findNearestSafePosition === 'function'
+    ? Config.findNearestSafePosition(preset?.x ?? 8, preset?.y ?? 15, preset?.dir || 'down')
+    : { x: 8, y: 15, dir: 'down' };
+  return { biomeId: biome.id, x: safe.x, y: safe.y, dir: safe.dir || 'down' };
+}
+
+function hasUnclearedShrineInBiome(biomeId, clearedSet) {
+  if (!clearedSet || !SHRINES) return false;
+  return Object.values(SHRINES).some(
+    (shrine) => shrine && shrine.biome === biomeId && shrine.id && !clearedSet.has(shrine.id),
+  );
+}
+
+function fallbackResolveFarmingBiomeForLevel(targetLevel, profile = null) {
+  const order = Array.isArray(Config.FARMING_BIOME_ORDER) && Config.FARMING_BIOME_ORDER.length > 0
+    ? Config.FARMING_BIOME_ORDER
+    : FALLBACK_FARMING_BIOME_ORDER;
+  const candidatesPool = order
+    .map((id) => BIOMES[id])
+    .filter((b) => b && Array.isArray(b.levelRange) && b.levelRange.length >= 2);
+
+  let pickedBiome = BIOMES.forest;
+  let clamped = null;
+
+  if (targetLevel < 2) {
+    pickedBiome = BIOMES.forest || candidatesPool[0];
+    clamped = 'low';
+  } else if (targetLevel > 36) {
+    pickedBiome = BIOMES.rift || candidatesPool[candidatesPool.length - 1];
+    clamped = 'high';
+  } else {
+    const inRange = candidatesPool.filter(
+      (b) => b.levelRange[0] <= targetLevel && targetLevel <= b.levelRange[1],
+    );
+    const pool = inRange.length > 0 ? inRange : candidatesPool;
+    const hasShrinesCleared = Boolean(
+      profile && (Array.isArray(profile.shrinesCleared) || profile.shrinesCleared instanceof Set),
+    );
+    const clearedSet = hasShrinesCleared ? new Set(profile.shrinesCleared) : null;
+
+    const sorted = [...pool].sort((a, b) => {
+      const midA = (a.levelRange[0] + a.levelRange[1]) / 2;
+      const midB = (b.levelRange[0] + b.levelRange[1]) / 2;
+      const diffA = Math.abs(targetLevel - midA);
+      const diffB = Math.abs(targetLevel - midB);
+      if (diffA !== diffB) return diffA - diffB;
+      if (hasShrinesCleared) {
+        const rankA = hasUnclearedShrineInBiome(a.id, clearedSet) ? 0 : 1;
+        const rankB = hasUnclearedShrineInBiome(b.id, clearedSet) ? 0 : 1;
+        if (rankA !== rankB) return rankA - rankB;
+      }
+      return order.indexOf(a.id) - order.indexOf(b.id);
+    });
+    pickedBiome = sorted[0] || BIOMES.forest;
+  }
+
+  const warp = typeof Config.getBiomeWarpPoint === 'function'
+    ? Config.getBiomeWarpPoint(pickedBiome.id)
+    : fallbackGetBiomeWarpPoint(pickedBiome.id);
+
+  return {
+    biomeId: pickedBiome.id,
+    biome: pickedBiome,
+    targetLevel,
+    levelRange: [...pickedBiome.levelRange],
+    minLv: pickedBiome.levelRange[0],
+    maxLv: pickedBiome.levelRange[1],
+    x: warp.x,
+    y: warp.y,
+    dir: warp.dir || 'down',
+    clamped,
+  };
+}
+
+/**
+ * Resolve the recommended wild farming biome, scaled level range, threat
+ * metadata, and walkable landing warp coordinates for a trainer profile or level.
+ */
+export function resolveRecommendedFarmingZone(profileOrLevel = null) {
+  const partyLevel = getPartyFarmingLevel(profileOrLevel);
+  const isProfile = Boolean(profileOrLevel) && typeof profileOrLevel === 'object' && !Array.isArray(profileOrLevel);
+  const profile = isProfile ? profileOrLevel : null;
+
+  const resolved = typeof Config.resolveFarmingBiomeForLevel === 'function'
+    ? Config.resolveFarmingBiomeForLevel(partyLevel, profile)
+    : fallbackResolveFarmingBiomeForLevel(partyLevel, profile);
+
+  const biomeId = resolved?.biomeId && Object.prototype.hasOwnProperty.call(BIOMES, resolved.biomeId)
+    ? resolved.biomeId
+    : 'forest';
+  const biome = BIOMES[biomeId] || BIOMES.forest;
+  const clamped = resolved?.clamped !== undefined
+    ? resolved.clamped
+    : (partyLevel < 2 ? 'low' : (partyLevel > 36 ? 'high' : null));
+
+  const scaled = getBiomeScaledRange(biomeId, profile);
+  const warp = (typeof Config.getBiomeWarpPoint === 'function' ? Config.getBiomeWarpPoint(biomeId) : null)
+    || (Number.isFinite(resolved?.x) && Number.isFinite(resolved?.y)
+      ? { biomeId, x: resolved.x, y: resolved.y, dir: resolved.dir || 'down' }
+      : fallbackGetBiomeWarpPoint(biomeId));
+
+  return {
+    biomeId,
+    biome,
+    partyLevel,
+    baseMin: scaled.baseMin,
+    baseMax: scaled.baseMax,
+    minLv: scaled.minLv,
+    maxLv: scaled.maxLv,
+    threatLabel: scaled.threatLabel,
+    threatTone: scaled.threatTone,
+    isScaled: scaled.isScaled,
+    clamped,
+    x: warp.x,
+    y: warp.y,
+    dir: warp.dir || 'down',
+  };
 }
 
 export function getBiomeScaledRange(biomeId, profile = null) {

@@ -1,3 +1,4 @@
+import * as Config from './config.js';
 import {
   BADGES,
   BIOMES,
@@ -185,7 +186,10 @@ function computeSyncedPokedexState(profile) {
 
   const seen = [...seenSet].sort((a, b) => a - b);
   const sumOfCaughtCounts = Object.values(caught).reduce((sum, count) => sum + count, 0);
-  const prevTotalRaw = Number(profile?.stats?.totalCaught);
+  const rawPrevTotal = profile?.stats?.totalCaught;
+  const prevTotalRaw = isInvalidNumericInput(rawPrevTotal) || (typeof rawPrevTotal === 'string' && rawPrevTotal.trim() === '')
+    ? 0
+    : Number(rawPrevTotal);
   const safePrevTotal = Number.isFinite(prevTotalRaw) && prevTotalRaw >= 0 ? Math.floor(prevTotalRaw) : 0;
   const totalCaught = Math.max(safePrevTotal, sumOfCaughtCounts);
 
@@ -337,8 +341,19 @@ export function sanitizePosition(rawPos) {
   const spawnDir = GAME_META.spawn?.dir || 'down';
   const dir = VALID_DIRS.has(rawPos?.dir) ? rawPos.dir : spawnDir;
 
-  const rawX = Number(rawPos?.x);
-  const rawY = Number(rawPos?.y);
+  const rawXInput = rawPos?.x;
+  const rawYInput = rawPos?.y;
+  if (
+    isInvalidNumericInput(rawXInput)
+    || isInvalidNumericInput(rawYInput)
+    || (typeof rawXInput === 'string' && rawXInput.trim() === '')
+    || (typeof rawYInput === 'string' && rawYInput.trim() === '')
+  ) {
+    return fallbackNearestSafe(spawnX, spawnY, dir);
+  }
+
+  const rawX = Number(rawXInput);
+  const rawY = Number(rawYInput);
   if (!Number.isFinite(rawX) || !Number.isFinite(rawY)) {
     return fallbackNearestSafe(spawnX, spawnY, dir);
   }
@@ -449,7 +464,7 @@ function hydrateGems(rawGems) {
 
 function hydrateUniqueStrings(rawList) {
   if (!Array.isArray(rawList)) return [];
-  return [...new Set(rawList.map((item) => String(item)).filter(Boolean))];
+  return [...new Set(rawList.map((item) => (typeof item === 'string' ? item.trim() : '')).filter(Boolean))];
 }
 
 function hydrateAppearance(rawAppearance) {
@@ -600,12 +615,16 @@ function createFreshSaveState() {
 function safeHydrateMon(item) {
   if (!item || typeof item !== 'object' || Array.isArray(item)) return null;
   try {
+    const resolvedId = resolveSpeciesId(item.speciesId);
+    const normalized = resolvedId !== null && resolvedId !== item.speciesId
+      ? { ...item, speciesId: resolvedId }
+      : item;
     if (item instanceof Pokemon) {
-      const clean = Pokemon.fromJSON(item);
+      const clean = Pokemon.fromJSON(normalized);
       Object.assign(item, clean);
       return item;
     }
-    return Pokemon.fromJSON(item);
+    return Pokemon.fromJSON(normalized);
   } catch {
     return null;
   }
@@ -1045,7 +1064,14 @@ export class StorageManager {
         };
     return {
       ...src,
+      pos: sanitizePosition(src.pos),
       appearance: hydrateAppearance(src.appearance),
+      badges: hydrateUniqueStrings(src.badges),
+      shrinesCleared: hydrateUniqueStrings(src.shrinesCleared),
+      chestsOpened: hydrateUniqueStrings(src.chestsOpened),
+      questsCompleted: hydrateUniqueStrings(src.questsCompleted),
+      npcsTalked: hydrateUniqueStrings(src.npcsTalked),
+      biomesVisited: hydrateUniqueStrings(src.biomesVisited),
       rivalsDefeated: hydrateUniqueStrings(src.rivalsDefeated),
       rivalRematchCounts: hydrateCountMap(src.rivalRematchCounts),
       shrineTrialCounts: hydrateCountMap(src.shrineTrialCounts),
@@ -1180,7 +1206,7 @@ export class StorageManager {
         arcadeStepProgress: 0,
       };
     }
-    profile.pos = { x, y, dir };
+    profile.pos = sanitizePosition({ x, y, dir });
     if (!isPlainObject(profile.bag)) {
       profile.bag = createEmptyBag();
     }
@@ -1779,14 +1805,42 @@ export class StorageManager {
     return { evolution, newBadges };
   }
 
-  recordBiomeVisited(biomeId) {
+  recordBiomeVisited(biomeId, persist = true) {
     const profile = this.getActiveProfile();
     if (!profile || !biomeId) return false;
     if (!Array.isArray(profile.biomesVisited)) profile.biomesVisited = [];
     if (profile.biomesVisited.includes(biomeId)) return false;
     profile.biomesVisited.push(biomeId);
-    this.save();
+    if (persist) this.save();
     return true;
+  }
+
+  /**
+   * Persist a starlight warp landing without mutating step, cheer, arcade,
+   * party, bag, or Pokédex progress.
+   */
+  warpToZone(x, y, dir = 'down', biomeId = null) {
+    const profile = this.getActiveProfile();
+    if (!profile) {
+      return { warped: false, reason: 'no_profile' };
+    }
+    const safePos = sanitizePosition({ x, y, dir });
+    profile.pos = safePos;
+    const biomesMap = Config.BIOMES || BIOMES;
+    const validBiomeId = typeof biomeId === 'string' && Object.prototype.hasOwnProperty.call(biomesMap, biomeId)
+      ? biomeId
+      : null;
+    if (validBiomeId) {
+      this.recordBiomeVisited(validBiomeId, false);
+    }
+    const newBadges = this.evaluateBadges(false) || [];
+    this.save();
+    return {
+      warped: true,
+      pos: { ...safePos },
+      biomeId: validBiomeId,
+      newBadges,
+    };
   }
 
   markNpcTalked(npcId) {
@@ -1818,7 +1872,9 @@ export class StorageManager {
 
   markChestOpened(chestId) {
     const profile = this.getActiveProfile();
-    if (!profile || profile.chestsOpened.includes(chestId)) return false;
+    if (!profile || !chestId) return false;
+    if (!Array.isArray(profile.chestsOpened)) profile.chestsOpened = [];
+    if (profile.chestsOpened.includes(chestId)) return false;
     profile.chestsOpened.push(chestId);
     this.save();
     return true;
@@ -1826,7 +1882,8 @@ export class StorageManager {
 
   markShrineCleared(shrineId) {
     const profile = this.getActiveProfile();
-    if (!profile) return [];
+    if (!profile || !shrineId) return [];
+    if (!Array.isArray(profile.shrinesCleared)) profile.shrinesCleared = [];
     const firstClear = !profile.shrinesCleared.includes(shrineId);
     if (firstClear) {
       profile.shrinesCleared.push(shrineId);
@@ -2208,6 +2265,7 @@ export class StorageManager {
   evaluateBadges(persist = true) {
     const profile = this.getActiveProfile();
     if (!profile) return [];
+    if (!Array.isArray(profile.badges)) profile.badges = [];
     const unlockedNow = [];
     for (const badge of BADGES) {
       if (!profile.badges.includes(badge.id) && badge.check(profile)) {
