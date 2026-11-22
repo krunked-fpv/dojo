@@ -27,6 +27,10 @@ const BIOME_SCALING_OFFSETS = {
   reef: 3,
   ruins: 3,
   rift: 4,
+  faeveldt: 2,
+  atoll: 3,
+  highlands: 3,
+  crater: 4,
 };
 
 function resolveAbilityId(monOrSpecies) {
@@ -688,6 +692,40 @@ export function rollWildPokemon(biomeId, avgTeamLevelOrProfile = 5, options = {}
         appendRoamer(644, 4);
         appendRoamer(649, 4);
       }
+    } else if (biomeId === 'faeveldt') {
+      if (cleared.has('faeveldt_shrine')) {
+        appendRoamer(717, 5);
+        appendRoamer(718, 4);
+        appendRoamer(719, 4);
+        appendRoamer(720, 4);
+        appendRoamer(721, 4);
+      }
+    } else if (biomeId === 'atoll') {
+      if (cleared.has('atoll_shrine')) {
+        appendRoamer(792, 5);
+        appendRoamer(800, 4);
+        appendRoamer(801, 4);
+        appendRoamer(802, 4);
+        appendRoamer(807, 4);
+        appendRoamer(808, 4);
+      }
+    } else if (biomeId === 'highlands') {
+      if (cleared.has('highlands_shrine')) {
+        appendRoamer(889, 5);
+        appendRoamer(890, 4);
+        appendRoamer(893, 4);
+        appendRoamer(898, 4);
+        appendRoamer(905, 4);
+      }
+    } else if (biomeId === 'crater') {
+      if (cleared.has('crater_shrine')) {
+        appendRoamer(1007, 5);
+        appendRoamer(1008, 5);
+        appendRoamer(1009, 4);
+        appendRoamer(1010, 4);
+        appendRoamer(1017, 4);
+        appendRoamer(1025, 4);
+      }
     }
   }
 
@@ -865,7 +903,7 @@ export function getTypeEffectiveness(moveType, defenderType) {
   return table[defenderType] ?? 1;
 }
 
-const PINCH_ABILITY_IDS = new Set(['overgrow', 'blaze', 'torrent']);
+const PINCH_ABILITY_IDS = new Set(['overgrow', 'blaze', 'torrent', 'swarm_resonance']);
 const TYPE_BOOST_ABILITY_IDS = new Set([
   'storm_conduit',
   'dune_titan',
@@ -873,6 +911,7 @@ const TYPE_BOOST_ABILITY_IDS = new Set([
   'shadow_cloak',
   'dragon_heart',
   'aurora_cloak',
+  'pixilate_aura',
 ]);
 
 export function evaluateOffensiveAbility(attacker, move) {
@@ -905,6 +944,16 @@ export function evaluateOffensiveAbility(attacker, move) {
     };
   }
 
+  if (ability.id === 'toxic_alchemy') {
+    return {
+      abilityId: ability.id,
+      ability,
+      mult: 1.15,
+      drainRatio: 0.2,
+      summary: 'Poison +15% & Drain!',
+    };
+  }
+
   if (ability.id === 'rail_overload') {
     return {
       abilityId: ability.id,
@@ -912,6 +961,16 @@ export function evaluateOffensiveAbility(attacker, move) {
       mult: 1.2,
       critBonus: 0.15,
       summary: 'Electric +20%',
+    };
+  }
+
+  if (ability.id === 'supreme_overlord') {
+    return {
+      abilityId: ability.id,
+      ability,
+      mult: 1.2,
+      critBonus: 0.15,
+      summary: 'Dark +20%',
     };
   }
 
@@ -974,6 +1033,34 @@ export function evaluateDefensiveAbility(defender, move, effectiveness = 1) {
       mult: 0.75,
       counterBoostStat: 'spd',
       summary: '-25% & SPD +1!',
+    };
+  }
+
+  if (ability.id === 'stamina_earth' && (move?.type === 'electric' || move?.type === 'poison' || move?.type === 'rock')) {
+    return {
+      abilityId: ability.id,
+      ability,
+      mult: 0.75,
+      counterBoostStat: 'def',
+      summary: '-25% & DEF +1!',
+    };
+  }
+
+  if (
+    ability.id === 'corviknight_armor'
+    && (
+      move?.type === 'fighting'
+      || move?.type === 'rock'
+      || move?.type === 'fairy'
+      || move?.type === 'bug'
+      || move?.type === 'steel'
+    )
+  ) {
+    return {
+      abilityId: ability.id,
+      ability,
+      mult: 0.75,
+      summary: '-25% Damage',
     };
   }
 
@@ -1133,14 +1220,111 @@ export function calculateCatchAttempt(wildPokemon, ballBonus = 1.0) {
   return { caught, shakes, chance };
 }
 
+export const SPECIES_ARCHETYPES = [
+  'biped',
+  'quadruped',
+  'winged',
+  'serpentine',
+  'aquatic',
+  'insectoid',
+  'draconic',
+  'construct',
+  'amorphous',
+  'flora',
+];
+
+const ARCHETYPE_CODE_TABLE =
+  '99900600055555522211223300111101100011002299955551111440011440000000999447771144772224488448883004477991100088100904444440500051434811117444420222336009991114441122555524400002221109440499909954411248781553031145550108811444242114117100000010111666228999000444111155555999999222200055990005550000047118077700110055988444411180066699221388444477995543808888981888444433446667777776641380999000444222145511199000055555144994408800821181177000286660001155009444990700900251101707887888661768448900999110444101111100000088222117772210000044400555555999941101095500288442288101000088822888990559944455997773338888866600755400677771222215666551192066164850001000000022255511999110010077720804470444400661110078367999911221237812221104442221055500255114441155999910109999005588411706084671007777871285577767708670087000000000002225551199111111777921332440055008890000000800888045570001160647446116000771101504042100001200115555100001199927170004022111099995995522000332447713791121144401130109857777777006773114676661988002076661118';
+
+const TYPE_FALLBACK_ARCHETYPE = {
+  bug: 'insectoid',
+  flying: 'winged',
+  water: 'aquatic',
+  grass: 'flora',
+  dragon: 'draconic',
+  steel: 'construct',
+  ghost: 'amorphous',
+  poison: 'amorphous',
+  ground: 'quadruped',
+  rock: 'construct',
+  fighting: 'biped',
+  dark: 'quadruped',
+  fairy: 'biped',
+  psychic: 'amorphous',
+  electric: 'quadruped',
+  fire: 'quadruped',
+  ice: 'aquatic',
+  normal: 'biped',
+};
+
+export function resolveSpeciesArchetype(speciesOrId) {
+  let species = null;
+  if (typeof speciesOrId === 'number' || typeof speciesOrId === 'string') {
+    species = SPECIES[Number(speciesOrId)] || null;
+  } else if (speciesOrId && typeof speciesOrId === 'object') {
+    if (speciesOrId.species && speciesOrId.species.id) {
+      species = speciesOrId.species;
+    } else {
+      const numId = Number(speciesOrId.speciesId ?? speciesOrId.id);
+      species = Number.isInteger(numId) && SPECIES[numId] ? SPECIES[numId] : speciesOrId;
+    }
+  }
+
+  const numId = Number(species?.id);
+  if (Number.isInteger(numId) && numId >= 1 && numId <= ARCHETYPE_CODE_TABLE.length) {
+    const code = Number(ARCHETYPE_CODE_TABLE[numId - 1]);
+    if (SPECIES_ARCHETYPES[code]) {
+      return SPECIES_ARCHETYPES[code];
+    }
+  }
+  return TYPE_FALLBACK_ARCHETYPE[species?.type] || 'biped';
+}
+
+function escapeXmlText(raw) {
+  return String(raw || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function buildArchetypeSilhouetteBody(archetype, fill, back) {
+  const face = back
+    ? '<path d="M37 33 L48 23 L59 33" fill="none" stroke="#ffffff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" opacity="0.7"/>'
+    : '<circle cx="38" cy="45" r="4.6" fill="#090d1a"/><circle cx="58" cy="45" r="4.6" fill="#090d1a"/><circle cx="36.5" cy="43.4" r="1.7" fill="#ffffff"/><circle cx="56.5" cy="43.4" r="1.7" fill="#ffffff"/><path d="M43 55 Q48 59 53 55" fill="none" stroke="#090d1a" stroke-width="2.5" stroke-linecap="round"/>';
+
+  switch (archetype) {
+    case 'quadruped':
+      return `<path d="M22 44 L14 26 L32 34 Z" fill="${fill}" stroke="#090d1a" stroke-width="3.2" stroke-linejoin="round"/><path d="M70 48 Q84 36 80 24 Q70 30 68 42 Z" fill="${fill}" stroke="#090d1a" stroke-width="3"/><rect x="20" y="34" width="52" height="36" rx="18" fill="${fill}" stroke="#090d1a" stroke-width="3.6"/><rect x="24" y="64" width="10" height="14" rx="4" fill="${fill}" stroke="#090d1a" stroke-width="3"/><rect x="58" y="64" width="10" height="14" rx="4" fill="${fill}" stroke="#090d1a" stroke-width="3"/>${face}`;
+    case 'winged':
+      return `<path d="M26 52 Q8 32 14 18 Q30 24 34 40 Z" fill="${fill}" stroke="#090d1a" stroke-width="3.2" stroke-linejoin="round"/><path d="M70 52 Q88 32 82 18 Q66 24 62 40 Z" fill="${fill}" stroke="#090d1a" stroke-width="3.2" stroke-linejoin="round"/><ellipse cx="48" cy="48" rx="20" ry="24" fill="${fill}" stroke="#090d1a" stroke-width="3.6"/><path d="M44 16 L48 25 L52 16 Z" fill="#ffffff" stroke="#090d1a" stroke-width="2.2"/>${face}`;
+    case 'serpentine':
+      return `<path d="M24 72 C14 58, 28 46, 48 52 C66 57, 74 42, 66 28 C58 16, 36 18, 34 32 C32 44, 48 48, 58 40" fill="none" stroke="#090d1a" stroke-width="20" stroke-linecap="round"/><path d="M24 72 C14 58, 28 46, 48 52 C66 57, 74 42, 66 28 C58 16, 36 18, 34 32 C32 44, 48 48, 58 40" fill="none" stroke="${fill}" stroke-width="13" stroke-linecap="round"/><circle cx="48" cy="34" r="15" fill="${fill}" stroke="#090d1a" stroke-width="3.4"/>${face}`;
+    case 'aquatic':
+      return `<path d="M68 48 L86 34 L82 48 L86 62 Z" fill="${fill}" stroke="#090d1a" stroke-width="3" stroke-linejoin="round"/><path d="M44 16 L54 29 L38 29 Z" fill="${fill}" stroke="#090d1a" stroke-width="3" stroke-linejoin="round"/><ellipse cx="45" cy="49" rx="25" ry="20" fill="${fill}" stroke="#090d1a" stroke-width="3.6"/><path d="M26 57 Q45 64 64 57" fill="none" stroke="#ffffff" stroke-width="2" opacity="0.65"/>${face}`;
+    case 'insectoid':
+      return `<path d="M38 26 Q30 12 22 14" fill="none" stroke="#090d1a" stroke-width="3" stroke-linecap="round"/><path d="M58 26 Q66 12 74 14" fill="none" stroke="#090d1a" stroke-width="3" stroke-linecap="round"/><ellipse cx="22" cy="46" rx="11" ry="16" transform="rotate(-18 22 46)" fill="${fill}" stroke="#090d1a" stroke-width="3"/><ellipse cx="74" cy="46" rx="11" ry="16" transform="rotate(18 74 46)" fill="${fill}" stroke="#090d1a" stroke-width="3"/><rect x="27" y="25" width="42" height="48" rx="21" fill="${fill}" stroke="#090d1a" stroke-width="3.6"/><path d="M28 56 H68" stroke="#090d1a" stroke-width="2.6"/>${face}`;
+    case 'draconic':
+      return `<path d="M26 44 L10 22 L28 32 Z" fill="${fill}" stroke="#090d1a" stroke-width="3" stroke-linejoin="round"/><path d="M70 44 L86 22 L68 32 Z" fill="${fill}" stroke="#090d1a" stroke-width="3" stroke-linejoin="round"/><path d="M35 28 L30 12 L43 24 Z" fill="#fef08a" stroke="#090d1a" stroke-width="2.6" stroke-linejoin="round"/><path d="M61 28 L66 12 L53 24 Z" fill="#fef08a" stroke="#090d1a" stroke-width="2.6" stroke-linejoin="round"/><rect x="24" y="26" width="48" height="48" rx="20" fill="${fill}" stroke="#090d1a" stroke-width="3.8"/>${face}`;
+    case 'construct':
+      return `<rect x="44" y="13" width="8" height="13" rx="3" fill="${fill}" stroke="#090d1a" stroke-width="2.8"/><circle cx="19" cy="48" r="8" fill="${fill}" stroke="#090d1a" stroke-width="3"/><circle cx="77" cy="48" r="8" fill="${fill}" stroke="#090d1a" stroke-width="3"/><polygon points="32,24 64,24 72,38 72,62 64,74 32,74 24,62 24,38" fill="${fill}" stroke="#090d1a" stroke-width="3.6" stroke-linejoin="round"/><rect x="31" y="39" width="34" height="13" rx="6" fill="#090d1a" opacity="0.22"/>${face}`;
+    case 'amorphous':
+      return `<circle cx="22" cy="30" r="5" fill="${fill}" stroke="#090d1a" stroke-width="2.4"/><circle cx="74" cy="28" r="4" fill="${fill}" stroke="#090d1a" stroke-width="2.4"/><path d="M22 54 C21 31, 35 18, 48 18 C61 18, 75 31, 74 54 C74 68, 69 77, 60 72 C54 68, 51 77, 48 77 C45 77, 42 68, 36 72 C27 77, 22 68, 22 54 Z" fill="${fill}" stroke="#090d1a" stroke-width="3.6" stroke-linejoin="round"/>${face}`;
+    case 'flora':
+      return `<path d="M48 10 C58 20, 58 30, 48 35 C38 30, 38 20, 48 10 Z" fill="${fill}" stroke="#090d1a" stroke-width="3"/><path d="M22 30 Q34 26 36 38 Q22 42 22 30 Z" fill="${fill}" stroke="#090d1a" stroke-width="3"/><path d="M74 30 Q62 26 60 38 Q74 42 74 30 Z" fill="${fill}" stroke="#090d1a" stroke-width="3"/><rect x="24" y="30" width="48" height="45" rx="22" fill="${fill}" stroke="#090d1a" stroke-width="3.6"/>${face}`;
+    case 'biped':
+    default:
+      return `<path d="M27 32 L18 14 L38 24 Z" fill="${fill}" stroke="#090d1a" stroke-width="3.5" stroke-linejoin="round"/><path d="M69 32 L78 14 L58 24 Z" fill="${fill}" stroke="#090d1a" stroke-width="3.5" stroke-linejoin="round"/><rect x="22" y="23" width="52" height="52" rx="24" fill="${fill}" stroke="#090d1a" stroke-width="4"/><rect x="25" y="26" width="46" height="46" rx="21" fill="none" stroke="#ffffff" stroke-width="1.8" opacity="0.7"/>${face}`;
+  }
+}
+
 export function generateSilhouetteDataUri(species, back = false) {
   const fill = species?.color || '#38bdf8';
-  const name = (species?.name || 'Mystery').slice(0, 11);
-  const eyes = back
-    ? '<path d="M36 32 L48 22 L60 32" fill="none" stroke="#ffffff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" opacity="0.65"/>'
-    : '<circle cx="38" cy="45" r="5" fill="#090d1a"/><circle cx="58" cy="45" r="5" fill="#090d1a"/><circle cx="36.5" cy="43.2" r="1.8" fill="#ffffff"/><circle cx="56.5" cy="43.2" r="1.8" fill="#ffffff"/><path d="M43 56 Q48 60 53 56" fill="none" stroke="#090d1a" stroke-width="2.5" stroke-linecap="round"/>';
+  const name = escapeXmlText((species?.name || 'Mystery').slice(0, 11));
+  const archetype = resolveSpeciesArchetype(species);
+  const body = buildArchetypeSilhouetteBody(archetype, fill, back);
 
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" width="96" height="96"><ellipse cx="48" cy="83" rx="26" ry="6" fill="rgba(2,6,23,0.45)"/><path d="M27 32 L18 14 L38 24 Z" fill="${fill}" stroke="#090d1a" stroke-width="3.5" stroke-linejoin="round"/><path d="M69 32 L78 14 L58 24 Z" fill="${fill}" stroke="#090d1a" stroke-width="3.5" stroke-linejoin="round"/><rect x="22" y="23" width="52" height="52" rx="24" fill="${fill}" stroke="#090d1a" stroke-width="4"/><rect x="25" y="26" width="46" height="46" rx="21" fill="none" stroke="#ffffff" stroke-width="1.8" opacity="0.7"/>${eyes}<text x="48" y="90" font-family="monospace" font-size="10" font-weight="bold" text-anchor="middle" fill="#ffffff" stroke="#090d1a" stroke-width="2.8" paint-order="stroke">${name}</text></svg>`;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" width="96" height="96" data-archetype="${archetype}"><ellipse cx="48" cy="83" rx="26" ry="6" fill="rgba(2,6,23,0.45)"/>${body}<text x="48" y="90" font-family="monospace" font-size="10" font-weight="bold" text-anchor="middle" fill="#ffffff" stroke="#090d1a" stroke-width="2.8" paint-order="stroke">${name}</text></svg>`;
   return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
 }
 
@@ -1197,13 +1381,23 @@ export function attachPokemonSprite(imgEl, speciesOrMon, options = {}) {
   }
 
   const urls = getSpriteUrls(species.id, back, shiny);
-  const localSvg = `./assets/fallback/${species.type}.svg`;
+  const safeType = TYPES?.[species.type] ? species.type : 'normal';
+  const localSvg = `./assets/fallback/${safeType}.svg`;
   const totalBudgetMs = Math.max(50, Number(timeoutMs) || 2000);
-  const animatedBudgetMs = Math.max(25, Math.round(totalBudgetMs * 0.55));
-  const remoteCandidates = [
-    { url: urls.animated, capMs: animatedBudgetMs },
-    { url: urls.static, capMs: null },
-  ];
+  const animatedBudgetMs = Math.max(25, Math.round(totalBudgetMs * 0.45));
+  const candidateUrls = [
+    urls?.animated,
+    urls?.static,
+    ...(Array.isArray(urls?.fallbacks) ? urls.fallbacks : []),
+  ].filter((url, idx, arr) => typeof url === 'string' && url.length > 0 && arr.indexOf(url) === idx);
+  const tailCount = Math.max(1, candidateUrls.length - 1);
+  const tailPerStepCap = Math.max(20, Math.round((totalBudgetMs - animatedBudgetMs) / tailCount));
+  const remoteCandidates = candidateUrls.map((url, idx) => ({
+    url,
+    capMs: idx === 0
+      ? animatedBudgetMs
+      : (idx === candidateUrls.length - 1 ? null : tailPerStepCap),
+  }));
 
   let placeholderErrored = false;
   // Immediately render local fallback sprite when empty or switching species so images never flash blank or stale
