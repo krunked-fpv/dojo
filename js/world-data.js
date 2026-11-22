@@ -3216,3 +3216,246 @@ export function getCompassGuidance(profile, speciesMap = null) {
     biomeStats,
   };
 }
+
+const ENCOUNTER_TILE_SET = new Set([
+  TILE.TALL_GRASS,
+  TILE.CAVE_FLOOR,
+  TILE.SHALLOW_WATER,
+  TILE.VOLCANO_FLOOR,
+  TILE.SNOW_GRASS,
+  TILE.GROVE_GRASS,
+  TILE.DUNE_SAND,
+  TILE.MARSH_GRASS,
+  TILE.SANCTUM_FLOOR,
+  TILE.CANYON_GRASS,
+  TILE.REEF_WATER,
+  TILE.RUINS_FLOOR,
+  TILE.RIFT_FLOOR,
+  TILE.FAE_GRASS,
+  TILE.ATOLL_SAND,
+  TILE.CROWN_GRASS,
+  TILE.TERA_FLOOR,
+]);
+
+const SHRINES_BY_BIOME = Object.values(SHRINES).reduce((acc, shrine) => {
+  if (shrine?.biome && shrine?.id) {
+    if (!acc[shrine.biome]) acc[shrine.biome] = [];
+    acc[shrine.biome].push(shrine.id);
+  }
+  return acc;
+}, {});
+
+export const FARMING_BIOME_ORDER = [
+  'forest',
+  'cave',
+  'water',
+  'volcano',
+  'peak',
+  'desert',
+  'grove',
+  'marsh',
+  'faeveldt',
+  'canyon',
+  'sanctum',
+  'atoll',
+  'reef',
+  'highlands',
+  'ruins',
+  'crater',
+  'rift',
+];
+
+export const BIOME_WARP_POINTS = {
+  village: { x: 8, y: 15, dir: 'down' },
+  forest: { x: 4, y: 5, dir: 'up' },
+  cave: { x: 21, y: 5, dir: 'right' },
+  water: { x: 15, y: 31, dir: 'down' },
+  volcano: { x: 39, y: 11, dir: 'up' },
+  peak: { x: 47, y: 23, dir: 'down' },
+  grove: { x: 25, y: 44, dir: 'up' },
+  desert: { x: 56, y: 16, dir: 'down' },
+  marsh: { x: 13, y: 55, dir: 'down' },
+  sanctum: { x: 46, y: 53, dir: 'right' },
+  canyon: { x: 73, y: 17, dir: 'down' },
+  reef: { x: 16, y: 64, dir: 'down' },
+  ruins: { x: 51, y: 64, dir: 'down' },
+  rift: { x: 78, y: 42, dir: 'down' },
+  faeveldt: { x: 90, y: 14, dir: 'right' },
+  atoll: { x: 25, y: 77, dir: 'down' },
+  highlands: { x: 60, y: 77, dir: 'down' },
+  crater: { x: 88, y: 46, dir: 'down' },
+};
+
+export const BIOME_MINIMAP_PALETTE = {
+  village: { base: '#57ba62', path: '#fde68a', encounter: '#2d8a47', accent: '#facc15' },
+  forest: { base: '#3ba352', path: '#e7c68b', encounter: '#1f7a3d', accent: '#86efac' },
+  cave: { base: '#4c4566', path: '#7c6fa6', encounter: '#9333ea', accent: '#22d3ee' },
+  water: { base: '#f5d078', path: '#38bdf8', encounter: '#0ea5e9', accent: '#67e8f9' },
+  volcano: { base: '#573d3b', path: '#946e69', encounter: '#ea580c', accent: '#fb923c' },
+  peak: { base: '#cbd5e1', path: '#f8fafc', encounter: '#38bdf8', accent: '#a5f3fc' },
+  grove: { base: '#1e7a5c', path: '#e2e8f0', encounter: '#34d399', accent: '#f9a8d4' },
+  desert: { base: '#e5a93b', path: '#fde68a', encounter: '#d97706', accent: '#fef08a' },
+  marsh: { base: '#14584b', path: '#52796f', encounter: '#2dd4bf', accent: '#c084fc' },
+  sanctum: { base: '#25215c', path: '#c4b5fd', encounter: '#6366f1', accent: '#fde047' },
+  canyon: { base: '#c38134', path: '#f0b26b', encounter: '#eab308', accent: '#38bdf8' },
+  reef: { base: '#0e586d', path: '#bae6fd', encounter: '#0284c7', accent: '#f472b6' },
+  ruins: { base: '#5b442c', path: '#e7c68b', encounter: '#b45309', accent: '#fbbf24' },
+  rift: { base: '#1d1035', path: '#a855f7', encounter: '#7e22ce', accent: '#e879f9' },
+  faeveldt: { base: '#4c3a6e', path: '#fbcfe8', encounter: '#6ee7b7', accent: '#f9a8d4' },
+  atoll: { base: '#f0b865', path: '#fdba74', encounter: '#fb923c', accent: '#38bdf8' },
+  highlands: { base: '#3b4a5e', path: '#94a3b8', encounter: '#14b8a6', accent: '#cbd5e1' },
+  crater: { base: '#132a46', path: '#7dd3fc', encounter: '#0284c7', accent: '#f472b6' },
+};
+
+/**
+ * Resolve a guaranteed-walkable landing coordinate for a biome.
+ * @param {string} biomeId
+ * @returns {{ biomeId: string, x: number, y: number, dir: string }}
+ */
+export function getBiomeWarpPoint(biomeId) {
+  const biome = BIOMES[biomeId] || BIOMES.forest;
+  const pt = BIOME_WARP_POINTS[biome.id];
+  const fallbackDir = pt?.dir || 'down';
+
+  if (pt && isTileWalkableAt(pt.x, pt.y) && getBiomeAt(pt.x, pt.y).id === biome.id) {
+    return { biomeId: biome.id, x: pt.x, y: pt.y, dir: fallbackDir };
+  }
+
+  let firstWalkable = null;
+  for (let y = 0; y < WORLD_ROWS; y++) {
+    for (let x = 0; x < WORLD_COLS; x++) {
+      if (!isTileWalkableAt(x, y) || getBiomeAt(x, y).id !== biome.id) continue;
+      if (!ENCOUNTER_TILE_SET.has(WORLD_MAP[y][x])) {
+        return { biomeId: biome.id, x, y, dir: fallbackDir };
+      }
+      if (!firstWalkable) {
+        firstWalkable = { x, y };
+      }
+    }
+  }
+
+  if (firstWalkable) {
+    return { biomeId: biome.id, x: firstWalkable.x, y: firstWalkable.y, dir: fallbackDir };
+  }
+
+  const safe = findNearestSafePosition(pt?.x ?? DEFAULT_SPAWN.x, pt?.y ?? DEFAULT_SPAWN.y, fallbackDir);
+  return { biomeId: biome.id, x: safe.x, y: safe.y, dir: safe.dir };
+}
+
+function clampFarmingLevel(value) {
+  return Math.max(1, Math.min(50, Math.round(value)));
+}
+
+function resolveTargetFarmingLevel(levelOrProfile) {
+  if (levelOrProfile === -Infinity) return 1;
+  if (levelOrProfile === Infinity) return 50;
+  if (typeof levelOrProfile === 'number') {
+    return Number.isFinite(levelOrProfile) ? clampFarmingLevel(levelOrProfile) : 5;
+  }
+  if (
+    levelOrProfile === null
+    || levelOrProfile === undefined
+    || typeof levelOrProfile === 'boolean'
+  ) {
+    return 5;
+  }
+  if (typeof levelOrProfile === 'string') {
+    const trimmed = levelOrProfile.trim();
+    if (!trimmed) return 5;
+    if (trimmed === '-Infinity') return 1;
+    if (trimmed === 'Infinity') return 50;
+    const parsed = Number(trimmed);
+    return Number.isFinite(parsed) ? clampFarmingLevel(parsed) : 5;
+  }
+
+  const rawTeam = Array.isArray(levelOrProfile)
+    ? levelOrProfile
+    : (Array.isArray(levelOrProfile?.team) ? levelOrProfile.team : []);
+
+  const validMons = rawTeam.filter((m) => (
+    m && typeof m === 'object'
+    && typeof m.level !== 'boolean'
+    && m.level !== null
+    && m.level !== undefined
+    && m.level !== ''
+    && Number.isFinite(Number(m.level))
+    && Number(m.level) > 0
+  ));
+  if (validMons.length === 0) return 5;
+
+  const healthyMons = validMons.filter((m) => Number(m.hp) > 0 && !m.isFainted);
+  const pool = healthyMons.length > 0 ? healthyMons : validMons;
+  const levels = pool
+    .map((m) => clampFarmingLevel(Number(m.level)))
+    .sort((a, b) => b - a);
+
+  if (levels.length === 1) return levels[0];
+  return clampFarmingLevel(0.68 * levels[0] + 0.32 * levels[1]);
+}
+
+/**
+ * Deterministically resolve the best farming biome and landing warp coordinate for a level or party profile.
+ * @param {number|object|Array} levelOrProfile
+ * @param {object|null} profileArg
+ * @returns {object}
+ */
+export function resolveFarmingBiomeForLevel(levelOrProfile, profileArg = null) {
+  const profile = profileArg && typeof profileArg === 'object'
+    ? profileArg
+    : (levelOrProfile && typeof levelOrProfile === 'object' && !Array.isArray(levelOrProfile)
+      ? levelOrProfile
+      : null);
+
+  const targetLevel = resolveTargetFarmingLevel(levelOrProfile);
+
+  const hasShrinesCleared = Boolean(
+    profile && (Array.isArray(profile.shrinesCleared) || profile.shrinesCleared instanceof Set),
+  );
+  const clearedSet = hasShrinesCleared ? new Set(profile.shrinesCleared) : null;
+
+  let biome = null;
+  let clamped = null;
+
+  if (targetLevel < 2) {
+    biome = BIOMES.forest;
+    clamped = 'low';
+  } else if (targetLevel > 36) {
+    biome = BIOMES.rift;
+    clamped = 'high';
+  } else {
+    const farmingBiomes = FARMING_BIOME_ORDER.map((id) => BIOMES[id]).filter(Boolean);
+    const matching = farmingBiomes.filter(
+      (b) => b.levelRange[0] <= targetLevel && targetLevel <= b.levelRange[1],
+    );
+    const candidates = matching.length > 0 ? matching : farmingBiomes;
+    candidates.sort((a, b) => {
+      const midA = (a.levelRange[0] + a.levelRange[1]) / 2;
+      const midB = (b.levelRange[0] + b.levelRange[1]) / 2;
+      const midDiff = Math.abs(targetLevel - midA) - Math.abs(targetLevel - midB);
+      if (midDiff !== 0) return midDiff;
+
+      if (clearedSet) {
+        const aUncleared = (SHRINES_BY_BIOME[a.id] || []).some((sid) => !clearedSet.has(sid)) ? 0 : 1;
+        const bUncleared = (SHRINES_BY_BIOME[b.id] || []).some((sid) => !clearedSet.has(sid)) ? 0 : 1;
+        if (aUncleared !== bUncleared) return aUncleared - bUncleared;
+      }
+
+      return FARMING_BIOME_ORDER.indexOf(a.id) - FARMING_BIOME_ORDER.indexOf(b.id);
+    });
+    biome = candidates[0] || BIOMES.forest;
+  }
+
+  const warp = getBiomeWarpPoint(biome.id);
+  return {
+    biomeId: biome.id,
+    biome,
+    targetLevel,
+    levelRange: [...biome.levelRange],
+    minLv: biome.levelRange[0],
+    maxLv: biome.levelRange[1],
+    x: warp.x,
+    y: warp.y,
+    dir: warp.dir,
+    clamped,
+  };
+}
