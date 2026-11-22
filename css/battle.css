@@ -3421,27 +3421,31 @@
 }
 
 .move-eff-tag,
-.move-eff-badge {
+.move-eff-badge,
+.move-eff-pill {
   font-size: 0.58rem;
   font-weight: 900;
-  line-height: 1.2;
-  padding: 1px 6px;
+  line-height: 1.15;
+  padding: 1px 5px;
   border-radius: 999px;
   background: rgba(0, 0, 0, 0.45);
   border: 1px solid rgba(255, 255, 255, 0.2);
   white-space: nowrap;
   flex-shrink: 0;
+  letter-spacing: 0.01em;
 }
 
 .move-eff-tag.is-super,
-.move-eff-badge.is-super {
+.move-eff-badge.is-super,
+.move-eff-pill.is-super {
   background: #fde047;
   color: #422006;
   border-color: #fef08a;
 }
 
 .move-eff-tag.is-boost,
-.move-eff-badge.is-boost {
+.move-eff-badge.is-boost,
+.move-eff-pill.is-boost {
   background: linear-gradient(90deg, #7dd3fc, #a5f3fc);
   color: #0c4a6e;
   border-color: #e0f2fe;
@@ -3466,9 +3470,18 @@
 }
 
 .move-eff-tag.is-resist,
-.move-eff-badge.is-resist {
+.move-eff-badge.is-resist,
+.move-eff-pill.is-resist {
   background: rgba(15, 23, 42, 0.72);
   color: #94a3b8;
+}
+
+.move-eff-tag.is-immune,
+.move-eff-badge.is-immune,
+.move-eff-pill.is-immune {
+  background: rgba(30, 41, 59, 0.88);
+  color: #cbd5e1;
+  border-color: rgba(148, 163, 184, 0.48);
 }
 
 .battle-actions {
@@ -3639,6 +3652,12 @@
   .move-btn-name {
     font-size: 0.78rem;
   }
+  .move-eff-tag,
+  .move-eff-badge,
+  .move-eff-pill {
+    font-size: 0.52rem;
+    padding: 1px 4px;
+  }
   .move-cat-badge {
     display: none;
   }
@@ -3652,6 +3671,15 @@
   .battle-act-btn {
     padding: 6px 4px;
     font-size: 0.69rem;
+  }
+}
+
+@media (max-height: 500px) {
+  .move-eff-tag,
+  .move-eff-badge,
+  .move-eff-pill {
+    font-size: 0.5rem;
+    padding: 1px 4px;
   }
 }
 
@@ -3703,4 +3731,108 @@
   22% { opacity: 1; }
   75% { opacity: 0.82; }
   100% { opacity: 0.35; }
+}
+
+/* --- Reduced Motion Accessibility --- */
+@media (prefers-reduced-motion: reduce) {
+  .battle-stage {
+    transition: none;
+  }
+
+  .scenery-clouds-far,
+  .scenery-clouds-near,
+  .battle-stage[data-biome='grove'] .scenery-celestial::after,
+  .battle-stage[data-biome='marsh'] .scenery-celestial::after,
+  .battle-stage[data-biome='ruins'] .scenery-celestial::before,
+  .fighter-shadow,
+  .fighter-sprite.is-idle:not(.windup):not(.hit-stop):not(.hit-shake):not(.enemy-sendout):not(.player-sendout):not(.faint-drop):not(.evo-glow):not(.evo-flash):not(.lunge-right):not(.lunge-left):not(.quick-lunge-right):not(.quick-lunge-left):not(.ability-pulse),
+  .fighter-sprite.is-idle[data-motion]:not(.windup):not(.hit-stop):not(.hit-shake):not(.enemy-sendout):not(.player-sendout):not(.faint-drop):not(.evo-glow):not(.evo-flash):not(.lunge-right):not(.lunge-left):not(.quick-lunge-right):not(.quick-lunge-left):not(.ability-pulse),
+  .fighter-sprite.is-elite-sprite.is-idle:not(.windup):not(.hit-stop):not(.hit-shake):not(.enemy-sendout):not(.player-sendout):not(.faint-drop):not(.evo-glow):not(.evo-flash):not(.lunge-right):not(.lunge-left):not(.quick-lunge-right):not(.quick-lunge-left):not(.ability-pulse),
+  .fighter-sprite[class*="fx-"],
+  .fighter-sprite.windup,
+  .fighter-sprite.lunge-right,
+  .fighter-sprite.lunge-left,
+  .fighter-sprite.quick-lunge-right,
+  .fighter-sprite.quick-lunge-left,
+  .fighter-sprite.ability-pulse,
+  .move-card::before,
+  .move-cursor,
+  .battle-log.is-waiting::after,
+  .battle-ability-banner,
+  .battle-ability-banner::before,
+  .battle-stage[data-ability-aura]::after,
+  .battle-stage.is-celebrating::before {
+    animation: none;
+  }
+
+  .move-card,
+  .battle-act-btn,
+  .fighter-sprite,
+  .fighter-sprite.capture-pull,
+  .fighter-sprite.capture-shrink {
+    transition-duration: 0.01ms !important;
+  }
+
+  .move-card:hover:not(:disabled),
+  .move-card:focus-visible:not(:disabled),
+  .move-card:active:not(:disabled),
+  .battle-act-btn:hover:not(:disabled),
+  .battle-act-btn:focus-visible:not(:disabled),
+  .battle-act-btn:active:not(:disabled) {
+    transform: none;
+  }
+
+  .fighter-sprite.hit-stop {
+    animation: hit-stop-reduced 120ms ease forwards;
+  }
+
+  .fighter-sprite.hit-shake {
+    animation: hit-shake-reduced 260ms ease;
+  }
+
+  .fighter-sprite.evo-glow {
+    animation: evo-glow-reduced 900ms ease-in-out infinite;
+  }
+
+  .fighter-sprite.evo-flash {
+    animation: evo-silhouette-reduced 700ms ease-in-out infinite;
+  }
+
+  .fighter-sprite.enemy-sendout,
+  .fighter-sprite.player-sendout {
+    animation: sendout-reduced 180ms ease-out forwards;
+  }
+
+  .fighter-sprite.faint-drop {
+    animation: faint-reduced 220ms ease-out forwards;
+  }
+
+  @keyframes hit-stop-reduced {
+    0%, 100% { filter: brightness(1.18); transform: none; }
+  }
+
+  @keyframes hit-shake-reduced {
+    0%, 100% { opacity: 1; transform: none; }
+    50% { opacity: 0.65; transform: none; }
+  }
+
+  @keyframes evo-glow-reduced {
+    0%, 100% { filter: brightness(1.25) drop-shadow(0 0 14px #fde047); transform: none; }
+    50% { filter: brightness(1.42) drop-shadow(0 0 18px #c084fc); transform: none; }
+  }
+
+  @keyframes evo-silhouette-reduced {
+    0%, 100% { filter: brightness(2.2) saturate(0.25) drop-shadow(0 0 16px #fde047); transform: none; }
+    50% { filter: brightness(2.5) saturate(0.25) drop-shadow(0 0 20px #67e8f9); transform: none; }
+  }
+
+  @keyframes sendout-reduced {
+    0% { opacity: 0.2; transform: none; }
+    100% { opacity: 1; transform: none; }
+  }
+
+  @keyframes faint-reduced {
+    0% { opacity: 1; transform: none; }
+    100% { opacity: 0; transform: none; }
+  }
 }

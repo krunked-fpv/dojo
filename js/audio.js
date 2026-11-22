@@ -959,6 +959,9 @@ export class AudioEngine {
     this._wakeBufferPlayed = false;
     this._pausedByVisibility = false;
     this._pendingVoices = [];
+    this._activeCryCleanup = null;
+    this._crySeq = 0;
+    this._cryDisconnectTimers = new Set();
 
     this.currentTheme = null;
     this.schedulerTimer = null;
@@ -1067,19 +1070,43 @@ export class AudioEngine {
     }
   }
 
+  _isInactiveState(state) {
+    return state === 'suspended' || state === 'interrupted';
+  }
+
+  _clearCryTimers() {
+    for (const timerId of this._cryDisconnectTimers) {
+      clearTimeout(timerId);
+    }
+    this._cryDisconnectTimers.clear();
+  }
+
+  _stopActiveCry(immediate = false) {
+    const cleanup = this._activeCryCleanup;
+    this._activeCryCleanup = null;
+    if (typeof cleanup === 'function') {
+      cleanup(immediate);
+    }
+  }
+
   _handleStateChange() {
     const ctx = this.ctx;
     if (!ctx) return;
     if (ctx.state === 'running') {
       this._handleRunningState();
-    } else {
+      return;
+    }
+    // Treat mobile iOS/Android 'interrupted' identically to 'suspended'
+    if (this._isInactiveState(ctx.state) || ctx.state !== 'running') {
       this.unlocked = false;
       this._wakeBufferPlayed = false;
+      this._unlockPromise = null;
       if (this.schedulerTimer !== null) {
         this.bgmGeneration += 1;
         this.stopScheduler();
         this._haltActiveBgmNodes();
       }
+      this._stopActiveCry(true);
     }
   }
 
@@ -1237,6 +1264,8 @@ export class AudioEngine {
 
   async destroy() {
     this.stopBGM();
+    this._stopActiveCry(true);
+    this._clearCryTimers();
     this._removeUnlockListeners();
     this._removeLifecycleListeners();
     this.unlocked = false;
@@ -1244,6 +1273,7 @@ export class AudioEngine {
     this._wakeBufferPlayed = false;
     this._pausedByVisibility = false;
     this._pendingVoices = [];
+    this._activeCryCleanup = null;
     const ctx = this.ctx;
     if (ctx) {
       try {
@@ -1289,6 +1319,12 @@ export class AudioEngine {
 
     if (ctx.state === 'running') {
       return Promise.resolve(this._handleRunningState());
+    }
+
+    if (!this._isInactiveState(ctx.state)) {
+      this.unlocked = false;
+      this._unlockPromise = null;
+      return Promise.resolve(false);
     }
 
     this._wakeBufferPlayed = false;
@@ -1370,6 +1406,7 @@ export class AudioEngine {
     }
     if (this.muted) {
       this._pendingVoices = [];
+      this._stopActiveCry(true);
       this.bgmGeneration += 1;
       this.stopScheduler();
       this._haltActiveBgmNodes();
@@ -1420,12 +1457,14 @@ export class AudioEngine {
     startTime = null,
     destination = null,
     trackBgm = false,
+    _cryToken = null,
   }) {
     if (this.muted) return null;
     const ctx = this.ensureContext();
     const dest = destination || this.masterFilter;
     if (!ctx || !dest) return null;
-    if (ctx.state !== 'running') {
+    if (this._isInactiveState(ctx.state) || ctx.state !== 'running') {
+      if (ctx.state === 'closed') return null;
       if (startTime === null && !trackBgm) {
         this._queuePendingVoice('voice', {
           freq,
@@ -1442,6 +1481,7 @@ export class AudioEngine {
           startTime: null,
           destination,
           trackBgm: false,
+          _cryToken,
         });
         this.unlock();
         return { queued: true };
@@ -1531,7 +1571,8 @@ export class AudioEngine {
     const ctx = this.ensureContext();
     const dest = destination || this.masterFilter;
     if (!ctx || !dest) return null;
-    if (ctx.state !== 'running') {
+    if (this._isInactiveState(ctx.state) || ctx.state !== 'running') {
+      if (ctx.state === 'closed') return null;
       if (startTime === null && !trackBgm) {
         this._queuePendingVoice('noise', {
           duration,
@@ -5343,6 +5384,25 @@ export class AudioEngine {
     midFreq = Math.max(90, Math.min(1320, midFreq));
     endFreq = Math.max(80, Math.min(1380, endFreq));
 
+    // Smoothly fade down (<= 25ms) and stop any previous still-sounding cry before starting the new one
+    this._stopActiveCry(false);
+
+    const ctx = this.ensureContext();
+    let cryBus = null;
+    if (!this.muted && ctx && ctx.state === 'running' && this.masterFilter && typeof ctx.createGain === 'function') {
+      try {
+        cryBus = ctx.createGain();
+        cryBus.gain.value = 1;
+        cryBus.connect(this.masterFilter);
+      } catch {
+        cryBus = null;
+      }
+    }
+
+    const cryToken = ++this._crySeq;
+    const voiceDestination = cryBus || undefined;
+    const oscNodes = [];
+
     const primaryGain = 0.068;
     const primaryOsc = this.triggerVoice({
       freq: baseFreq,
@@ -5354,12 +5414,17 @@ export class AudioEngine {
       sustain: 0.48,
       duration,
       gain: primaryGain,
+      destination: voiceDestination,
+      _cryToken: cryToken,
     });
+    if (primaryOsc && typeof primaryOsc === 'object') {
+      oscNodes.push(primaryOsc);
+    }
 
     if (primaryOsc && u3 > 0.3) {
       const harmRatio = u4 > 0.5 ? 1.5 : 0.5;
       const harmWave = wave === 'pulse12' ? 'triangle' : 'sine';
-      this.triggerVoice({
+      const harmOsc = this.triggerVoice({
         freq: Math.max(70, Math.min(1400, baseFreq * harmRatio)),
         midFreq: Math.max(70, Math.min(1400, midFreq * harmRatio)),
         endFreq: Math.max(70, Math.min(1400, endFreq * harmRatio)),
@@ -5370,12 +5435,17 @@ export class AudioEngine {
         duration: Math.max(0.12, duration * 0.78),
         gain: 0.032,
         delay: 0.035,
+        destination: voiceDestination,
+        _cryToken: cryToken,
       });
+      if (harmOsc && typeof harmOsc === 'object') {
+        oscNodes.push(harmOsc);
+      }
     }
 
     if (primaryOsc && u4 > 0.42) {
       const vibShift = 1 + (0.018 + u2 * 0.016);
-      this.triggerVoice({
+      const vibOsc = this.triggerVoice({
         freq: Math.max(70, Math.min(1400, baseFreq * vibShift)),
         midFreq: Math.max(70, Math.min(1400, midFreq / vibShift)),
         endFreq: Math.max(70, Math.min(1400, endFreq * vibShift)),
@@ -5386,7 +5456,124 @@ export class AudioEngine {
         duration: Math.max(0.1, duration * 0.72),
         gain: 0.014,
         delay: 0.025,
+        destination: voiceDestination,
+        _cryToken: cryToken,
       });
+      if (vibOsc && typeof vibOsc === 'object') {
+        oscNodes.push(vibOsc);
+      }
+    }
+
+    const hasLiveOsc = oscNodes.some((node) => typeof node.stop === 'function');
+    const isQueued = Boolean(primaryOsc?.queued);
+
+    if (!primaryOsc) {
+      if (cryBus) {
+        try {
+          cryBus.disconnect();
+        } catch {
+          // Ignore
+        }
+      }
+    } else if (cryBus || hasLiveOsc || isQueued) {
+      let cleaned = false;
+      let autoTimer = null;
+
+      const disconnectCryBus = () => {
+        if (cryBus) {
+          try {
+            cryBus.disconnect();
+          } catch {
+            // Ignore
+          }
+        }
+      };
+
+      const cleanup = (immediate = false) => {
+        if (cleaned) return;
+        cleaned = true;
+        if (autoTimer !== null) {
+          clearTimeout(autoTimer);
+          this._cryDisconnectTimers.delete(autoTimer);
+          autoTimer = null;
+        }
+        if (isQueued && this._pendingVoices.length > 0) {
+          this._pendingVoices = this._pendingVoices.filter((entry) => entry?.opts?._cryToken !== cryToken);
+        }
+
+        const activeCtx = this.ctx;
+        const now = activeCtx && typeof activeCtx.currentTime === 'number' ? activeCtx.currentTime : 0;
+        const fadeSec = immediate ? 0.004 : 0.018;
+
+        if (cryBus) {
+          try {
+            cryBus.gain?.cancelScheduledValues?.(now);
+            const curGain = typeof cryBus.gain?.value === 'number' && cryBus.gain.value > 0.0001
+              ? cryBus.gain.value
+              : 1;
+            cryBus.gain?.setValueAtTime?.(curGain, now);
+            cryBus.gain?.linearRampToValueAtTime?.(0.0001, now + fadeSec);
+          } catch {
+            // Ignore mock/parameter errors
+          }
+        }
+
+        for (const osc of oscNodes) {
+          if (typeof osc.stop === 'function') {
+            try {
+              osc.stop(immediate ? now : now + fadeSec);
+            } catch {
+              // Ignore already-stopped nodes
+            }
+          }
+        }
+
+        if (immediate || !hasLiveOsc) {
+          for (const osc of oscNodes) {
+            if (typeof osc.disconnect === 'function') {
+              try {
+                osc.disconnect();
+              } catch {
+                // Ignore
+              }
+            }
+          }
+          disconnectCryBus();
+          return;
+        }
+
+        const discTimer = setTimeout(() => {
+          this._cryDisconnectTimers.delete(discTimer);
+          for (const osc of oscNodes) {
+            if (typeof osc.disconnect === 'function') {
+              try {
+                osc.disconnect();
+              } catch {
+                // Ignore
+              }
+            }
+          }
+          disconnectCryBus();
+        }, Math.ceil(fadeSec * 1000) + 6);
+        this._cryDisconnectTimers.add(discTimer);
+      };
+
+      if (cryBus || hasLiveOsc) {
+        autoTimer = setTimeout(() => {
+          this._cryDisconnectTimers.delete(autoTimer);
+          autoTimer = null;
+          if (this._activeCryCleanup === cleanup) {
+            this._activeCryCleanup = null;
+          }
+          if (!cleaned) {
+            cleaned = true;
+            disconnectCryBus();
+          }
+        }, Math.ceil((duration + 0.09) * 1000));
+        this._cryDisconnectTimers.add(autoTimer);
+      }
+
+      this._activeCryCleanup = cleanup;
     }
 
     return {

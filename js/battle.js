@@ -518,6 +518,7 @@ export class BattleEngine {
     this.typingHoldTimer = null;
     this.typingResolve = null;
     this.typingFullText = '';
+    this._lastSkipPointerUpAt = -1000;
 
     this.displayedEnemyHp = 0;
     this.displayedPlayerHp = 0;
@@ -577,7 +578,25 @@ export class BattleEngine {
 
   bindUI() {
     const signal = this._uiAbort.signal;
-    this.logEl?.addEventListener('click', () => this.finishTypewriter(), { signal });
+    const handleTapToSkip = (event, isPointerUp = false) => {
+      if (this.teamDrawerEl && !this.teamDrawerEl.hidden) return;
+      if (event?.target?.closest?.('#battle-team-drawer, button, input, select, a')) return;
+      if (isPointerUp && event?.pointerType === 'mouse' && event.button !== 0) return;
+      const isTypewriterActive = this.typingTimer !== null || this.typingHoldTimer !== null || this.typingResolve !== null;
+      if (!isTypewriterActive) return;
+
+      const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+      if (isPointerUp) {
+        this._lastSkipPointerUpAt = now;
+      } else if (now - this._lastSkipPointerUpAt < 150) {
+        return;
+      }
+      this.finishTypewriter();
+    };
+    this.logEl?.addEventListener('pointerup', (e) => handleTapToSkip(e, true), { signal });
+    this.logEl?.addEventListener('click', (e) => handleTapToSkip(e, false), { signal });
+    this.stageEl?.addEventListener('pointerup', (e) => handleTapToSkip(e, true), { signal });
+    this.stageEl?.addEventListener('click', (e) => handleTapToSkip(e, false), { signal });
     this.btnBall?.addEventListener('click', () => this.handleThrowBall('pokeball'), { signal });
     this.btnGreat?.addEventListener('click', () => this.handleThrowBall('great'), { signal });
     this.btnStar?.addEventListener('click', () => this.handleThrowBall('star'), { signal });
@@ -1036,6 +1055,8 @@ export class BattleEngine {
     this.abilityStageFx = [];
     this.popups = [];
     this.shakeTimer = 0;
+    this.shakeDuration = 0;
+    this.shakeIntensity = 0;
     this.hideAbilityBanner();
     this.clearCelebrationGlow();
     if (this.stageEl) {
@@ -1423,7 +1444,7 @@ export class BattleEngine {
         || move.category === 'shield'
         || move.damageClass === 'status'
         || (Number(move.power) || 0) <= 0;
-      const eff = isNonAttack ? 1 : computeTypeEffectiveness(move.type, this.enemy?.type);
+      const eff = isNonAttack || !this.enemy ? 1 : computeTypeEffectiveness(move.type, this.enemy.type);
       const pp = this.player.getMovePp(move.id);
       const outOfPp = pp.current <= 0 && hasAnyPp;
       const ppRatio = pp.max > 0 ? pp.current / pp.max : 0;
@@ -1444,17 +1465,19 @@ export class BattleEngine {
 
       let effBadgeHtml = '';
       if (move.category === 'heal') {
-        effBadgeHtml = '<span class="move-eff-tag is-heal">♥ RECOVER</span>';
+        effBadgeHtml = '<span class="move-eff-tag is-heal" title="Restores partner HP">♥ RECOVER</span>';
       } else if (move.category === 'buff') {
-        effBadgeHtml = '<span class="move-eff-tag is-buff">⚡ STAT UP</span>';
+        effBadgeHtml = '<span class="move-eff-tag is-buff" title="Boosts partner stats">⚡ STAT UP</span>';
       } else if (move.category === 'shield') {
-        effBadgeHtml = '<span class="move-eff-tag is-shield">🛡️ GUARD</span>';
+        effBadgeHtml = '<span class="move-eff-tag is-shield" title="Raises partner defense">🛡️ GUARD</span>';
       } else if (eff >= 2) {
-        effBadgeHtml = '<span class="move-eff-tag move-eff-badge is-super">2x SUPER</span>';
+        effBadgeHtml = '<span class="move-eff-tag move-eff-badge move-eff-pill is-super" title="Super Effective! (2× damage)">2x SUPER</span>';
       } else if (eff > 1) {
-        effBadgeHtml = '<span class="move-eff-tag move-eff-badge is-boost">1.5x BOOST</span>';
+        effBadgeHtml = '<span class="move-eff-tag move-eff-badge move-eff-pill is-boost" title="Good Boost! (1.5× damage)">1.5x BOOST</span>';
+      } else if (eff === 0) {
+        effBadgeHtml = '<span class="move-eff-tag move-eff-badge move-eff-pill is-immune" title="No Effect (0× damage)">0x IMMUNE</span>';
       } else if (eff < 1) {
-        effBadgeHtml = '<span class="move-eff-tag move-eff-badge is-resist">0.5x RESIST</span>';
+        effBadgeHtml = '<span class="move-eff-tag move-eff-badge move-eff-pill is-resist" title="Resisted (½× damage)">0.5x RESIST</span>';
       }
 
       const statShort = { atk: 'ATK', def: 'DEF', spd: 'SPD' }[move.buffStat || 'atk'] || 'STAT';
@@ -1687,7 +1710,20 @@ export class BattleEngine {
     };
   }
 
+  prefersReducedMotion() {
+    return typeof window !== 'undefined'
+      && typeof window.matchMedia === 'function'
+      && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  }
+
   triggerScreenShake(intensity = 6, durationMs = 260) {
+    if (this.prefersReducedMotion()) {
+      this.shakeIntensity = 0;
+      this.shakeDuration = 0;
+      this.shakeTimer = 0;
+      if (this.stageEl) this.stageEl.style.transform = '';
+      return;
+    }
     this.shakeIntensity = Math.min(16, Math.max(2, intensity));
     this.shakeDuration = Math.max(0.08, durationMs / 1000);
     this.shakeTimer = this.shakeDuration;
