@@ -177,22 +177,113 @@ function makeUid() {
   return `pk_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
+function normalizeUid(raw) {
+  if (typeof raw === 'string') {
+    const trimmed = raw.trim();
+    if (trimmed.length > 0) return trimmed;
+  } else if (typeof raw === 'number' && Number.isFinite(raw)) {
+    return String(raw);
+  }
+  return makeUid();
+}
+
 function normalizeNickname(raw) {
   if (typeof raw !== 'string') return null;
   const trimmed = raw.trim().slice(0, 14).trim();
   return trimmed.length > 0 ? trimmed : null;
 }
 
-function normalizeBond(raw) {
-  if (raw === null || raw === undefined || raw === '') return 20;
+function normalizeBoundedInt(raw, min, max, fallback) {
+  if (raw === null || raw === undefined || raw === '' || typeof raw === 'boolean') return fallback;
+  if (raw === Infinity) return max;
+  if (raw === -Infinity) return min;
   const num = Number(raw);
-  return Number.isFinite(num) ? Math.max(0, Math.min(100, Math.round(num))) : 20;
+  return Number.isFinite(num) ? Math.max(min, Math.min(max, Math.round(num))) : fallback;
+}
+
+function normalizeLevel(raw, fallback = 5) {
+  return normalizeBoundedInt(raw, 1, 50, fallback);
+}
+
+function normalizeXp(raw) {
+  if (raw === null || raw === undefined || raw === '' || typeof raw === 'boolean') return 0;
+  if (raw === -Infinity) return 0;
+  const num = Number(raw);
+  return Number.isFinite(num) ? Math.max(0, Math.round(num)) : 0;
+}
+
+function normalizeHp(raw, maxHp) {
+  return normalizeBoundedInt(raw, 0, maxHp, maxHp);
+}
+
+function normalizeBond(raw) {
+  return normalizeBoundedInt(raw, 0, 100, 20);
 }
 
 function normalizeUpgradeTier(raw) {
-  if (raw === null || raw === undefined || raw === '') return 0;
-  const num = Number(raw);
-  return Number.isFinite(num) ? Math.max(0, Math.min(MAX_UPGRADE_TIER, Math.round(num))) : 0;
+  return normalizeBoundedInt(raw, 0, MAX_UPGRADE_TIER, 0);
+}
+
+function parseFiniteMovePp(val) {
+  if (val === null || val === undefined || val === '' || typeof val === 'boolean') return NaN;
+  if (val === Infinity) return Number.MAX_SAFE_INTEGER;
+  if (val === -Infinity) return 0;
+  const num = Number(val);
+  return Number.isFinite(num) ? num : NaN;
+}
+
+function sanitizeMovePp(species, rawMovePp, rawPp, rawMoves) {
+  const pool = Array.isArray(species?.movePool) ? species.movePool : [];
+  const movesByIdPp = new Map();
+
+  if (Array.isArray(rawMoves)) {
+    for (let idx = 0; idx < rawMoves.length; idx += 1) {
+      const item = rawMoves[idx];
+      if (typeof item === 'string' && MOVES[item]) {
+        if (Array.isArray(rawPp) && idx < rawPp.length) {
+          const parsed = parseFiniteMovePp(rawPp[idx]);
+          if (Number.isFinite(parsed)) movesByIdPp.set(item, parsed);
+        }
+      } else if (item && typeof item === 'object' && !Array.isArray(item)) {
+        const mId = typeof item.id === 'string' ? item.id : (typeof item.moveId === 'string' ? item.moveId : null);
+        if (mId && MOVES[mId]) {
+          const rawVal = item.pp ?? item.currentPp ?? item.current;
+          const parsed = parseFiniteMovePp(rawVal);
+          if (Number.isFinite(parsed)) movesByIdPp.set(mId, parsed);
+        }
+      }
+    }
+  }
+
+  const out = {};
+  for (let i = 0; i < pool.length; i += 1) {
+    const moveId = pool[i];
+    const maxPp = MOVES[moveId]?.pp || 20;
+    let candidate = NaN;
+
+    if (rawMovePp && typeof rawMovePp === 'object') {
+      if (Array.isArray(rawMovePp)) {
+        candidate = parseFiniteMovePp(rawMovePp[i]);
+      } else if (Object.prototype.hasOwnProperty.call(rawMovePp, moveId)) {
+        candidate = parseFiniteMovePp(rawMovePp[moveId]);
+      }
+    }
+
+    if (!Number.isFinite(candidate) && movesByIdPp.has(moveId)) {
+      candidate = movesByIdPp.get(moveId);
+    }
+
+    if (!Number.isFinite(candidate) && rawPp && typeof rawPp === 'object') {
+      if (Array.isArray(rawPp)) {
+        candidate = parseFiniteMovePp(rawPp[i]);
+      } else if (Object.prototype.hasOwnProperty.call(rawPp, moveId)) {
+        candidate = parseFiniteMovePp(rawPp[moveId]);
+      }
+    }
+
+    out[moveId] = Number.isFinite(candidate) ? Math.max(0, Math.min(maxPp, Math.round(candidate))) : maxPp;
+  }
+  return out;
 }
 
 export class Pokemon {
@@ -204,28 +295,34 @@ export class Pokemon {
     hp = null,
     caughtBiome = 'wild',
     movePp = null,
+    pp = null,
+    moves = null,
     isShiny = false,
     nickname = null,
     bond = 20,
     upgradeTier = 0,
     isElite = false,
     encounterTrait = null,
+    abilityId = null,
   }) {
-    const species = SPECIES[speciesId];
+    const parsedSpeciesId = Number(speciesId);
+    const species = Number.isInteger(parsedSpeciesId) ? SPECIES[parsedSpeciesId] : null;
     if (!species) {
       throw new Error(`Unknown Pokémon speciesId: ${speciesId}`);
     }
-    this.uid = uid;
-    this.speciesId = Number(speciesId);
-    this.level = Math.max(1, Math.min(50, Number(level) || 5));
-    this.xp = Math.max(0, Number(xp) || 0);
-    this.caughtBiome = caughtBiome;
+    this.uid = normalizeUid(uid);
+    this.speciesId = parsedSpeciesId;
+    this.level = normalizeLevel(level, 5);
+    this.xp = normalizeXp(xp);
+    this.caughtBiome = typeof caughtBiome === 'string' && caughtBiome.trim() ? caughtBiome.trim() : 'wild';
     this.isShiny = Boolean(isShiny);
     this.nickname = normalizeNickname(nickname);
     this.bond = normalizeBond(bond);
     this.upgradeTier = normalizeUpgradeTier(upgradeTier);
     this.isElite = Boolean(isElite);
     this.encounterTrait = normalizeEncounterTrait(encounterTrait);
+    const rawAbilityId = typeof abilityId === 'string' && ABILITIES?.[abilityId] ? abilityId : null;
+    this._abilityId = rawAbilityId && rawAbilityId !== species.ability ? rawAbilityId : null;
 
     this.maxHp = 20;
     this.atk = 10;
@@ -234,14 +331,8 @@ export class Pokemon {
     this.xpToNext = 100;
     this.recalculateStats();
 
-    this.hp = hp === null || hp === undefined ? this.maxHp : Math.max(0, Math.min(this.maxHp, Number(hp)));
-
-    this.movePp = {};
-    for (const moveId of this.species.movePool) {
-      const maxPp = MOVES[moveId]?.pp || 20;
-      const saved = movePp && typeof movePp === 'object' ? Number(movePp[moveId]) : NaN;
-      this.movePp[moveId] = Number.isFinite(saved) ? Math.max(0, Math.min(maxPp, Math.round(saved))) : maxPp;
-    }
+    this.hp = normalizeHp(hp, this.maxHp);
+    this.movePp = sanitizeMovePp(this.species, movePp, pp, moves);
 
     this.resetBattleState();
   }
@@ -323,6 +414,9 @@ export class Pokemon {
   }
 
   get abilityId() {
+    if (this._abilityId && ABILITIES?.[this._abilityId]) {
+      return this._abilityId;
+    }
     const id = this.species?.ability;
     return id && ABILITIES?.[id] ? id : null;
   }
@@ -337,13 +431,19 @@ export class Pokemon {
   }
 
   recalculateStats() {
-    const base = this.species.baseStats;
-    const lv = this.level;
-    const rawMaxHp = Math.floor(((base.hp * 2) * lv) / 35) + lv + 18;
-    const rawAtk = Math.floor(((base.atk * 2) * lv) / 40) + 7;
-    const rawDef = Math.floor(((base.def * 2) * lv) / 40) + 6;
-    const rawSpd = Math.floor(((base.spd * 2) * lv) / 40) + 6;
+    const base = this.species?.baseStats || {};
+    const safeHp = Number.isFinite(Number(base.hp)) && Number(base.hp) > 0 ? Number(base.hp) : 45;
+    const safeAtk = Number.isFinite(Number(base.atk)) && Number(base.atk) > 0 ? Number(base.atk) : 45;
+    const safeDef = Number.isFinite(Number(base.def)) && Number(base.def) > 0 ? Number(base.def) : 45;
+    const safeSpd = Number.isFinite(Number(base.spd)) && Number(base.spd) > 0 ? Number(base.spd) : 45;
+    const lv = normalizeLevel(this.level, 5);
+    this.level = lv;
     const tier = normalizeUpgradeTier(this.upgradeTier);
+    this.upgradeTier = tier;
+    const rawMaxHp = Math.floor(((safeHp * 2) * lv) / 35) + lv + 18;
+    const rawAtk = Math.floor(((safeAtk * 2) * lv) / 40) + 7;
+    const rawDef = Math.floor(((safeDef * 2) * lv) / 40) + 6;
+    const rawSpd = Math.floor(((safeSpd * 2) * lv) / 40) + 6;
     if (tier > 0) {
       const mult = 1 + tier * 0.05;
       this.maxHp = Math.round(rawMaxHp * mult);
@@ -400,20 +500,35 @@ export class Pokemon {
   }
 
   healAmount(amount) {
-    const before = this.hp;
-    this.hp = Math.min(this.maxHp, this.hp + Math.max(1, Math.round(amount)));
+    const n = Number(amount);
+    if (!Number.isFinite(n)) return 0;
+    const before = normalizeHp(this.hp, this.maxHp);
+    this.hp = Math.min(this.maxHp, before + Math.max(1, Math.round(n)));
     return this.hp - before;
   }
 
   takeDamage(amount) {
-    const before = this.hp;
-    this.hp = Math.max(0, this.hp - Math.max(0, Math.round(amount)));
+    const n = Number(amount);
+    if (!Number.isFinite(n)) return 0;
+    const before = normalizeHp(this.hp, this.maxHp);
+    this.hp = Math.max(0, before - Math.max(0, Math.round(n)));
     return before - this.hp;
   }
 
   gainXp(amount) {
-    const oldLevel = this.level;
-    this.xp += Math.max(1, Math.round(amount));
+    const n = Number(amount);
+    const oldLevel = normalizeLevel(this.level, 5);
+    this.level = oldLevel;
+    this.xp = normalizeXp(this.xp);
+    if (!Number.isFinite(n)) {
+      return {
+        leveledUp: false,
+        levelsGained: 0,
+        oldLevel,
+        newLevel: oldLevel,
+      };
+    }
+    this.xp += Math.max(1, Math.round(n));
     while (this.level < 50 && this.xp >= this.xpToNext) {
       this.xp -= this.xpToNext;
       const oldMax = this.maxHp;
@@ -504,6 +619,7 @@ export class Pokemon {
     const prevPp = this.movePp || {};
 
     this.speciesId = targetId;
+    this._abilityId = null;
     this.recalculateStats();
 
     if (this.hp > 0) {
@@ -548,12 +664,24 @@ export class Pokemon {
       upgradeTier: this.upgradeTier,
       isElite: Boolean(this.isElite),
       encounterTrait: this.encounterTrait,
+      abilityId: this.abilityId,
       movePp: { ...this.movePp },
     };
   }
 
   static fromJSON(data) {
-    return new Pokemon(data);
+    if (!data || typeof data !== 'object' || Array.isArray(data)) {
+      throw new Error('Invalid Pokémon JSON data');
+    }
+    const abilityId = typeof data.abilityId === 'string'
+      ? data.abilityId
+      : (typeof data.ability === 'string'
+        ? data.ability
+        : (data.ability && typeof data.ability === 'object' ? data.ability.id : null));
+    return new Pokemon({
+      ...data,
+      abilityId,
+    });
   }
 }
 
@@ -568,6 +696,7 @@ export function createPokemon(speciesId, level = 5, biome = 'wild', options = {}
     upgradeTier: options?.upgradeTier ?? 0,
     isElite: Boolean(options?.isElite),
     encounterTrait: options?.encounterTrait ?? null,
+    abilityId: options?.abilityId ?? null,
   });
 }
 

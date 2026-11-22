@@ -61,7 +61,7 @@ const SHRINE_BY_ID = new Map(
 
 export function resolveSpeciesId(raw) {
   if (typeof raw === 'number') {
-    return Number.isInteger(raw) && SPECIES[raw] ? raw : null;
+    return Number.isInteger(raw) && raw >= 1 && raw <= 1025 && SPECIES[raw] ? raw : null;
   }
   if (typeof raw !== 'string') return null;
 
@@ -71,11 +71,11 @@ export function resolveSpeciesId(raw) {
   const noHash = trimmed.startsWith('#') ? trimmed.slice(1).trim() : trimmed;
   if (/^\d+$/.test(noHash)) {
     const num = Number(noHash);
-    return Number.isSafeInteger(num) && SPECIES[num] ? num : null;
+    return Number.isSafeInteger(num) && num >= 1 && num <= 1025 && SPECIES[num] ? num : null;
   }
 
   const byName = SPECIES_ID_BY_NAME.get(trimmed.toLowerCase());
-  return byName !== undefined && SPECIES[byName] ? byName : null;
+  return byName !== undefined && byName >= 1 && byName <= 1025 && SPECIES[byName] ? byName : null;
 }
 
 function isPlainObject(val) {
@@ -152,7 +152,11 @@ function computeSyncedPokedexState(profile) {
     }
   } else if (isPlainObject(rawSeen)) {
     for (const [k, v] of Object.entries(rawSeen)) {
-      if (!v) continue;
+      if (v === false || v === null || v === undefined || v === '') continue;
+      if (typeof v !== 'boolean') {
+        const num = Number(v);
+        if (!Number.isFinite(num) || num <= 0) continue;
+      }
       const id = resolveSpeciesId(k);
       if (id !== null) seenSet.add(id);
     }
@@ -174,7 +178,7 @@ function computeSyncedPokedexState(profile) {
   const seen = [...seenSet].sort((a, b) => a - b);
   const sumOfCaughtCounts = Object.values(caught).reduce((sum, count) => sum + count, 0);
   const prevTotalRaw = Number(profile?.stats?.totalCaught);
-  const safePrevTotal = Number.isFinite(prevTotalRaw) && prevTotalRaw >= 0 ? prevTotalRaw : 0;
+  const safePrevTotal = Number.isFinite(prevTotalRaw) && prevTotalRaw >= 0 ? Math.floor(prevTotalRaw) : 0;
   const totalCaught = Math.max(safePrevTotal, sumOfCaughtCounts);
 
   return {
@@ -351,18 +355,28 @@ export function sanitizePosition(rawPos) {
   return fallbackNearestSafe(ix, iy, dir);
 }
 
+function toNonNegInt(rawVal, fallback = 0) {
+  if (rawVal === null || rawVal === undefined || rawVal === '' || typeof rawVal === 'boolean') {
+    return fallback;
+  }
+  if (rawVal === -Infinity) return 0;
+  const num = Number(rawVal);
+  return Number.isFinite(num) ? Math.max(0, Math.floor(num)) : fallback;
+}
+
 function hydrateGems(rawGems) {
+  const src = isPlainObject(rawGems) ? rawGems : null;
   const gems = {};
   for (const key of Object.keys(EVOLUTION_ITEMS)) {
-    const val = Number(rawGems?.[key]);
-    gems[key] = Number.isFinite(val) && val > 0 ? Math.floor(val) : 0;
+    gems[key] = src ? toNonNegInt(src[key], 0) : 0;
   }
-  if (rawGems && typeof rawGems === 'object') {
-    for (const [key, rawVal] of Object.entries(rawGems)) {
+  if (src) {
+    for (const [key, rawVal] of Object.entries(src)) {
+      if (key === '__proto__' || key === 'constructor' || key === 'prototype') continue;
       if (!(key in gems)) {
-        const val = Number(rawVal);
-        if (Number.isFinite(val) && val > 0) {
-          gems[key] = Math.floor(val);
+        const val = toNonNegInt(rawVal, 0);
+        if (val > 0) {
+          gems[key] = val;
         }
       }
     }
@@ -391,16 +405,11 @@ function hydrateAppearance(rawAppearance) {
 }
 
 function hydrateStarShards(rawShards, fallback = 2) {
-  if (rawShards === null || rawShards === undefined || rawShards === '') return fallback;
-  const num = Number(rawShards);
-  return Number.isFinite(num) ? Math.max(0, Math.floor(num)) : fallback;
-}
-
-function toNonNegInt(rawVal, fallback = 0) {
-  if (rawVal === null || rawVal === undefined || rawVal === '' || typeof rawVal === 'boolean') {
+  if (rawShards === null || rawShards === undefined || rawShards === '' || typeof rawShards === 'boolean') {
     return fallback;
   }
-  const num = Number(rawVal);
+  if (rawShards === -Infinity) return 0;
+  const num = Number(rawShards);
   return Number.isFinite(num) ? Math.max(0, Math.floor(num)) : fallback;
 }
 
@@ -409,12 +418,9 @@ function hydrateCountMap(rawMap) {
   if (!isPlainObject(rawMap)) return out;
   for (const [key, rawVal] of Object.entries(rawMap)) {
     const id = String(key).trim();
-    if (!id) continue;
-    if (rawVal === null || rawVal === undefined || rawVal === '' || typeof rawVal === 'boolean') continue;
-    const num = Number(rawVal);
-    if (Number.isFinite(num) && num >= 0) {
-      out[id] = Math.floor(num);
-    }
+    if (!id || id === '__proto__' || id === 'constructor' || id === 'prototype') continue;
+    if (rawVal === undefined) continue;
+    out[id] = toNonNegInt(rawVal, 0);
   }
   return out;
 }
@@ -439,12 +445,14 @@ function getCaughtSpeciesCount(profile) {
 
 function hydrateArcade(rawArcade, autoUnlocked = false) {
   const src = isPlainObject(rawArcade) ? rawArcade : {};
+  const secretKnocks = toNonNegInt(src.secretKnocks, 0);
+  const rawUnlocked = Boolean(src.unlocked && src.unlocked !== 'false');
   return {
-    unlocked: Boolean(src.unlocked || autoUnlocked),
+    unlocked: Boolean(rawUnlocked || autoUnlocked || secretKnocks >= 3),
     highScore: toNonNegInt(src.highScore, 0),
     plays: toNonNegInt(src.plays, 0),
     bestWave: toNonNegInt(src.bestWave, 0),
-    secretKnocks: toNonNegInt(src.secretKnocks, 0),
+    secretKnocks,
   };
 }
 
@@ -523,12 +531,54 @@ function createFreshSaveState() {
 }
 
 function safeHydrateMon(item) {
-  if (!item || typeof item !== 'object') return null;
+  if (!item || typeof item !== 'object' || Array.isArray(item)) return null;
   try {
+    if (item instanceof Pokemon) {
+      const clean = Pokemon.fromJSON(item);
+      Object.assign(item, clean);
+      return item;
+    }
     return Pokemon.fromJSON(item);
   } catch {
     return null;
   }
+}
+
+function generateUniqueUid(usedUids) {
+  let candidate = '';
+  do {
+    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+      candidate = crypto.randomUUID();
+    } else {
+      candidate = `pk_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
+    }
+  } while (!candidate || usedUids.has(candidate));
+  return candidate;
+}
+
+function deduplicateTeamAndBoxUids(profile, report = null) {
+  if (!profile || typeof profile !== 'object') return 0;
+  const seenUids = new Set();
+  let deduplicated = 0;
+  const allMons = [
+    ...(Array.isArray(profile.team) ? profile.team : []),
+    ...(Array.isArray(profile.box) ? profile.box : []),
+  ];
+  for (const mon of allMons) {
+    if (!mon || typeof mon !== 'object') continue;
+    const trimmedUid = typeof mon.uid === 'string' ? mon.uid.trim() : '';
+    if (!trimmedUid || seenUids.has(trimmedUid)) {
+      mon.uid = generateUniqueUid(seenUids);
+      deduplicated += 1;
+    } else {
+      mon.uid = trimmedUid;
+    }
+    seenUids.add(mon.uid);
+  }
+  if (report && typeof report === 'object') {
+    report.uidsDeduplicated = (report.uidsDeduplicated || 0) + deduplicated;
+  }
+  return deduplicated;
 }
 
 function repairProfileParty(profile) {
@@ -546,16 +596,47 @@ function repairProfileParty(profile) {
   return profile;
 }
 
-function hydrateProfile(raw, trainerId) {
-  const fresh = createFreshProfile(trainerId);
-  if (!raw || typeof raw !== 'object') return fresh;
+function hydrateProfileBag(rawBag) {
+  const src = isPlainObject(rawBag) ? rawBag : null;
+  return {
+    potions: src && src.potions !== undefined ? toNonNegInt(src.potions, 0) : 5,
+    greatBalls: src && src.greatBalls !== undefined ? toNonNegInt(src.greatBalls, 0) : 3,
+    starBalls: src && src.starBalls !== undefined ? toNonNegInt(src.starBalls, 0) : 0,
+    starShards: src && src.starShards !== undefined ? toNonNegInt(src.starShards, 0) : 2,
+    gems: hydrateGems(src?.gems),
+  };
+}
 
-  const team = Array.isArray(raw.team)
-    ? raw.team.map(safeHydrateMon).filter(Boolean).slice(0, 6)
-    : [];
-  const box = Array.isArray(raw.box)
-    ? raw.box.map(safeHydrateMon).filter(Boolean)
-    : [];
+function hydrateProfileStats(rawStats) {
+  const src = isPlainObject(rawStats) ? rawStats : {};
+  return {
+    battlesWon: toNonNegInt(src.battlesWon, 0),
+    totalCaught: toNonNegInt(src.totalCaught, 0),
+    steps: toNonNegInt(src.steps, 0),
+    evolutions: toNonNegInt(src.evolutions, 0),
+    shiniesFound: toNonNegInt(src.shiniesFound, 0),
+    upgrades: toNonNegInt(src.upgrades, 0),
+  };
+}
+
+export function validateAndRepairProfile(raw, trainerIdFallback = null, report = null) {
+  const fallbackTrainer = TRAINERS[trainerIdFallback] ? trainerIdFallback : 'violet';
+  if (!isPlainObject(raw)) {
+    return createFreshProfile(fallbackTrainer);
+  }
+
+  const trainerId = TRAINERS[raw.trainerId] ? raw.trainerId : fallbackTrainer;
+
+  const rawTeamList = Array.isArray(raw.team) ? raw.team : [];
+  const rawBoxList = Array.isArray(raw.box) ? raw.box : [];
+  const hydratedTeamAll = rawTeamList.map(safeHydrateMon).filter(Boolean);
+  const hydratedBoxRaw = rawBoxList.map(safeHydrateMon).filter(Boolean);
+
+  const droppedTeam = rawTeamList.length - hydratedTeamAll.length;
+  const droppedBox = rawBoxList.length - hydratedBoxRaw.length;
+  const team = hydratedTeamAll.slice(0, 6);
+  const teamOverflow = hydratedTeamAll.slice(6);
+  const box = [...hydratedBoxRaw, ...teamOverflow];
 
   const starterId = resolveSpeciesId(raw.starterId);
   const rawPokedex = isPlainObject(raw.pokedex) ? raw.pokedex : {};
@@ -566,7 +647,7 @@ function hydrateProfile(raw, trainerId) {
     ? [...rawPokedex.caught]
     : (isPlainObject(rawPokedex.caught) ? { ...rawPokedex.caught } : {});
 
-  const profile = repairProfileParty({
+  const repaired = {
     trainerId,
     starterId,
     pos: sanitizePosition(raw.pos),
@@ -587,88 +668,260 @@ function hydrateProfile(raw, trainerId) {
     rivalRematchCounts: hydrateCountMap(raw.rivalRematchCounts),
     shrineTrialCounts: hydrateCountMap(raw.shrineTrialCounts),
     recentEncounters: hydrateRecentEncounters(raw.recentEncounters),
-    bag: {
-      potions: Math.max(0, Number.isFinite(Number(raw.bag?.potions)) ? Number(raw.bag.potions) : 5),
-      greatBalls: Math.max(0, Number.isFinite(Number(raw.bag?.greatBalls)) ? Number(raw.bag.greatBalls) : 3),
-      starBalls: Math.max(0, Math.floor(Number(raw.bag?.starBalls) || 0)),
-      starShards: hydrateStarShards(raw.bag?.starShards, 2),
-      gems: hydrateGems(raw.bag?.gems),
-    },
-    stats: {
-      battlesWon: Math.max(0, Number.isFinite(Number(raw.stats?.battlesWon)) ? Number(raw.stats.battlesWon) : 0),
-      totalCaught: Math.max(0, Number.isFinite(Number(raw.stats?.totalCaught)) ? Number(raw.stats.totalCaught) : 0),
-      steps: Math.max(0, Number.isFinite(Number(raw.stats?.steps)) ? Number(raw.stats.steps) : 0),
-      evolutions: Math.max(0, Number.isFinite(Number(raw.stats?.evolutions)) ? Number(raw.stats.evolutions) : 0),
-      shiniesFound: Math.max(0, Number.isFinite(Number(raw.stats?.shiniesFound)) ? Number(raw.stats.shiniesFound) : 0),
-      upgrades: Math.max(0, Number.isFinite(Number(raw.stats?.upgrades)) ? Math.floor(Number(raw.stats.upgrades)) : 0),
-    },
-  });
+    bag: hydrateProfileBag(raw.bag),
+    stats: hydrateProfileStats(raw.stats),
+  };
 
-  syncProfilePokedex(profile);
-  const autoUnlocked = profile.badges.length >= 1 || getCaughtSpeciesCount(profile) >= 5;
-  profile.arcade = hydrateArcade(raw.arcade, autoUnlocked);
-  return profile;
+  Object.assign(raw, repaired);
+  repairProfileParty(raw);
+  deduplicateTeamAndBoxUids(raw, report);
+  syncProfilePokedex(raw);
+
+  const autoUnlocked = raw.badges.length >= 1 || getCaughtSpeciesCount(raw) >= 5;
+  raw.arcade = hydrateArcade(raw.arcade, autoUnlocked);
+
+  if (report && typeof report === 'object') {
+    report.teamOverflowRescued = (report.teamOverflowRescued || 0) + teamOverflow.length;
+    report.invalidMonsDropped = (report.invalidMonsDropped || 0) + droppedTeam + droppedBox;
+  }
+
+  return raw;
+}
+
+function hydrateProfile(raw, trainerId, report = null) {
+  if (!isPlainObject(raw)) {
+    return createFreshProfile(trainerId);
+  }
+  return validateAndRepairProfile({ ...raw, trainerId }, trainerId, report);
 }
 
 export class StorageManager {
   constructor(storageKey = STORAGE_KEY) {
     this.storageKey = storageKey;
     this.memoryFallback = null;
+    this.lastSaveError = null;
+    this.lastLoadError = null;
+    this.lastRepairSummary = { uidsDeduplicated: 0, teamOverflowRescued: 0, invalidMonsDropped: 0 };
     this.state = this.load();
   }
 
+  _getStorage() {
+    try {
+      if (typeof window !== 'undefined' && window?.localStorage) {
+        return window.localStorage;
+      }
+      if (typeof globalThis !== 'undefined' && globalThis?.localStorage) {
+        return globalThis.localStorage;
+      }
+    } catch {
+      return null;
+    }
+    return null;
+  }
+
+  _formatStorageError(err) {
+    if (!err) return 'StorageError';
+    const name = typeof err.name === 'string' && err.name ? err.name : '';
+    const msg = typeof err.message === 'string' && err.message ? err.message : String(err);
+    if (name && msg && !msg.includes(name)) return `${name}: ${msg}`;
+    return name || msg || 'StorageError';
+  }
+
+  _safeGetItem(key = this.storageKey, { recordLoadError = false } = {}) {
+    try {
+      const store = this._getStorage();
+      if (!store || typeof store.getItem !== 'function') {
+        if (recordLoadError) this.lastLoadError = 'localStorage unavailable';
+        return null;
+      }
+      const val = store.getItem(key);
+      if (recordLoadError) this.lastLoadError = null;
+      return val;
+    } catch (err) {
+      if (recordLoadError) this.lastLoadError = this._formatStorageError(err);
+      return null;
+    }
+  }
+
+  _safeSetItem(key = this.storageKey, value) {
+    try {
+      const store = this._getStorage();
+      if (!store || typeof store.setItem !== 'function') {
+        this.lastSaveError = 'localStorage unavailable';
+        return false;
+      }
+      store.setItem(key, value);
+      this.lastSaveError = null;
+      return true;
+    } catch (err) {
+      this.lastSaveError = this._formatStorageError(err);
+      return false;
+    }
+  }
+
+  _safeRemoveItem(key = this.storageKey) {
+    try {
+      const store = this._getStorage();
+      if (!store || typeof store.removeItem !== 'function') {
+        return false;
+      }
+      store.removeItem(key);
+      return true;
+    } catch (err) {
+      this.lastSaveError = this._formatStorageError(err);
+      return false;
+    }
+  }
+
+  safeGetItem(key = this.storageKey) {
+    return this._safeGetItem(key);
+  }
+
+  safeSetItem(key = this.storageKey, value) {
+    return this._safeSetItem(key, value);
+  }
+
+  safeRemoveItem(key = this.storageKey) {
+    return this._safeRemoveItem(key);
+  }
+
+  validateAndRepairProfile(profile, trainerIdFallback = null) {
+    const report = { uidsDeduplicated: 0, teamOverflowRescued: 0, invalidMonsDropped: 0 };
+    const repaired = validateAndRepairProfile(profile, trainerIdFallback, report);
+    this.lastRepairSummary = report;
+    return repaired;
+  }
+
+  getStorageDiagnostics() {
+    let storageAvailable = false;
+    let persisted = null;
+    try {
+      const store = this._getStorage();
+      if (store && typeof store.getItem === 'function' && typeof store.setItem === 'function') {
+        persisted = store.getItem(this.storageKey);
+        storageAvailable = true;
+      }
+    } catch {
+      storageAvailable = false;
+      persisted = null;
+    }
+
+    const violet = this.state?.profiles?.violet;
+    const ozias = this.state?.profiles?.ozias;
+
+    return {
+      storageKey: this.storageKey,
+      storageAvailable,
+      lastSaveError: this.lastSaveError,
+      lastLoadError: this.lastLoadError,
+      usingMemoryFallback: this.lastSaveError !== null || !storageAvailable,
+      hasMemoryFallback: typeof this.memoryFallback === 'string',
+      persistedBytes: typeof persisted === 'string' ? persisted.length : 0,
+      memoryBytes: typeof this.memoryFallback === 'string' ? this.memoryFallback.length : 0,
+      version: this.state?.version ?? 2,
+      activeTrainerId: this.state?.activeTrainerId ?? null,
+      lastRepairs: { ...this.lastRepairSummary },
+      profiles: {
+        violet: {
+          teamCount: Array.isArray(violet?.team) ? violet.team.length : 0,
+          boxCount: Array.isArray(violet?.box) ? violet.box.length : 0,
+          caughtCount: isPlainObject(violet?.pokedex?.caught) ? Object.keys(violet.pokedex.caught).length : 0,
+          seenCount: Array.isArray(violet?.pokedex?.seen) ? violet.pokedex.seen.length : 0,
+        },
+        ozias: {
+          teamCount: Array.isArray(ozias?.team) ? ozias.team.length : 0,
+          boxCount: Array.isArray(ozias?.box) ? ozias.box.length : 0,
+          caughtCount: isPlainObject(ozias?.pokedex?.caught) ? Object.keys(ozias.pokedex.caught).length : 0,
+          seenCount: Array.isArray(ozias?.pokedex?.seen) ? ozias.pokedex.seen.length : 0,
+        },
+      },
+    };
+  }
+
   load() {
-    let rawJson = null;
+    let rawFromStorage = null;
+    let storageReadFailed = false;
     try {
-      rawJson = window.localStorage.getItem(this.storageKey);
-    } catch {
-      rawJson = this.memoryFallback;
+      const store = this._getStorage();
+      if (!store || typeof store.getItem !== 'function') {
+        storageReadFailed = true;
+        this.lastLoadError = 'localStorage unavailable';
+      } else {
+        rawFromStorage = store.getItem(this.storageKey);
+        this.lastLoadError = null;
+      }
+    } catch (err) {
+      storageReadFailed = true;
+      this.lastLoadError = this._formatStorageError(err);
     }
 
-    if (!rawJson) {
+    const useFallback = (storageReadFailed || this.lastSaveError !== null) && typeof this.memoryFallback === 'string';
+    const rawJson = useFallback ? this.memoryFallback : rawFromStorage;
+
+    if (!rawJson || typeof rawJson !== 'string') {
+      if (!storageReadFailed && this.lastSaveError === null) {
+        this.memoryFallback = null;
+      }
       return createFreshSaveState();
     }
 
+    let parsed = null;
     try {
-      const parsed = JSON.parse(rawJson);
-      return {
-        version: 2,
-        activeTrainerId: parsed.activeTrainerId && TRAINERS[parsed.activeTrainerId] ? parsed.activeTrainerId : null,
-        settings: {
-          muted: Boolean(parsed.settings?.muted ?? false),
-          crtEnabled: Boolean(parsed.settings?.crtEnabled ?? true),
-          showTouchPad: ['auto', 'show', 'hide'].includes(parsed.settings?.showTouchPad)
-            ? parsed.settings.showTouchPad
-            : 'auto',
-          battlePace: VALID_PACES.has(parsed.settings?.battlePace) ? parsed.settings.battlePace : 'cinema',
-        },
-        profiles: {
-          violet: hydrateProfile(parsed.profiles?.violet, 'violet'),
-          ozias: hydrateProfile(parsed.profiles?.ozias, 'ozias'),
-        },
-      };
+      parsed = JSON.parse(rawJson);
     } catch {
+      if (this.memoryFallback && this.memoryFallback !== rawJson) {
+        try {
+          parsed = JSON.parse(this.memoryFallback);
+        } catch {
+          parsed = null;
+        }
+      }
+    }
+
+    if (!isPlainObject(parsed)) {
       return createFreshSaveState();
     }
+
+    const report = { uidsDeduplicated: 0, teamOverflowRescued: 0, invalidMonsDropped: 0 };
+    const hydrated = {
+      version: 2,
+      activeTrainerId: parsed.activeTrainerId && TRAINERS[parsed.activeTrainerId] ? parsed.activeTrainerId : null,
+      settings: {
+        muted: Boolean(parsed.settings?.muted ?? false),
+        crtEnabled: Boolean(parsed.settings?.crtEnabled ?? true),
+        showTouchPad: ['auto', 'show', 'hide'].includes(parsed.settings?.showTouchPad)
+          ? parsed.settings.showTouchPad
+          : 'auto',
+        battlePace: VALID_PACES.has(parsed.settings?.battlePace) ? parsed.settings.battlePace : 'cinema',
+      },
+      profiles: {
+        violet: hydrateProfile(parsed.profiles?.violet, 'violet', report),
+        ozias: hydrateProfile(parsed.profiles?.ozias, 'ozias', report),
+      },
+    };
+    this.lastRepairSummary = report;
+    return hydrated;
   }
 
   save() {
     this.state.version = 2;
-    const serialized = JSON.stringify({
-      version: 2,
-      activeTrainerId: this.state.activeTrainerId,
-      settings: this.state.settings,
-      profiles: {
-        violet: this.serializeProfile(this.state.profiles.violet),
-        ozias: this.serializeProfile(this.state.profiles.ozias),
-      },
-    });
-    this.memoryFallback = serialized;
+    let serialized = '';
     try {
-      window.localStorage.setItem(this.storageKey, serialized);
-    } catch {
-      // Fallback already retained in memoryFallback if storage quota/privacy mode blocks writes
+      serialized = JSON.stringify({
+        version: 2,
+        activeTrainerId: this.state.activeTrainerId,
+        settings: this.state.settings,
+        profiles: {
+          violet: this.serializeProfile(this.state.profiles.violet),
+          ozias: this.serializeProfile(this.state.profiles.ozias),
+        },
+      });
+    } catch (err) {
+      this.lastSaveError = this._formatStorageError(err);
+      return false;
     }
+    this.memoryFallback = serialized;
+    return this._safeSetItem(this.storageKey, serialized);
   }
 
   syncPokedex(profile = this.getActiveProfile(), persist = true) {
@@ -703,6 +956,15 @@ export class StorageManager {
   }
 
   serializeProfile(profile) {
+    const cleanBag = isPlainObject(profile?.bag)
+      ? {
+          potions: toNonNegInt(profile.bag.potions, 0),
+          greatBalls: toNonNegInt(profile.bag.greatBalls, 0),
+          starBalls: toNonNegInt(profile.bag.starBalls, 0),
+          starShards: toNonNegInt(profile.bag.starShards, 0),
+          gems: hydrateGems(profile.bag.gems),
+        }
+      : { potions: 5, greatBalls: 3, starBalls: 0, starShards: 2, gems: hydrateGems(null) };
     return {
       ...profile,
       appearance: hydrateAppearance(profile.appearance),
@@ -711,8 +973,10 @@ export class StorageManager {
       shrineTrialCounts: hydrateCountMap(profile.shrineTrialCounts),
       recentEncounters: hydrateRecentEncounters(profile.recentEncounters),
       arcade: hydrateArcade(profile.arcade, false),
-      team: profile.team.map((p) => p.toJSON()),
-      box: profile.box.map((p) => p.toJSON()),
+      bag: cleanBag,
+      stats: hydrateProfileStats(profile.stats),
+      team: (Array.isArray(profile.team) ? profile.team : []).map((p) => (typeof p?.toJSON === 'function' ? p.toJSON() : p)),
+      box: (Array.isArray(profile.box) ? profile.box : []).map((p) => (typeof p?.toJSON === 'function' ? p.toJSON() : p)),
     };
   }
 
@@ -771,8 +1035,9 @@ export class StorageManager {
       syncProfilePokedex(profile);
     }
     this.recordSeen(numId, false);
-    profile.pokedex.caught[numId] = (profile.pokedex.caught[numId] || 0) + 1;
-    profile.stats.totalCaught = (Number(profile.stats?.totalCaught) || 0) + 1;
+    profile.pokedex.caught[numId] = toNonNegInt(profile.pokedex.caught[numId], 0) + 1;
+    if (!isPlainObject(profile.stats)) profile.stats = hydrateProfileStats(null);
+    profile.stats.totalCaught = toNonNegInt(profile.stats.totalCaught, 0) + 1;
     syncProfilePokedex(profile);
     this.evaluateBadges(false);
     this.save();
@@ -783,7 +1048,10 @@ export class StorageManager {
     const profile = this.getActiveProfile();
     if (!profile) return;
     profile.pos = { x, y, dir };
-    if (incSteps) profile.stats.steps += 1;
+    if (incSteps) {
+      if (!isPlainObject(profile.stats)) profile.stats = hydrateProfileStats(null);
+      profile.stats.steps = toNonNegInt(profile.stats.steps, 0) + 1;
+    }
     this.save();
   }
 
@@ -808,7 +1076,8 @@ export class StorageManager {
   recordShinyEncounter(persist = true) {
     const profile = this.getActiveProfile();
     if (!profile) return 0;
-    profile.stats.shiniesFound = (profile.stats.shiniesFound || 0) + 1;
+    if (!isPlainObject(profile.stats)) profile.stats = hydrateProfileStats(null);
+    profile.stats.shiniesFound = toNonNegInt(profile.stats.shiniesFound, 0) + 1;
     if (persist) this.save();
     return profile.stats.shiniesFound;
   }
@@ -823,11 +1092,25 @@ export class StorageManager {
     if (!isPlainObject(profile.pokedex) || !isPlainObject(profile.pokedex.caught)) {
       syncProfilePokedex(profile);
     }
+    if (!isPlainObject(profile.stats)) {
+      profile.stats = hydrateProfileStats(null);
+    }
+    if (!Array.isArray(profile.team)) profile.team = [];
+    if (!Array.isArray(profile.box)) profile.box = [];
+
+    const usedUids = new Set(
+      [...profile.team, ...profile.box].map((m) => (typeof m?.uid === 'string' ? m.uid.trim() : '')).filter(Boolean),
+    );
+    const monUid = typeof pokemonInstance.uid === 'string' ? pokemonInstance.uid.trim() : '';
+    if (!monUid || usedUids.has(monUid)) {
+      pokemonInstance.uid = generateUniqueUid(usedUids);
+    }
+
     this.recordSeen(numId, false);
-    profile.pokedex.caught[numId] = (profile.pokedex.caught[numId] || 0) + 1;
-    profile.stats.totalCaught = (Number(profile.stats?.totalCaught) || 0) + 1;
+    profile.pokedex.caught[numId] = toNonNegInt(profile.pokedex.caught[numId], 0) + 1;
+    profile.stats.totalCaught = toNonNegInt(profile.stats.totalCaught, 0) + 1;
     if (pokemonInstance.isShiny) {
-      profile.stats.shiniesFound = (profile.stats.shiniesFound || 0) + 1;
+      profile.stats.shiniesFound = toNonNegInt(profile.stats.shiniesFound, 0) + 1;
     }
 
     let destination = 'team';
@@ -886,8 +1169,10 @@ export class StorageManager {
     if (EVOLUTION_ITEMS[itemKey]) {
       return this.useGem(itemKey);
     }
-    if (!profile.bag || !profile.bag[itemKey] || profile.bag[itemKey] <= 0) return false;
-    profile.bag[itemKey] -= 1;
+    if (!profile.bag) return false;
+    const current = toNonNegInt(profile.bag[itemKey], 0);
+    if (current <= 0) return false;
+    profile.bag[itemKey] = current - 1;
     this.save();
     return true;
   }
@@ -895,19 +1180,25 @@ export class StorageManager {
   addGem(gemId, count = 1, persist = true) {
     const profile = this.getActiveProfile();
     if (!profile || !EVOLUTION_ITEMS[gemId]) return 0;
-    const add = Math.max(0, Math.round(Number(count) || 0));
+    const rawCount = Number(count);
+    const add = Number.isFinite(rawCount) ? Math.max(0, Math.round(rawCount)) : 0;
+    if (!profile.bag || typeof profile.bag !== 'object') {
+      profile.bag = { potions: 0, greatBalls: 0, starBalls: 0, starShards: 0, gems: hydrateGems(null) };
+    }
     if (!profile.bag.gems || typeof profile.bag.gems !== 'object') {
       profile.bag.gems = hydrateGems(null);
     }
-    profile.bag.gems[gemId] = Math.max(0, (profile.bag.gems[gemId] || 0) + add);
+    profile.bag.gems[gemId] = toNonNegInt(profile.bag.gems[gemId], 0) + add;
     if (persist) this.save();
     return profile.bag.gems[gemId];
   }
 
   useGem(gemId, persist = true) {
     const profile = this.getActiveProfile();
-    if (!profile || !profile.bag?.gems || (profile.bag.gems[gemId] || 0) <= 0) return false;
-    profile.bag.gems[gemId] -= 1;
+    if (!profile || !profile.bag?.gems) return false;
+    const current = toNonNegInt(profile.bag.gems[gemId], 0);
+    if (current <= 0) return false;
+    profile.bag.gems[gemId] = current - 1;
     if (persist) this.save();
     return true;
   }
@@ -918,7 +1209,8 @@ export class StorageManager {
     if (!profile.bag || typeof profile.bag !== 'object') {
       profile.bag = { potions: 0, greatBalls: 0, starBalls: 0, starShards: 0, gems: hydrateGems(null) };
     }
-    const add = Math.max(0, Math.round(Number(count) || 0));
+    const rawCount = Number(count);
+    const add = Number.isFinite(rawCount) ? Math.max(0, Math.round(rawCount)) : 0;
     const prev = hydrateStarShards(profile.bag.starShards, 0);
     profile.bag.starShards = prev + add;
     if (persist) this.save();
@@ -931,17 +1223,21 @@ export class StorageManager {
     if (!profile.bag || typeof profile.bag !== 'object') {
       profile.bag = { potions: 0, greatBalls: 0, starBalls: 0, starShards: 0, gems: hydrateGems(null) };
     }
-    const safePotions = Math.max(0, Math.round(Number(potions) || 0));
-    const safeBalls = Math.max(0, Math.round(Number(greatBalls) || 0));
-    const safeStarBalls = Math.max(0, Math.round(Number(starBalls) || 0));
-    const safeShards = Math.max(0, Math.round(Number(starShards) || 0));
-    profile.bag.potions = (Number(profile.bag.potions) || 0) + safePotions;
-    profile.bag.greatBalls = (Number(profile.bag.greatBalls) || 0) + safeBalls;
-    profile.bag.starBalls = (Number(profile.bag.starBalls) || 0) + safeStarBalls;
+    const safeRoundPos = (v) => {
+      const n = Number(v);
+      return Number.isFinite(n) ? Math.max(0, Math.round(n)) : 0;
+    };
+    const safePotions = safeRoundPos(potions);
+    const safeBalls = safeRoundPos(greatBalls);
+    const safeStarBalls = safeRoundPos(starBalls);
+    const safeShards = safeRoundPos(starShards);
+    profile.bag.potions = toNonNegInt(profile.bag.potions, 0) + safePotions;
+    profile.bag.greatBalls = toNonNegInt(profile.bag.greatBalls, 0) + safeBalls;
+    profile.bag.starBalls = toNonNegInt(profile.bag.starBalls, 0) + safeStarBalls;
     profile.bag.starShards = hydrateStarShards(profile.bag.starShards, 0) + safeShards;
     if (gems && typeof gems === 'object') {
       for (const [gemId, amount] of Object.entries(gems)) {
-        if (EVOLUTION_ITEMS[gemId] && Number(amount) > 0) {
+        if (EVOLUTION_ITEMS[gemId] && Number.isFinite(Number(amount)) && Number(amount) > 0) {
           this.addGem(gemId, Number(amount), false);
         }
       }
@@ -1134,8 +1430,9 @@ export class StorageManager {
 
     const evolution = mon.evolve(targetId);
     this.recordSeen(targetId, false);
-    profile.pokedex.caught[targetId] = (profile.pokedex.caught[targetId] || 0) + 1;
-    profile.stats.evolutions = (profile.stats.evolutions || 0) + 1;
+    profile.pokedex.caught[targetId] = toNonNegInt(profile.pokedex.caught[targetId], 0) + 1;
+    if (!isPlainObject(profile.stats)) profile.stats = hydrateProfileStats(null);
+    profile.stats.evolutions = toNonNegInt(profile.stats.evolutions, 0) + 1;
     syncProfilePokedex(profile);
 
     const newBadges = this.evaluateBadges(false);
@@ -1326,7 +1623,8 @@ export class StorageManager {
   recordBattleWin() {
     const profile = this.getActiveProfile();
     if (!profile) return [];
-    profile.stats.battlesWon += 1;
+    if (!isPlainObject(profile.stats)) profile.stats = hydrateProfileStats(null);
+    profile.stats.battlesWon = toNonNegInt(profile.stats.battlesWon, 0) + 1;
     const newBadges = this.evaluateBadges(false);
     this.save();
     return newBadges;
@@ -1352,9 +1650,15 @@ export class StorageManager {
   }
 
   updateSettings(partial) {
-    const next = { ...this.state.settings, ...partial };
+    const patch = isPlainObject(partial) ? partial : {};
+    const next = { ...this.state.settings, ...patch };
     if (!VALID_PACES.has(next.battlePace)) {
       next.battlePace = this.state.settings?.battlePace || 'cinema';
+    }
+    if (!['auto', 'show', 'hide'].includes(next.showTouchPad)) {
+      next.showTouchPad = ['auto', 'show', 'hide'].includes(this.state.settings?.showTouchPad)
+        ? this.state.settings.showTouchPad
+        : 'auto';
     }
     this.state.settings = next;
     this.save();
