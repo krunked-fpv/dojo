@@ -172,9 +172,49 @@ function escapeHtml(raw) {
     .replaceAll("'", '&#39;');
 }
 
-export function getBondTierSafe(rawBond) {
+function toNonNegIntSafe(v) {
+  if (v === null || v === undefined || v === '' || typeof v === 'boolean') return 0;
+  const num = Number(v);
+  return Number.isFinite(num) ? Math.max(0, Math.floor(num)) : 0;
+}
+
+function normalizeBondSafe(rawBond) {
+  if (rawBond === null || rawBond === undefined || rawBond === '' || typeof rawBond === 'boolean') {
+    return 20;
+  }
   const num = Number(rawBond);
-  const bond = Number.isFinite(num) ? Math.max(0, Math.min(100, Math.round(num))) : 20;
+  return Number.isFinite(num) ? Math.max(0, Math.min(100, Math.round(num))) : 20;
+}
+
+function getCheerStateSafe(storage, profile) {
+  const raw = typeof storage?.getCheerState === 'function' ? storage.getCheerState(profile) : null;
+  const maxCharges = Math.max(1, toNonNegIntSafe(raw?.maxCharges) || 3);
+  const stepsPerCharge = Math.max(1, toNonNegIntSafe(raw?.stepsPerCharge) || 25);
+  const rawCharges = raw ? raw.charges : profile?.bag?.cheerCharges;
+  const charges = Math.min(maxCharges, toNonNegIntSafe(rawCharges));
+  const rawProgress = raw ? raw.stepProgress : profile?.cheerStepProgress;
+  const stepProgress = charges >= maxCharges ? 0 : Math.min(stepsPerCharge - 1, toNonNegIntSafe(rawProgress));
+  const rawUntil = raw?.stepsUntilNext;
+  const stepsUntilNext = charges >= maxCharges
+    ? 0
+    : (raw && rawUntil !== null && rawUntil !== undefined && Number.isFinite(Number(rawUntil))
+      ? Math.max(1, Math.min(stepsPerCharge, Math.floor(Number(rawUntil))))
+      : (stepsPerCharge - stepProgress));
+  return { charges, maxCharges, stepProgress, stepsPerCharge, stepsUntilNext };
+}
+
+function sanitizeBagGems(rawGems) {
+  const out = {};
+  if (rawGems && typeof rawGems === 'object') {
+    for (const [key, val] of Object.entries(rawGems)) {
+      out[key] = toNonNegIntSafe(val);
+    }
+  }
+  return out;
+}
+
+export function getBondTierSafe(rawBond) {
+  const bond = normalizeBondSafe(rawBond);
   if (typeof PokemonMod.getBondTier === 'function') {
     const res = PokemonMod.getBondTier(bond);
     if (res && typeof res === 'object') return res;
@@ -292,7 +332,7 @@ export function hasAnyReadyEvolutionSafe(profile, storage = null) {
   if (typeof storage?.hasAnyReadyEvolution === 'function') {
     return Boolean(storage.hasAnyReadyEvolution(profile));
   }
-  const gems = profile.bag?.gems || {};
+  const gems = sanitizeBagGems(profile.bag?.gems);
   const mons = [...(profile.team || []), ...(profile.box || [])];
   return mons.some((mon) => {
     if (!mon) return false;
@@ -415,12 +455,19 @@ function formatEvolutionCondition(rule) {
 
 function formatRewardsList(rewards = {}) {
   const chips = [];
-  if (rewards.potions) chips.push(`🍓 ${rewards.potions} Potion${rewards.potions > 1 ? 's' : ''}`);
-  if (rewards.greatBalls) chips.push(`🔵 ${rewards.greatBalls} Great Ball${rewards.greatBalls > 1 ? 's' : ''}`);
-  if (rewards.starBalls) chips.push(`🌟 ${rewards.starBalls} Star Ball${rewards.starBalls > 1 ? 's' : ''}`);
-  if (rewards.starShards) chips.push(`✨ ${rewards.starShards} Star Shard${rewards.starShards > 1 ? 's' : ''}`);
+  const potions = toNonNegIntSafe(rewards.potions);
+  const greatBalls = toNonNegIntSafe(rewards.greatBalls);
+  const starBalls = toNonNegIntSafe(rewards.starBalls);
+  const starShards = toNonNegIntSafe(rewards.starShards);
+  const cheerCharges = toNonNegIntSafe(rewards.cheerCharges);
+  if (potions > 0) chips.push(`🍓 ${potions} Potion${potions > 1 ? 's' : ''}`);
+  if (greatBalls > 0) chips.push(`🔵 ${greatBalls} Great Ball${greatBalls > 1 ? 's' : ''}`);
+  if (starBalls > 0) chips.push(`🌟 ${starBalls} Star Ball${starBalls > 1 ? 's' : ''}`);
+  if (starShards > 0) chips.push(`✨ ${starShards} Star Shard${starShards > 1 ? 's' : ''}`);
+  if (cheerCharges > 0) chips.push(`💖 ${cheerCharges} Cheer Heart${cheerCharges > 1 ? 's' : ''}`);
   if (rewards.gems && typeof rewards.gems === 'object') {
-    for (const [gemId, count] of Object.entries(rewards.gems)) {
+    for (const [gemId, rawCount] of Object.entries(rewards.gems)) {
+      const count = toNonNegIntSafe(rawCount);
       if (count > 0) {
         const gem = EVOLUTION_ITEMS?.[gemId] || FALLBACK_GEM_INFO[gemId] || null;
         chips.push(`${gem?.icon || '💎'} ${count} ${gem?.name || gemId}`);
@@ -832,8 +879,8 @@ export class PokedexUI {
     header.innerHTML = `
       <span>📖 Caught: <strong>${caughtCount}/${allSpecies.length}</strong></span>
       <span>👀 Seen: <strong>${seenCount}/${allSpecies.length}</strong></span>
-      <span>🏆 Wins: <strong>${profile.stats?.battlesWon || 0}</strong></span>
-      <span>✨ Shimmers: <strong>${profile.stats?.shiniesFound || 0}</strong></span>
+      <span>🏆 Wins: <strong>${toNonNegIntSafe(profile.stats?.battlesWon)}</strong></span>
+      <span>✨ Shimmers: <strong>${toNonNegIntSafe(profile.stats?.shiniesFound)}</strong></span>
     `;
     wrap.appendChild(header);
 
@@ -1243,9 +1290,10 @@ export class PokedexUI {
   }
 
   getMonEvolutionOptions(mon, bagGems = {}) {
+    const safeGems = sanitizeBagGems(bagGems);
     const levelEvo = typeof mon.getPendingLevelEvolution === 'function' ? mon.getPendingLevelEvolution() : null;
     const itemEvos = typeof mon.getAvailableItemEvolutions === 'function'
-      ? mon.getAvailableItemEvolutions(bagGems)
+      ? mon.getAvailableItemEvolutions(safeGems)
       : [];
     const rules = EVOLUTIONS?.[mon.speciesId] || [];
 
@@ -1296,11 +1344,19 @@ export class PokedexUI {
   }
 
   triggerInModalEvolution(mon, option) {
-    if (typeof this.storage.evolvePokemon !== 'function') return;
+    if (!mon || typeof this.storage?.evolvePokemon !== 'function') {
+      this.audio?.playMenuBlip?.(280);
+      this.render();
+      return;
+    }
     const oldName = mon.name;
     const res = this.storage.evolvePokemon(mon.uid, option.toId, option.item || null);
     const evo = res?.evolution || res;
-    if (!evo) return;
+    if (!evo) {
+      this.audio?.playMenuBlip?.(280);
+      this.render();
+      return;
+    }
 
     if (typeof this.audio?.playEvolutionFanfare === 'function') {
       this.audio.playEvolutionFanfare();
@@ -1331,17 +1387,25 @@ export class PokedexUI {
   }
 
   triggerPokemonUpgrade(mon) {
-    if (!mon || typeof this.storage.upgradePokemon !== 'function') return;
+    if (!mon || typeof this.storage?.upgradePokemon !== 'function') {
+      this.audio?.playMenuBlip?.(280);
+      this.render();
+      return;
+    }
     const prevStats = {
       maxHp: Number(mon.maxHp) || 0,
       atk: Number(mon.atk) || 0,
       def: Number(mon.def) || 0,
       spd: Number(mon.spd) || 0,
-      tier: Math.max(0, Number(mon.upgradeTier) || 0),
+      tier: toNonNegIntSafe(mon.upgradeTier),
     };
 
     const res = this.storage.upgradePokemon(mon.uid);
-    if (!res?.upgraded) return;
+    if (!res?.upgraded) {
+      this.audio?.playMenuBlip?.(280);
+      this.render();
+      return;
+    }
 
     if (typeof this.audio?.playUpgradeFanfare === 'function') {
       this.audio.playUpgradeFanfare();
@@ -1384,25 +1448,12 @@ export class PokedexUI {
 
   triggerBuddyCheer(mon) {
     if (!mon) return;
-    let res = null;
-    if (typeof this.storage.cheerPokemon === 'function') {
-      res = this.storage.cheerPokemon(mon.uid);
-    } else {
-      const prevBond = Number.isFinite(Number(mon.bond)) ? Number(mon.bond) : 20;
-      const nextBond = typeof mon.gainBond === 'function'
-        ? mon.gainBond(10)
-        : Math.min(100, Math.max(0, Math.round(prevBond + 10)));
-      if (typeof mon.gainBond !== 'function') mon.bond = nextBond;
-      const newBadges = this.storage.evaluateBadges?.(false) || [];
-      this.storage.save?.();
-      res = {
-        cheered: true,
-        bond: nextBond,
-        tier: getBondTierSafe(nextBond),
-        newBadges,
-      };
+    const res = this.storage?.cheerPokemon?.(mon.uid);
+    if (!res?.cheered) {
+      this.audio?.playMenuBlip?.(280);
+      this.render();
+      return;
     }
-    if (!res?.cheered) return;
 
     if (typeof this.audio?.playBuddyCheer === 'function') {
       this.audio.playBuddyCheer();
@@ -1410,7 +1461,7 @@ export class PokedexUI {
       this.audio?.playMenuBlip?.(820);
     }
 
-    const finalBond = Number.isFinite(Number(res.bond)) ? Number(res.bond) : (Number(mon.bond) || 20);
+    const finalBond = normalizeBondSafe(res.bond ?? mon.bond);
     const tier = res.tier || getBondTierSafe(finalBond);
     this.evoBanner = {
       kind: 'cheer',
@@ -1449,52 +1500,97 @@ export class PokedexUI {
   }
 
   buildPowerUpControl(mon, starShards, maxTier, compact = false) {
-    const tier = Math.max(0, Number(mon.upgradeTier) || 0);
-    if (tier >= maxTier) {
+    const tier = toNonNegIntSafe(mon.upgradeTier);
+    const safeMaxTier = Math.max(1, toNonNegIntSafe(maxTier) || 5);
+    if (tier >= safeMaxTier) {
       const maxPill = document.createElement('span');
       maxPill.className = `rank-max-pill${compact ? ' is-compact' : ''}`;
       maxPill.textContent = '★ MAX RANK';
       return maxPill;
     }
 
+    const safeShards = toNonNegIntSafe(starShards);
     const cost = typeof mon.getUpgradeCost === 'function'
       ? mon.getUpgradeCost()
       : (tier + 1) * 2;
-    const safeCost = Math.max(1, Number(cost) || 2);
-    const canAfford = starShards >= safeCost;
+    const safeCost = Math.max(1, toNonNegIntSafe(cost) || (tier + 1) * 2);
+    const canAfford = safeShards >= safeCost;
 
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = `upgrade-btn${compact ? ' is-compact' : ''}`;
-    btn.textContent = `⚡ Power Up (${safeCost} ✨)`;
+    btn.textContent = canAfford
+      ? `⚡ Power Up (${safeCost} ✨)`
+      : `🔒 Power Up (${safeShards}/${safeCost} ✨)`;
     btn.disabled = !canAfford;
+    if (!canAfford) {
+      btn.setAttribute('aria-disabled', 'true');
+    }
     btn.title = canAfford
       ? `Boost HP/ATK/DEF/SPD +5% to ★${tier + 1}, full heal & gain bonus XP`
-      : `Need ${safeCost} Star Shards (you have ${starShards})`;
+      : `Need ${safeCost} Star Shards (you have ${safeShards}) — earn from battles, catches, Starfall nodes & Sky-Hop (60+ pts)`;
     btn.addEventListener('click', () => this.triggerPokemonUpgrade(mon));
     return btn;
+  }
+
+  buildCheerControl(mon, cheerState, compact = false) {
+    const bond = normalizeBondSafe(mon?.bond);
+    if (bond >= 100) {
+      const maxPill = document.createElement('span');
+      maxPill.className = `bond-max-pill${compact ? ' is-compact' : ''}`;
+      maxPill.textContent = '🌟 MAX BOND';
+      maxPill.title = 'Maximum Bond reached (100/100)!';
+      return maxPill;
+    }
+
+    const displayName = mon?.displayName || mon?.name || 'Buddy';
+    const safeCharges = toNonNegIntSafe(cheerState?.charges);
+    const maxCharges = Math.max(1, toNonNegIntSafe(cheerState?.maxCharges) || 3);
+    const stepsUntilNext = toNonNegIntSafe(cheerState?.stepsUntilNext);
+
+    const cheerBtn = document.createElement('button');
+    cheerBtn.type = 'button';
+    cheerBtn.className = `mini-btn cheer-btn${compact ? ' is-compact' : ''}`;
+    if (safeCharges <= 0) {
+      cheerBtn.disabled = true;
+      cheerBtn.setAttribute('aria-disabled', 'true');
+      cheerBtn.textContent = compact
+        ? `🔒 Cheer (0/${maxCharges} 💖)`
+        : `🔒 Cheer (0/${maxCharges} 💖 • ${stepsUntilNext}👣)`;
+      cheerBtn.title = `No Cheer Hearts! Earn +1 💖 every 25 walked steps (${stepsUntilNext} left), per battle win/catch, or scoring 120+ pts in Sky-Hop (max ${maxCharges}).`;
+    } else {
+      cheerBtn.textContent = `💖 Cheer Buddy (${safeCharges}/${maxCharges} 💖)`;
+      cheerBtn.title = `Spend 1 Cheer Heart to cheer ${displayName} and raise Bond (+10)`;
+      cheerBtn.addEventListener('click', () => this.triggerBuddyCheer(mon));
+    }
+    return cheerBtn;
   }
 
   renderTeam(profile) {
     const wrap = document.createElement('div');
     wrap.className = 'team-layout';
 
-    const maxTier = Math.max(1, Number(PokemonMod.MAX_UPGRADE_TIER) || 5);
-    const starShards = Math.max(0, Number(profile.bag?.starShards) || 0);
-    const gems = profile.bag?.gems || {};
+    const maxTier = Math.max(1, toNonNegIntSafe(PokemonMod.MAX_UPGRADE_TIER) || 5);
+    const potions = toNonNegIntSafe(profile.bag?.potions);
+    const greatBalls = toNonNegIntSafe(profile.bag?.greatBalls);
+    const starBalls = toNonNegIntSafe(profile.bag?.starBalls);
+    const starShards = toNonNegIntSafe(profile.bag?.starShards);
+    const cheerState = getCheerStateSafe(this.storage, profile);
+    const gems = sanitizeBagGems(profile.bag?.gems);
     const gemItems = Object.values(EVOLUTION_ITEMS || {});
-    const gemBadgesHtml = gemItems.map((gem) => (
-      `<span class="gem-chip" title="${gem.name}: ${gem.description}">${gem.icon} <strong>${gems[gem.id] || 0}</strong></span>`
-    )).join('');
+    const gemBadgesHtml = gemItems.map((gem) => {
+      const count = toNonNegIntSafe(gems[gem.id]);
+      return `<span class="gem-chip" title="${escapeHtml(gem.name)}: ${escapeHtml(gem.description)}">${gem.icon} <strong>${count}</strong></span>`;
+    }).join('');
 
-    const starBalls = profile.bag?.starBalls || 0;
     const bagBar = document.createElement('div');
     bagBar.className = 'dex-summary-bar';
     bagBar.innerHTML = `
-      <span>🍓 Potions: <strong>${profile.bag.potions}</strong></span>
-      <span>🔵 Great Balls: <strong>${profile.bag.greatBalls}</strong></span>
+      <span>🍓 Potions: <strong>${potions}</strong></span>
+      <span>🔵 Great Balls: <strong>${greatBalls}</strong></span>
       <span>🌟 Star Balls: <strong>${starBalls}</strong></span>
-      <span>✨ Shards: <strong>${profile.bag?.starShards ?? 0}</strong></span>
+      <span>✨ Shards: <strong>${starShards}</strong></span>
+      <span>💖 Cheers: <strong>${cheerState.charges}/${cheerState.maxCharges}</strong></span>
       <span>🔴 Poké Balls: <strong>∞</strong></span>
       <span class="gem-bag-strip">💎 Gems: ${gemBadgesHtml || 'None'}</span>
     `;
@@ -1618,7 +1714,7 @@ export class PokedexUI {
       const xpPct = Math.min(100, Math.round((mon.xp / Math.max(1, mon.xpToNext)) * 100));
       const displayName = mon.displayName || mon.name;
       const isNicknamed = Boolean(mon.nickname && mon.nickname !== mon.name);
-      const bond = Number.isFinite(Number(mon.bond)) ? Math.max(0, Math.min(100, Math.round(Number(mon.bond)))) : 20;
+      const bond = normalizeBondSafe(mon.bond);
       const bondTier = getBondTierSafe(bond);
 
       const card = document.createElement('div');
@@ -1654,7 +1750,7 @@ export class PokedexUI {
       titleRow.appendChild(lvSpan);
       meta.appendChild(titleRow);
 
-      const tier = Math.max(0, Number(mon.upgradeTier) || 0);
+      const tier = toNonNegIntSafe(mon.upgradeTier);
       const pillRow = document.createElement('div');
       pillRow.className = 'team-pill-row';
       pillRow.innerHTML = `
@@ -1808,13 +1904,7 @@ export class PokedexUI {
         const actionBtnsRight = document.createElement('div');
         actionBtnsRight.className = 'team-card-actions-right';
 
-        const cheerBtn = document.createElement('button');
-        cheerBtn.type = 'button';
-        cheerBtn.className = 'mini-btn cheer-btn';
-        cheerBtn.textContent = '💖 Cheer Buddy';
-        cheerBtn.title = `Cheer ${displayName} to raise Bond (+10)`;
-        cheerBtn.addEventListener('click', () => this.triggerBuddyCheer(mon));
-        actionBtnsRight.appendChild(cheerBtn);
+        actionBtnsRight.appendChild(this.buildCheerControl(mon, cheerState, false));
 
         if (this.editingNicknameUid !== mon.uid) {
           const nickBtn = document.createElement('button');
@@ -1829,19 +1919,35 @@ export class PokedexUI {
           actionBtnsRight.appendChild(nickBtn);
         }
 
-        if (mon.hp < mon.maxHp && profile.bag.potions > 0) {
+        if (mon.hp < mon.maxHp && potions > 0) {
           const healBtn = document.createElement('button');
           healBtn.type = 'button';
           healBtn.className = 'mini-btn is-heal';
-          healBtn.textContent = '🍓 Heal';
+          healBtn.textContent = `🍓 Heal (${potions})`;
+          healBtn.title = `Use 1 Berry Potion to heal ${displayName} (${potions} in bag)`;
           healBtn.addEventListener('click', () => {
-            if (this.storage.useItem('potions')) {
-              this.audio.playHealChime();
-              mon.healAmount(Math.max(18, Math.round(mon.maxHp * 0.45)));
-              this.storage.save();
-              this.onTeamChanged?.();
-              this.render();
+            let healed = false;
+            if (typeof this.storage?.healPokemonWithPotion === 'function') {
+              const healRes = this.storage.healPokemonWithPotion(mon.uid);
+              healed = Boolean(healRes?.healed);
+            } else if (mon.hp < mon.maxHp && this.storage?.useItem?.('potions')) {
+              const healAmount = Math.max(18, Math.round(mon.maxHp * 0.45));
+              if (typeof mon.healAmount === 'function') {
+                mon.healAmount(healAmount);
+              } else {
+                mon.hp = Math.min(mon.maxHp, mon.hp + healAmount);
+              }
+              this.storage.save?.();
+              healed = true;
             }
+            if (!healed) {
+              this.audio?.playMenuBlip?.(280);
+              this.render();
+              return;
+            }
+            this.audio?.playHealChime?.();
+            this.onTeamChanged?.();
+            this.render();
           });
           actionBtnsRight.appendChild(healBtn);
         }
@@ -1894,8 +2000,8 @@ export class PokedexUI {
         nameLine.textContent = `${mon.isShiny ? '✨ ' : ''}${displayName}${isNicknamed ? ` (${mon.name})` : ''}`;
         const lvLine = document.createElement('small');
         lvLine.textContent = `Lv.${mon.level}`;
-        const tier = Math.max(0, Number(mon.upgradeTier) || 0);
-        const boxBond = Number.isFinite(Number(mon.bond)) ? Math.max(0, Math.min(100, Math.round(Number(mon.bond)))) : 20;
+        const tier = toNonNegIntSafe(mon.upgradeTier);
+        const boxBond = normalizeBondSafe(mon.bond);
         const boxBondTier = getBondTierSafe(boxBond);
         const pillLine = document.createElement('div');
         pillLine.className = 'box-card-pills';
@@ -1942,13 +2048,7 @@ export class PokedexUI {
         const actionsRow = document.createElement('div');
         actionsRow.className = 'box-card-actions';
         if (this.swapBoxIndex === null) {
-          const cheerBtn = document.createElement('button');
-          cheerBtn.type = 'button';
-          cheerBtn.className = 'mini-btn cheer-btn is-compact';
-          cheerBtn.textContent = '💖 Cheer Buddy';
-          cheerBtn.title = `Cheer ${displayName} to raise Bond (+10)`;
-          cheerBtn.addEventListener('click', () => this.triggerBuddyCheer(mon));
-          actionsRow.appendChild(cheerBtn);
+          actionsRow.appendChild(this.buildCheerControl(mon, cheerState, true));
         }
         const swapBtn = document.createElement('button');
         swapBtn.type = 'button';
@@ -1993,7 +2093,8 @@ export class PokedexUI {
     const dirText = formatCompassArrow(guidance, profile);
     const targetBiome = guidance?.targetBiomeId ? BIOMES[guidance.targetBiomeId] : null;
     const powerLevel = getTrainerPowerSafe(profile);
-    const starShards = profile.bag?.starShards ?? 0;
+    const starShards = toNonNegIntSafe(profile.bag?.starShards);
+    const cheerState = getCheerStateSafe(this.storage, profile);
 
     const compassCard = document.createElement('div');
     compassCard.className = 'guide-compass-card';
@@ -2007,6 +2108,7 @@ export class PokedexUI {
         ${targetBiome ? `<span>📍 Destination: <strong>${targetBiome.icon} ${targetBiome.name}</strong></span>` : ''}
         <span>⚡ Trainer Power: <strong>Lv.${powerLevel}</strong></span>
         <span>✨ Star Shards: <strong>${starShards}</strong></span>
+        <span>💖 Cheer Hearts: <strong>${cheerState.charges}/${cheerState.maxCharges}</strong></span>
         <span>📖 Dex: <strong>${caughtCount}/${totalSpecies}</strong></span>
         <span>⛩️ Shrines: <strong>${(profile.shrinesCleared || []).length}/${totalShrines}</strong></span>
         <span>⚔️ Rivals: <strong>${rivalsDefeated}/${rivalsList.length}</strong></span>
@@ -2014,6 +2116,29 @@ export class PokedexUI {
       </div>
     `;
     wrap.appendChild(compassCard);
+
+    const nextCheerHint = cheerState.charges >= cheerState.maxCharges
+      ? `Bag full (${cheerState.maxCharges}/${cheerState.maxCharges} 💖 held)`
+      : `${cheerState.stepsUntilNext}👣 to next heart (${cheerState.stepProgress}/${cheerState.stepsPerCharge})`;
+    const economyCard = document.createElement('div');
+    economyCard.className = 'guide-economy-card';
+    economyCard.innerHTML = `
+      <div class="guide-economy-head">
+        <strong>✨ Starlight Economy &amp; Buddy Cheer</strong>
+        <span class="guide-economy-meter">💖 ${cheerState.charges}/${cheerState.maxCharges} • ${nextCheerHint}</span>
+      </div>
+      <div class="guide-economy-grid">
+        <div class="guide-economy-item">
+          <span>✨ <strong>Star Shards</strong></span>
+          <p>Win battles, catch Pokémon, touch Starfall nodes, or score 60+ pts in Sky-Hop to power ⚡ Upgrades.</p>
+        </div>
+        <div class="guide-economy-item">
+          <span>💖 <strong>Cheer Hearts</strong></span>
+          <p>Earn every ${cheerState.stepsPerCharge} steps, on battle wins/catches, or 120+ pts in Sky-Hop (max ${cheerState.maxCharges} held) to raise Bond (+10).</p>
+        </div>
+      </div>
+    `;
+    wrap.appendChild(economyCard);
 
     const arcadeUnlocked = Boolean(this.storage?.isArcadeUnlocked?.(profile) ?? profile?.arcade?.unlocked);
     const arcadeData = profile?.arcade || {};
@@ -2422,6 +2547,7 @@ export class PokedexUI {
     const totalRivals = Object.keys(RIVAL_TRAINERS || {}).length;
     const rivalsDefeated = (profile.rivalsDefeated || []).length;
 
+    const cheerState = getCheerStateSafe(this.storage, profile);
     const statsHeading = document.createElement('h3');
     statsHeading.className = 'section-heading';
     statsHeading.textContent = 'Trainer Adventure Stats';
@@ -2430,14 +2556,16 @@ export class PokedexUI {
     const statsCard = document.createElement('div');
     statsCard.className = 'trainer-stats-grid';
     statsCard.innerHTML = `
-      <div class="trainer-stat-card"><span>👣 Steps</span><strong>${profile.stats?.steps || 0}</strong></div>
-      <div class="trainer-stat-card"><span>🏆 Wins</span><strong>${profile.stats?.battlesWon || 0}</strong></div>
+      <div class="trainer-stat-card"><span>👣 Steps</span><strong>${toNonNegIntSafe(profile.stats?.steps)}</strong></div>
+      <div class="trainer-stat-card"><span>🏆 Wins</span><strong>${toNonNegIntSafe(profile.stats?.battlesWon)}</strong></div>
       <div class="trainer-stat-card"><span>📖 Dex</span><strong>${caughtCount}/${allSpecies.length}</strong></div>
       <div class="trainer-stat-card"><span>⛩️ Shrines</span><strong>${(profile.shrinesCleared || []).length}/${totalShrines}</strong></div>
       <div class="trainer-stat-card"><span>⚔️ Rivals</span><strong>${rivalsDefeated}/${totalRivals}</strong></div>
-      <div class="trainer-stat-card"><span>⚡ Power Ups</span><strong>${profile.stats?.upgrades || 0}</strong></div>
-      <div class="trainer-stat-card"><span>✨ Star Shards</span><strong>${profile.bag?.starShards ?? 0}</strong></div>
-      <div class="trainer-stat-card"><span>🌟 Shimmers</span><strong>${profile.stats?.shiniesFound || 0}</strong></div>
+      <div class="trainer-stat-card"><span>⚡ Power Ups</span><strong>${toNonNegIntSafe(profile.stats?.upgrades)}</strong></div>
+      <div class="trainer-stat-card"><span>✨ Star Shards</span><strong>${toNonNegIntSafe(profile.bag?.starShards)}</strong></div>
+      <div class="trainer-stat-card"><span>💖 Cheer Hearts</span><strong>${cheerState.charges}/${cheerState.maxCharges}</strong></div>
+      <div class="trainer-stat-card"><span>💗 Cheers Given</span><strong>${toNonNegIntSafe(profile.stats?.cheers)}</strong></div>
+      <div class="trainer-stat-card"><span>🌟 Shimmers</span><strong>${toNonNegIntSafe(profile.stats?.shiniesFound)}</strong></div>
     `;
     wrap.appendChild(statsCard);
 

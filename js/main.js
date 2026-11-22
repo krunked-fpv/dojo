@@ -233,7 +233,17 @@ class GameApp {
     this.overworld = new OverworldEngine(this.overworldCanvasEl, {
       getProfile: () => storage.getActiveProfile(),
       onStepSaved: (x, y, dir, incSteps) => {
-        storage.updatePosition(x, y, dir, incSteps);
+        const stepRes = storage.updatePosition(x, y, dir, incSteps);
+        if (stepRes?.stepCheerEarned) {
+          this.overworld?.triggerCelebrationBurst?.(x, y, 'heal');
+          if (!this.battle?.active && !this.dialogueOpen) {
+            audio.playBuddyCheer?.();
+          }
+          if (this.pokedex?.isOpen?.()) {
+            this.pokedex.render?.();
+          }
+          this.refreshHud?.();
+        }
         this.updateCompassHud();
       },
       onWildEncounter: (biomeId, encounterMeta = {}) => this.startWildEncounter(biomeId, encounterMeta),
@@ -1326,10 +1336,17 @@ class GameApp {
 
   formatRewardSummary(rewards = {}) {
     const parts = [];
-    if (rewards.potions) parts.push(`+${rewards.potions} Berry Potion${rewards.potions > 1 ? 's' : ''}`);
-    if (rewards.greatBalls) parts.push(`+${rewards.greatBalls} Great Ball${rewards.greatBalls > 1 ? 's' : ''}`);
-    if (rewards.starBalls) parts.push(`+${rewards.starBalls} Star Ball${rewards.starBalls > 1 ? 's' : ''}`);
-    if (rewards.starShards) parts.push(`+${rewards.starShards} ✨ Star Shard${rewards.starShards > 1 ? 's' : ''}`);
+    const toCount = (v) => (Number.isFinite(Number(v)) ? Math.max(0, Math.floor(Number(v))) : 0);
+    const potions = toCount(rewards.potions);
+    const greatBalls = toCount(rewards.greatBalls);
+    const starBalls = toCount(rewards.starBalls);
+    const starShards = toCount(rewards.starShards);
+    const cheerCharges = toCount(rewards.cheerCharges);
+    if (potions > 0) parts.push(`+${potions} Berry Potion${potions > 1 ? 's' : ''}`);
+    if (greatBalls > 0) parts.push(`+${greatBalls} Great Ball${greatBalls > 1 ? 's' : ''}`);
+    if (starBalls > 0) parts.push(`+${starBalls} Star Ball${starBalls > 1 ? 's' : ''}`);
+    if (starShards > 0) parts.push(`+${starShards} ✨ Star Shard${starShards > 1 ? 's' : ''}`);
+    if (cheerCharges > 0) parts.push(`+${cheerCharges} 💖 Cheer Heart${cheerCharges > 1 ? 's' : ''}`);
     if (rewards.gems && typeof rewards.gems === 'object') {
       const fallbackGems = {
         prism_gem: { icon: '💠', name: 'Prism Gem' },
@@ -1340,7 +1357,8 @@ class GameApp {
         crown_gem: { icon: '🛡️', name: 'Sovereign Crest' },
         tera_gem: { icon: '💎', name: 'Terastal Shard' },
       };
-      for (const [gemId, count] of Object.entries(rewards.gems)) {
+      for (const [gemId, rawCount] of Object.entries(rewards.gems)) {
+        const count = toCount(rawCount);
         if (count > 0) {
           const item = EVOLUTION_ITEMS?.[gemId] || fallbackGems[gemId];
           parts.push(`+${count} ${item?.icon || '💎'} ${item?.name || gemId}`);
