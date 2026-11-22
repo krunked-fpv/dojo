@@ -504,6 +504,11 @@ async function checkEconomyAndCheerInvariants(reporter) {
 
   check(storageMod.MAX_CHEER_CHARGES === 3, `MAX_CHEER_CHARGES=${storageMod.MAX_CHEER_CHARGES} !== 3`);
   check(storageMod.STEPS_PER_CHEER_CHARGE === 25, `STEPS_PER_CHEER_CHARGE=${storageMod.STEPS_PER_CHEER_CHARGE} !== 25`);
+  check(storageMod.MAX_ARCADE_CHARGES === 3, `MAX_ARCADE_CHARGES=${storageMod.MAX_ARCADE_CHARGES} !== 3`);
+  check(storageMod.STEPS_PER_ARCADE_CHARGE === 50, `STEPS_PER_ARCADE_CHARGE=${storageMod.STEPS_PER_ARCADE_CHARGE} !== 50`);
+  check(storageMod.BATTLES_PER_ARCADE_CHARGE === 2, `BATTLES_PER_ARCADE_CHARGE=${storageMod.BATTLES_PER_ARCADE_CHARGE} !== 2`);
+  check(storageMod.ARCADE_SHARD_BUYIN_COST === 5, `ARCADE_SHARD_BUYIN_COST=${storageMod.ARCADE_SHARD_BUYIN_COST} !== 5`);
+  check(storageMod.ARCADE_GEM_COOLDOWN_RUNS === 2, `ARCADE_GEM_COOLDOWN_RUNS=${storageMod.ARCADE_GEM_COOLDOWN_RUNS} !== 2`);
 
   const store = new storageMod.StorageManager('__ci_static_economy_gate__');
   store.resetAllProgress();
@@ -593,19 +598,39 @@ async function checkEconomyAndCheerInvariants(reporter) {
     'evolvePokemon failed to reject invalid/gemless/under-level evolutions',
   );
 
-  // StarlightMinigame.computeRewards <60 & non-finite guard
+  // StarlightMinigame.computeRewards <80 & non-finite guard + Arcade lock/charge invariants
+  check(!store.isArcadeUnlocked(), '5 caught / 1 badge does not auto-unlock arcade');
+  for (const id of [10, 16, 19]) {
+    store.recordCaught(pokemonMod.createPokemon(id, 5));
+  }
+  check(store.isArcadeAttuned() && !store.isArcadeUnlocked(), '5 caught attunes arcade without auto-unlocking');
+  const k1 = store.recordSecretKnock();
+  const k2 = store.recordSecretKnock();
+  const k3 = store.recordSecretKnock();
+  check(
+    k1.knocks === 1 && !k1.unlocked && k2.knocks === 2 && !k2.unlocked && k3.knocks === 3 && k3.unlocked && k3.charges === 3,
+    '3 attuned knocks unlock arcade with 3 charges',
+  );
+  store.resetTrainerProgress('violet');
+  check(!store.isArcadeUnlocked() && store.getArcadeState().charges === 0, 'resetTrainerProgress re-locks arcade & clears charges');
+
   const mg = new minigameMod.StarlightMinigame({ storage: store, audio: null });
-  for (const badScore of [0, 59, -10, NaN, Infinity]) {
-    const r = mg.computeRewards(badScore, 5);
+  for (const badScore of [0, 79, -10, NaN, Infinity]) {
+    const r = mg.computeRewards(badScore, 8);
     check(
       r.starShards === 0 && r.potions === 0 && !r.greatBalls && !r.starBalls && !r.cheerCharges && !r.gems,
       `computeRewards(${badScore}) leaked rewards: ${JSON.stringify(r)}`,
     );
   }
-  const r60 = mg.computeRewards(60, 1);
-  const r120 = mg.computeRewards(120, 1);
-  check(r60.starShards === 1 && r60.potions === 1 && !r60.cheerCharges, `computeRewards(60) unexpected: ${JSON.stringify(r60)}`);
-  check(r120.starShards === 2 && r120.potions === 1 && r120.cheerCharges === 1, `computeRewards(120) unexpected: ${JSON.stringify(r120)}`);
+  const r80 = mg.computeRewards(80, 1);
+  const r180 = mg.computeRewards(180, 2);
+  const r900 = mg.computeRewards(900, 8);
+  check(r80.starShards === 1 && r80.potions === 1 && !r80.cheerCharges, `computeRewards(80, 1) unexpected: ${JSON.stringify(r80)}`);
+  check(r180.starShards === 2 && r180.potions === 1 && r180.cheerCharges === 1, `computeRewards(180, 2) unexpected: ${JSON.stringify(r180)}`);
+  check(
+    r900.starShards === 4 && r900.starShards < storageMod.ARCADE_SHARD_BUYIN_COST && r900.potions === 2 && r900.greatBalls === 2 && r900.starBalls === 1 && r900.cheerCharges === 1,
+    `computeRewards(900, 8) unexpected: ${JSON.stringify(r900)}`,
+  );
 
   // pokedex.js zero unguarded gainBond cheer fallbacks
   const pokedexText = fs.readFileSync(path.join(ROOT_DIR, 'js/pokedex.js'), 'utf8');
@@ -616,7 +641,7 @@ async function checkEconomyAndCheerInvariants(reporter) {
     failures.length === 0,
     'Economy & Buddy Cheer invariants',
     failures.length === 0
-      ? 'MAX_CHEER_CHARGES=3, STEPS_PER_CHEER_CHARGE=25, 0-start bag, Infinity/NaN rejected, Cheer/Evo/Minigame guards enforced, 0 gainBond fallbacks in pokedex.js'
+      ? 'MAX_CHEER_CHARGES=3, MAX_ARCADE_CHARGES=3, 50 steps/2 battles/5✨ buy-in, 0-start bag, Infinity/NaN rejected, Cheer/Evo/Minigame guards enforced, 0 gainBond fallbacks in pokedex.js'
       : failures.join(' | '),
   );
 }

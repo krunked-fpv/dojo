@@ -474,8 +474,8 @@ async function runStageB(browser, baseUrl) {
         const app = window.__starlightApp;
         const installGroup = document.getElementById('hud-install-group');
         const arcadeBtn = document.getElementById('hud-btn-arcade');
-        const profile = app?.pokedex?.storage?.getActiveProfile?.();
-        if (profile?.arcade) profile.arcade.unlocked = true;
+        app?.pokedex?.storage?.unlockArcade?.();
+        app?.refreshHud?.();
         if (installGroup) installGroup.hidden = false;
         if (arcadeBtn) arcadeBtn.hidden = false;
 

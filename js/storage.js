@@ -23,6 +23,11 @@ import { Pokemon, createStarterPokemon, getBondTier } from './pokemon.js';
 export const STORAGE_KEY = 'starlight_pokemon_save_v1';
 export const MAX_CHEER_CHARGES = 3;
 export const STEPS_PER_CHEER_CHARGE = 25;
+export const MAX_ARCADE_CHARGES = 3;
+export const STEPS_PER_ARCADE_CHARGE = 50;
+export const BATTLES_PER_ARCADE_CHARGE = 2;
+export const ARCADE_SHARD_BUYIN_COST = 5;
+export const ARCADE_GEM_COOLDOWN_RUNS = 2;
 
 const SOLID_TILE_IDS = new Set([3, 4, 8, 11, 12, 14, 16, 17, 18, 21, 25, 30, 33, 36, 39, 42, 45, 48, 51, 54, 57, 60]);
 const VALID_DIRS = new Set(['up', 'down', 'left', 'right']);
@@ -382,6 +387,26 @@ function clampCheerStepProgress(rawVal, fallback = 0) {
   return Math.max(0, Math.min(STEPS_PER_CHEER_CHARGE - 1, n));
 }
 
+function clampArcadeCharges(rawVal, fallback = 0) {
+  const n = toNonNegInt(rawVal, fallback);
+  return Math.max(0, Math.min(MAX_ARCADE_CHARGES, n));
+}
+
+function clampArcadeStepProgress(rawVal, fallback = 0) {
+  const n = toNonNegInt(rawVal, fallback);
+  return Math.max(0, Math.min(STEPS_PER_ARCADE_CHARGE - 1, n));
+}
+
+function clampArcadeBattleProgress(rawVal, fallback = 0) {
+  const n = toNonNegInt(rawVal, fallback);
+  return Math.max(0, Math.min(BATTLES_PER_ARCADE_CHARGE - 1, n));
+}
+
+function clampArcadeGemCooldown(rawVal, fallback = 0) {
+  const n = toNonNegInt(rawVal, fallback);
+  return Math.max(0, Math.min(ARCADE_GEM_COOLDOWN_RUNS, n));
+}
+
 function normalizeMonBond(rawBond) {
   if (isInvalidNumericInput(rawBond)) {
     return 20;
@@ -479,33 +504,36 @@ function getCaughtSpeciesCount(profile) {
   return Object.values(caught).filter((val) => val === true || (Number.isFinite(Number(val)) && Number(val) > 0)).length;
 }
 
-function hydrateArcade(rawArcade, autoUnlocked = false) {
+function hydrateArcade(rawArcade, { allowLegacyPlayUnlock = false } = {}) {
   const src = isPlainObject(rawArcade) ? rawArcade : {};
-  const secretKnocks = toNonNegInt(src.secretKnocks, 0);
-  const rawUnlocked = Boolean(src.unlocked && src.unlocked !== 'false');
+  const rawUnlocked = Boolean(src.unlocked === true || (src.unlocked && src.unlocked !== 'false'));
+  const plays = toNonNegInt(src.plays, 0);
+  const highScore = toNonNegInt(src.highScore, 0);
+  const unlocked = Boolean(rawUnlocked || (allowLegacyPlayUnlock && (plays > 0 || highScore > 0)));
+  const secretKnocks = unlocked
+    ? Math.max(3, toNonNegInt(src.secretKnocks, 0))
+    : Math.min(2, toNonNegInt(src.secretKnocks, 0));
+  const charges = !unlocked
+    ? 0
+    : (src.charges === undefined ? MAX_ARCADE_CHARGES : clampArcadeCharges(src.charges, 0));
+  const stepProgress = (!unlocked || charges >= MAX_ARCADE_CHARGES)
+    ? 0
+    : clampArcadeStepProgress(src.stepProgress, 0);
+  const battleProgress = (!unlocked || charges >= MAX_ARCADE_CHARGES)
+    ? 0
+    : clampArcadeBattleProgress(src.battleProgress, 0);
+  const gemCooldown = clampArcadeGemCooldown(src.gemCooldown, 0);
   return {
-    unlocked: Boolean(rawUnlocked || autoUnlocked || secretKnocks >= 3),
-    highScore: toNonNegInt(src.highScore, 0),
-    plays: toNonNegInt(src.plays, 0),
+    unlocked,
+    charges,
+    stepProgress,
+    battleProgress,
+    gemCooldown,
+    highScore,
+    plays,
     bestWave: toNonNegInt(src.bestWave, 0),
     secretKnocks,
   };
-}
-
-function syncArcadeAutoUnlock(profile) {
-  if (!profile || typeof profile !== 'object') return false;
-  const badgeCount = Array.isArray(profile.badges) ? profile.badges.length : 0;
-  const caughtCount = getCaughtSpeciesCount(profile);
-  const shouldUnlock = badgeCount >= 1 || caughtCount >= 5;
-  if (!isPlainObject(profile.arcade)) {
-    profile.arcade = hydrateArcade(null, shouldUnlock);
-    return shouldUnlock;
-  }
-  if (shouldUnlock && !profile.arcade.unlocked) {
-    profile.arcade.unlocked = true;
-    return true;
-  }
-  return false;
 }
 
 function createFreshProfile(trainerId) {
@@ -531,7 +559,7 @@ function createFreshProfile(trainerId) {
     shrineTrialCounts: {},
     recentEncounters: [],
     cheerStepProgress: 0,
-    arcade: hydrateArcade(null, false),
+    arcade: hydrateArcade(null, { allowLegacyPlayUnlock: false }),
     bag: {
       potions: 5,
       greatBalls: 3,
@@ -719,8 +747,7 @@ export function validateAndRepairProfile(raw, trainerIdFallback = null, report =
   deduplicateTeamAndBoxUids(raw, report);
   syncProfilePokedex(raw);
 
-  const autoUnlocked = raw.badges.length >= 1 || getCaughtSpeciesCount(raw) >= 5;
-  raw.arcade = hydrateArcade(raw.arcade, autoUnlocked);
+  raw.arcade = hydrateArcade(raw.arcade, { allowLegacyPlayUnlock: true });
 
   if (report && typeof report === 'object') {
     report.teamOverflowRescued = (report.teamOverflowRescued || 0) + teamOverflow.length;
@@ -1024,7 +1051,7 @@ export class StorageManager {
       shrineTrialCounts: hydrateCountMap(src.shrineTrialCounts),
       recentEncounters: hydrateRecentEncounters(src.recentEncounters),
       cheerStepProgress: clampCheerStepProgress(src.cheerStepProgress, 0),
-      arcade: hydrateArcade(src.arcade, false),
+      arcade: hydrateArcade(src.arcade, { allowLegacyPlayUnlock: false }),
       bag: cleanBag,
       stats: hydrateProfileStats(src.stats),
       team: (Array.isArray(src.team) ? src.team : []).map((p) => (typeof p?.toJSON === 'function' ? p.toJSON() : p)),
@@ -1144,7 +1171,14 @@ export class StorageManager {
   updatePosition(x, y, dir, incSteps = false) {
     const profile = this.getActiveProfile();
     if (!profile) {
-      return { stepCheerEarned: false, cheerCharges: 0, stepProgress: 0 };
+      return {
+        stepCheerEarned: false,
+        cheerCharges: 0,
+        stepProgress: 0,
+        stepArcadeChargeEarned: false,
+        arcadeCharges: 0,
+        arcadeStepProgress: 0,
+      };
     }
     profile.pos = { x, y, dir };
     if (!isPlainObject(profile.bag)) {
@@ -1156,6 +1190,17 @@ export class StorageManager {
     let stepProgress = cheerCharges >= MAX_CHEER_CHARGES
       ? 0
       : clampCheerStepProgress(profile.cheerStepProgress, 0);
+
+    if (!isPlainObject(profile.arcade)) {
+      profile.arcade = hydrateArcade(null, { allowLegacyPlayUnlock: false });
+    }
+    const arcadeUnlocked = this.isArcadeUnlocked(profile);
+    let stepArcadeChargeEarned = false;
+    let arcadeCharges = arcadeUnlocked ? clampArcadeCharges(profile.arcade.charges, 0) : 0;
+    profile.arcade.charges = arcadeCharges;
+    let arcadeStepProgress = (!arcadeUnlocked || arcadeCharges >= MAX_ARCADE_CHARGES)
+      ? 0
+      : clampArcadeStepProgress(profile.arcade.stepProgress, 0);
 
     if (incSteps) {
       if (!isPlainObject(profile.stats)) profile.stats = hydrateProfileStats(null);
@@ -1172,11 +1217,37 @@ export class StorageManager {
             stepCheerEarned = true;
           }
         }
+
+        if (arcadeUnlocked) {
+          if (arcadeCharges >= MAX_ARCADE_CHARGES) {
+            arcadeStepProgress = 0;
+            profile.arcade.battleProgress = 0;
+          } else {
+            arcadeStepProgress += 1;
+            if (arcadeStepProgress >= STEPS_PER_ARCADE_CHARGE) {
+              arcadeStepProgress = 0;
+              arcadeCharges = Math.min(MAX_ARCADE_CHARGES, arcadeCharges + 1);
+              profile.arcade.charges = arcadeCharges;
+              if (arcadeCharges >= MAX_ARCADE_CHARGES) {
+                profile.arcade.battleProgress = 0;
+              }
+              stepArcadeChargeEarned = true;
+            }
+          }
+        }
       }
     }
     profile.cheerStepProgress = stepProgress;
+    profile.arcade.stepProgress = arcadeStepProgress;
     this.save();
-    return { stepCheerEarned, cheerCharges, stepProgress };
+    return {
+      stepCheerEarned,
+      cheerCharges,
+      stepProgress,
+      stepArcadeChargeEarned,
+      arcadeCharges,
+      arcadeStepProgress,
+    };
   }
 
   recordSeen(speciesId, persist = true) {
@@ -1247,7 +1318,6 @@ export class StorageManager {
 
     syncProfilePokedex(profile);
     const newBadges = this.evaluateBadges(false);
-    syncArcadeAutoUnlock(profile);
     this.save();
     return { destination, newBadges };
   }
@@ -1757,10 +1827,14 @@ export class StorageManager {
   markShrineCleared(shrineId) {
     const profile = this.getActiveProfile();
     if (!profile) return [];
-    if (!profile.shrinesCleared.includes(shrineId)) {
+    const firstClear = !profile.shrinesCleared.includes(shrineId);
+    if (firstClear) {
       profile.shrinesCleared.push(shrineId);
     }
     syncProfilePokedex(profile);
+    if (firstClear && this.isArcadeUnlocked(profile)) {
+      this.addArcadeCharges(1, false);
+    }
     const newBadges = this.evaluateBadges(false);
     this.save();
     return newBadges;
@@ -1788,6 +1862,9 @@ export class StorageManager {
     if (rewards && typeof rewards === 'object') {
       this.addRewards(rewards, false);
     }
+    if (this.isArcadeUnlocked(profile)) {
+      this.addArcadeCharges(1, false);
+    }
     const newBadges = this.evaluateBadges(false);
     this.save();
     return {
@@ -1811,25 +1888,95 @@ export class StorageManager {
     if (rewards && typeof rewards === 'object') {
       this.addRewards(rewards, false);
     }
+    if (this.isArcadeUnlocked(profile)) {
+      this.addArcadeCharges(1, false);
+    }
     const newBadges = this.evaluateBadges(false);
     this.save();
     return { trialCount: nextCount, newBadges };
   }
 
-  isArcadeUnlocked(profile = this.getActiveProfile()) {
+  isArcadeAttuned(profile = this.getActiveProfile()) {
     if (!profile || typeof profile !== 'object') return false;
-    if (profile.arcade?.unlocked) return true;
     if (Array.isArray(profile.badges) && profile.badges.length >= 1) return true;
     return getCaughtSpeciesCount(profile) >= 5;
+  }
+
+  isArcadeUnlocked(profile = this.getActiveProfile()) {
+    if (!profile || typeof profile !== 'object') return false;
+    return profile.arcade?.unlocked === true;
+  }
+
+  getArcadeState(profile = this.getActiveProfile()) {
+    const attuned = this.isArcadeAttuned(profile);
+    const unlocked = this.isArcadeUnlocked(profile);
+    const starShards = toNonNegInt(profile?.bag?.starShards, 0);
+    if (!profile || typeof profile !== 'object' || !unlocked) {
+      return {
+        unlocked: false,
+        attuned,
+        charges: 0,
+        maxCharges: MAX_ARCADE_CHARGES,
+        stepProgress: 0,
+        stepsPerCharge: STEPS_PER_ARCADE_CHARGE,
+        stepsUntilNext: STEPS_PER_ARCADE_CHARGE,
+        battleProgress: 0,
+        battlesPerCharge: BATTLES_PER_ARCADE_CHARGE,
+        battlesUntilNext: BATTLES_PER_ARCADE_CHARGE,
+        shardBuyInCost: ARCADE_SHARD_BUYIN_COST,
+        starShards,
+        canBuyWithShards: false,
+        gemCooldown: clampArcadeGemCooldown(profile?.arcade?.gemCooldown, 0),
+        highScore: toNonNegInt(profile?.arcade?.highScore, 0),
+        bestWave: toNonNegInt(profile?.arcade?.bestWave, 0),
+        plays: toNonNegInt(profile?.arcade?.plays, 0),
+        secretKnocks: Math.min(2, toNonNegInt(profile?.arcade?.secretKnocks, 0)),
+      };
+    }
+
+    const charges = profile.arcade?.charges === undefined
+      ? MAX_ARCADE_CHARGES
+      : clampArcadeCharges(profile.arcade.charges, 0);
+    const stepProgress = charges >= MAX_ARCADE_CHARGES
+      ? 0
+      : clampArcadeStepProgress(profile.arcade?.stepProgress, 0);
+    const battleProgress = charges >= MAX_ARCADE_CHARGES
+      ? 0
+      : clampArcadeBattleProgress(profile.arcade?.battleProgress, 0);
+    const stepsUntilNext = charges >= MAX_ARCADE_CHARGES ? 0 : STEPS_PER_ARCADE_CHARGE - stepProgress;
+    const battlesUntilNext = charges >= MAX_ARCADE_CHARGES ? 0 : BATTLES_PER_ARCADE_CHARGE - battleProgress;
+
+    return {
+      unlocked: true,
+      attuned,
+      charges,
+      maxCharges: MAX_ARCADE_CHARGES,
+      stepProgress,
+      stepsPerCharge: STEPS_PER_ARCADE_CHARGE,
+      stepsUntilNext,
+      battleProgress,
+      battlesPerCharge: BATTLES_PER_ARCADE_CHARGE,
+      battlesUntilNext,
+      shardBuyInCost: ARCADE_SHARD_BUYIN_COST,
+      starShards,
+      canBuyWithShards: charges < MAX_ARCADE_CHARGES && starShards >= ARCADE_SHARD_BUYIN_COST,
+      gemCooldown: clampArcadeGemCooldown(profile.arcade?.gemCooldown, 0),
+      highScore: toNonNegInt(profile.arcade?.highScore, 0),
+      bestWave: toNonNegInt(profile.arcade?.bestWave, 0),
+      plays: toNonNegInt(profile.arcade?.plays, 0),
+      secretKnocks: Math.max(3, toNonNegInt(profile.arcade?.secretKnocks, 0)),
+    };
   }
 
   unlockArcade(persist = true) {
     const profile = this.getActiveProfile();
     if (!profile) return false;
-    if (!isPlainObject(profile.arcade)) {
-      profile.arcade = hydrateArcade(null, false);
-    }
+    profile.arcade = hydrateArcade(profile.arcade, { allowLegacyPlayUnlock: false });
     profile.arcade.unlocked = true;
+    profile.arcade.secretKnocks = Math.max(3, toNonNegInt(profile.arcade.secretKnocks, 0));
+    profile.arcade.charges = MAX_ARCADE_CHARGES;
+    profile.arcade.stepProgress = 0;
+    profile.arcade.battleProgress = 0;
     if (persist) this.save();
     return true;
   }
@@ -1837,31 +1984,159 @@ export class StorageManager {
   recordSecretKnock() {
     const profile = this.getActiveProfile();
     if (!profile) {
-      return { knocks: 0, unlocked: false, justUnlocked: false };
+      return { knocks: 0, attuned: false, unlocked: false, justUnlocked: false, charges: 0 };
     }
-    const wasUnlocked = this.isArcadeUnlocked(profile);
-    if (!isPlainObject(profile.arcade)) {
-      profile.arcade = hydrateArcade(null, wasUnlocked);
+    profile.arcade = hydrateArcade(profile.arcade, { allowLegacyPlayUnlock: false });
+    if (this.isArcadeUnlocked(profile)) {
+      return {
+        knocks: profile.arcade.secretKnocks,
+        attuned: true,
+        unlocked: true,
+        justUnlocked: false,
+        charges: profile.arcade.charges,
+      };
     }
+
+    const attuned = this.isArcadeAttuned(profile);
+    if (!attuned) {
+      return {
+        knocks: profile.arcade.secretKnocks,
+        attuned: false,
+        unlocked: false,
+        justUnlocked: false,
+        charges: 0,
+      };
+    }
+
     const knocks = toNonNegInt(profile.arcade.secretKnocks, 0) + 1;
     profile.arcade.secretKnocks = knocks;
-    const unlocked = wasUnlocked || knocks >= 3;
-    const justUnlocked = !wasUnlocked && unlocked;
-    if (unlocked) {
+    if (knocks >= 3) {
       profile.arcade.unlocked = true;
+      profile.arcade.charges = MAX_ARCADE_CHARGES;
+      profile.arcade.stepProgress = 0;
+      profile.arcade.battleProgress = 0;
+      this.save();
+      return {
+        knocks,
+        attuned: true,
+        unlocked: true,
+        justUnlocked: true,
+        charges: MAX_ARCADE_CHARGES,
+      };
     }
+
     this.save();
-    return { knocks, unlocked, justUnlocked };
+    return {
+      knocks,
+      attuned: true,
+      unlocked: false,
+      justUnlocked: false,
+      charges: 0,
+    };
+  }
+
+  addArcadeCharges(count = 1, persist = true) {
+    const profile = this.getActiveProfile();
+    if (!profile || !this.isArcadeUnlocked(profile)) {
+      return { charges: 0, added: 0, maxCharges: MAX_ARCADE_CHARGES };
+    }
+    profile.arcade = hydrateArcade(profile.arcade, { allowLegacyPlayUnlock: false });
+    const prevCharges = clampArcadeCharges(profile.arcade.charges, 0);
+    const addCount = toNonNegInt(count, 0);
+    const nextCharges = Math.min(MAX_ARCADE_CHARGES, prevCharges + addCount);
+    const added = Math.max(0, nextCharges - prevCharges);
+    profile.arcade.charges = nextCharges;
+    if (nextCharges >= MAX_ARCADE_CHARGES) {
+      profile.arcade.stepProgress = 0;
+      profile.arcade.battleProgress = 0;
+    }
+    if (persist) this.save();
+    return { charges: nextCharges, added, maxCharges: MAX_ARCADE_CHARGES };
+  }
+
+  consumeArcadeCharge(persist = true) {
+    const profile = this.getActiveProfile();
+    if (!profile || !this.isArcadeUnlocked(profile)) {
+      return {
+        consumed: false,
+        reason: 'locked',
+        remainingCharges: 0,
+        maxCharges: MAX_ARCADE_CHARGES,
+      };
+    }
+    profile.arcade = hydrateArcade(profile.arcade, { allowLegacyPlayUnlock: false });
+    const current = clampArcadeCharges(profile.arcade.charges, 0);
+    if (current < 1) {
+      profile.arcade.charges = 0;
+      return {
+        consumed: false,
+        reason: 'empty_charges',
+        remainingCharges: 0,
+        maxCharges: MAX_ARCADE_CHARGES,
+      };
+    }
+    profile.arcade.charges = current - 1;
+    if (persist) this.save();
+    return {
+      consumed: true,
+      remainingCharges: profile.arcade.charges,
+      maxCharges: MAX_ARCADE_CHARGES,
+    };
+  }
+
+  buyArcadeChargeWithShards(persist = true) {
+    const profile = this.getActiveProfile();
+    if (!profile || !this.isArcadeUnlocked(profile)) {
+      return {
+        purchased: false,
+        reason: 'locked',
+        cost: ARCADE_SHARD_BUYIN_COST,
+        charges: 0,
+        remainingShards: toNonNegInt(profile?.bag?.starShards, 0),
+      };
+    }
+    profile.arcade = hydrateArcade(profile.arcade, { allowLegacyPlayUnlock: false });
+    if (!isPlainObject(profile.bag)) {
+      profile.bag = createEmptyBag();
+    }
+    const charges = clampArcadeCharges(profile.arcade.charges, 0);
+    const starShards = hydrateStarShards(profile.bag.starShards, 0);
+    profile.bag.starShards = starShards;
+    if (charges >= MAX_ARCADE_CHARGES) {
+      return {
+        purchased: false,
+        reason: 'full_charges',
+        cost: ARCADE_SHARD_BUYIN_COST,
+        charges,
+        remainingShards: starShards,
+      };
+    }
+    if (starShards < ARCADE_SHARD_BUYIN_COST) {
+      return {
+        purchased: false,
+        reason: 'insufficient_shards',
+        cost: ARCADE_SHARD_BUYIN_COST,
+        charges,
+        remainingShards: starShards,
+      };
+    }
+    profile.bag.starShards = starShards - ARCADE_SHARD_BUYIN_COST;
+    this.addArcadeCharges(1, false);
+    if (persist) this.save();
+    return {
+      purchased: true,
+      cost: ARCADE_SHARD_BUYIN_COST,
+      charges: profile.arcade.charges,
+      remainingShards: profile.bag.starShards,
+    };
   }
 
   recordArcadeRun({ score = 0, wave = 1, stars = 0, rewards = {} } = {}) {
     const profile = this.getActiveProfile();
-    if (!profile) {
-      return { isNewBest: false, highScore: 0, bestWave: 0, plays: 0, newBadges: [] };
+    if (!profile || !this.isArcadeUnlocked(profile)) {
+      return { isNewBest: false, highScore: 0, bestWave: 0, plays: 0, stars: 0, newBadges: [] };
     }
-    if (!isPlainObject(profile.arcade)) {
-      profile.arcade = hydrateArcade(null, this.isArcadeUnlocked(profile));
-    }
+    profile.arcade = hydrateArcade(profile.arcade, { allowLegacyPlayUnlock: false });
     const safeScore = toNonNegInt(score, 0);
     const safeWave = Math.max(1, toNonNegInt(wave, 1));
     const prevHigh = toNonNegInt(profile.arcade.highScore, 0);
@@ -1872,6 +2147,21 @@ export class StorageManager {
     profile.arcade.highScore = Math.max(prevHigh, safeScore);
     profile.arcade.bestWave = Math.max(prevBestWave, safeWave);
     profile.arcade.unlocked = true;
+
+    let awardedGem = false;
+    if (isPlainObject(rewards?.gems)) {
+      for (const [gemId, amount] of Object.entries(rewards.gems)) {
+        if (Object.prototype.hasOwnProperty.call(EVOLUTION_ITEMS, gemId) && toNonNegInt(amount, 0) > 0) {
+          awardedGem = true;
+          break;
+        }
+      }
+    }
+    if (awardedGem) {
+      profile.arcade.gemCooldown = ARCADE_GEM_COOLDOWN_RUNS;
+    } else {
+      profile.arcade.gemCooldown = Math.max(0, clampArcadeGemCooldown(profile.arcade.gemCooldown, 0) - 1);
+    }
 
     if (rewards && typeof rewards === 'object') {
       this.addRewards(rewards, false);
@@ -1885,6 +2175,7 @@ export class StorageManager {
       bestWave: profile.arcade.bestWave,
       plays: profile.arcade.plays,
       stars: toNonNegInt(stars, 0),
+      gemCooldown: profile.arcade.gemCooldown,
       newBadges,
     };
   }
@@ -1895,6 +2186,20 @@ export class StorageManager {
     if (!isPlainObject(profile.stats)) profile.stats = hydrateProfileStats(null);
     profile.stats.battlesWon = toNonNegInt(profile.stats.battlesWon, 0) + 1;
     this.addCheerCharges(1, false);
+    if (this.isArcadeUnlocked(profile)) {
+      profile.arcade = hydrateArcade(profile.arcade, { allowLegacyPlayUnlock: false });
+      if (profile.arcade.charges >= MAX_ARCADE_CHARGES) {
+        profile.arcade.battleProgress = 0;
+      } else {
+        const nextBattleProg = clampArcadeBattleProgress(profile.arcade.battleProgress, 0) + 1;
+        if (nextBattleProg >= BATTLES_PER_ARCADE_CHARGE) {
+          profile.arcade.battleProgress = 0;
+          this.addArcadeCharges(1, false);
+        } else {
+          profile.arcade.battleProgress = nextBattleProg;
+        }
+      }
+    }
     const newBadges = this.evaluateBadges(false);
     this.save();
     return newBadges;
@@ -1910,8 +2215,7 @@ export class StorageManager {
         unlockedNow.push(badge);
       }
     }
-    const arcadeAutoUnlocked = syncArcadeAutoUnlock(profile);
-    if (persist && (unlockedNow.length > 0 || arcadeAutoUnlocked)) this.save();
+    if (persist && unlockedNow.length > 0) this.save();
     return unlockedNow;
   }
 

@@ -804,9 +804,40 @@ button {
 }
 
 .hud-arcade-btn {
+  position: relative;
   border-color: rgba(56, 189, 248, 0.65);
   background: linear-gradient(135deg, #1e3a8a, #581c87);
   box-shadow: 0 0 10px rgba(56, 189, 248, 0.28), 0 2px 0 #090d1a;
+}
+
+.hud-arcade-btn[data-charges]::after {
+  content: attr(data-charges);
+  position: absolute;
+  right: 1px;
+  bottom: 1px;
+  min-width: 11px;
+  height: 11px;
+  padding: 0 2px;
+  border-radius: 999px;
+  font-size: 0.55rem;
+  line-height: 11px;
+  font-weight: 900;
+  text-align: center;
+  background: #0f172a;
+  color: #fde047;
+  border: 1px solid rgba(250, 204, 21, 0.72);
+  pointer-events: none;
+}
+
+.hud-arcade-btn.is-depleted {
+  border-color: rgba(148, 163, 184, 0.45);
+  background: linear-gradient(135deg, #1e293b, #334155);
+  box-shadow: 0 2px 0 #090d1a;
+}
+
+.hud-arcade-btn.is-depleted[data-charges]::after {
+  color: #cbd5e1;
+  border-color: rgba(148, 163, 184, 0.6);
 }
 
 .hud-pill:hover,

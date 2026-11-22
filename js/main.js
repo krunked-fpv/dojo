@@ -239,6 +239,11 @@ class GameApp {
           if (!this.battle?.active && !this.dialogueOpen) {
             audio.playBuddyCheer?.();
           }
+        }
+        if (stepRes?.stepArcadeChargeEarned) {
+          this.overworld?.triggerCelebrationBurst?.(x, y, 'arcade');
+        }
+        if (stepRes?.stepCheerEarned || stepRes?.stepArcadeChargeEarned) {
           if (this.pokedex?.isOpen?.()) {
             this.pokedex.render?.();
           }
@@ -564,7 +569,13 @@ class GameApp {
 
     this.bindHoldReset(this.resetTrainerBtn, this.resetTrainerFill, () => {
       const id = storage.getActiveTrainerId();
+      this.minigame?.close?.();
       storage.resetTrainerProgress(id);
+      if (this.hudArcadeBtn) {
+        this.hudArcadeBtn.hidden = true;
+        this.hudArcadeBtn.removeAttribute('data-charges');
+        this.hudArcadeBtn.classList.remove('is-depleted');
+      }
       this.resetStatusEl.textContent = `${TRAINERS[id]?.name || 'Trainer'}'s progress was reset cleanly!`;
       if (this.resetRedirectTimer) clearTimeout(this.resetRedirectTimer);
       this.resetRedirectTimer = setTimeout(() => {
@@ -575,7 +586,13 @@ class GameApp {
     });
 
     this.bindHoldReset(this.resetAllBtn, this.resetAllFill, () => {
+      this.minigame?.close?.();
       storage.resetAllProgress();
+      if (this.hudArcadeBtn) {
+        this.hudArcadeBtn.hidden = true;
+        this.hudArcadeBtn.removeAttribute('data-charges');
+        this.hudArcadeBtn.classList.remove('is-depleted');
+      }
       this.resetStatusEl.textContent = 'Both Violet and Ozias profiles were reset cleanly!';
       if (this.resetRedirectTimer) clearTimeout(this.resetRedirectTimer);
       this.resetRedirectTimer = setTimeout(() => {
@@ -838,6 +855,11 @@ class GameApp {
     this._starterFallbackAura = null;
     this.input.clearAll();
     this.overworld.setActive(false);
+    if (this.hudArcadeBtn) {
+      this.hudArcadeBtn.hidden = true;
+      this.hudArcadeBtn.removeAttribute('data-charges');
+      this.hudArcadeBtn.classList.remove('is-depleted');
+    }
     this.bootScreenEl.hidden = false;
     this.starterScreenEl.hidden = true;
     this.gameShellEl.hidden = true;
@@ -1156,9 +1178,27 @@ class GameApp {
         : 'Open Pokédex & Team (P)';
     }
 
-    const arcadeUnlocked = Boolean(storage.isArcadeUnlocked?.(profile) ?? profile?.arcade?.unlocked);
+    const arcadeState = typeof storage.getArcadeState === 'function'
+      ? storage.getArcadeState(profile)
+      : {
+          unlocked: Boolean(storage.isArcadeUnlocked?.(profile) ?? profile?.arcade?.unlocked),
+          charges: Number(profile?.arcade?.charges) || 0,
+          maxCharges: 3,
+        };
     if (this.hudArcadeBtn) {
-      this.hudArcadeBtn.hidden = !arcadeUnlocked;
+      this.hudArcadeBtn.hidden = !arcadeState.unlocked;
+      this.hudArcadeBtn.textContent = '🕹️';
+      if (arcadeState.unlocked) {
+        this.hudArcadeBtn.dataset.charges = String(arcadeState.charges);
+        this.hudArcadeBtn.classList.toggle('is-depleted', arcadeState.charges <= 0);
+        this.hudArcadeBtn.title = arcadeState.charges > 0
+          ? `Play Starlight Sky-Hop Arcade (${arcadeState.charges}/${arcadeState.maxCharges} 🎟️)`
+          : `Starlight Sky-Hop Arcade (0/${arcadeState.maxCharges} 🎟️ — walk, battle, or spend ✨ to recharge)`;
+      } else {
+        this.hudArcadeBtn.removeAttribute('data-charges');
+        this.hudArcadeBtn.classList.remove('is-depleted');
+        this.hudArcadeBtn.title = 'Play Starlight Sky-Hop Arcade';
+      }
     }
 
     this.overworld?.syncFollower?.();
@@ -1505,21 +1545,26 @@ class GameApp {
     } else if (target.type === 'npc') {
       this.handleNpcInteract(target.data, target);
     } else if (target.type === 'arcade') {
-      const unlocked = Boolean(
-        storage.isArcadeUnlocked?.(profile) ??
-        (profile?.arcade?.unlocked || (profile?.badges?.length || 0) >= 1 || countCaughtSpecies(profile) >= 5),
-      );
+      const unlocked = Boolean(storage.isArcadeUnlocked?.(profile));
       if (unlocked) {
         this.openMinigame();
         return;
       }
-      const knockRes = storage.recordSecretKnock?.() || { knocks: 1, unlocked: false, justUnlocked: false };
-      if (knockRes.unlocked || knockRes.justUnlocked) {
+      const knockRes = storage.recordSecretKnock?.() || {
+        knocks: 0,
+        attuned: false,
+        unlocked: false,
+        justUnlocked: false,
+      };
+      if (!knockRes.attuned) {
+        this.openDialogue('🔍 A faint star-shaped seam is etched into the cottage wall... Tiny runes whisper: "Earn 1 Island Badge or register 5 Pokédex species to attune your Starlight, then return and knock three times!"');
+      } else if (knockRes.unlocked || knockRes.justUnlocked) {
         this.overworld?.triggerCelebrationBurst?.(tx, ty, 'arcade');
+        this.overworld?.refreshInteractHint?.();
         this.triggerCelebration({
           icon: '🕹️',
           title: 'SECRET ARCADE UNLOCKED!',
-          subtitle: 'Starlight Sky-Hop Arcade is now open!',
+          subtitle: 'Starlight Sky-Hop revealed! 3/3 🎟️ Charges ready!',
           tone: 'arcade',
         });
         if (typeof audio.playArcadeUnlockFanfare === 'function') {
@@ -1530,9 +1575,9 @@ class GameApp {
         this.refreshHud();
         this.openMinigame();
       } else if (knockRes.knocks === 1) {
-        this.openDialogue('🕹️ *Tap-tap!* A warm starlight hum echoes inside this mysterious cabinet... (Knock 1/3 — Knock twice more, earn 1 Badge, or catch 5 Pokémon!)');
+        this.openDialogue('🕹️ *Tap-tap!* Your Starlight resonates behind the hidden cottage panel! A secret latch clicks... (Secret Knock 1/3 — Knock twice more!)');
       } else {
-        this.openDialogue(`🕹️ *Spark-chime!* Constellations flicker behind the dark glass screen! Almost awake... (Knock ${knockRes.knocks}/3!)`);
+        this.openDialogue(`🕹️ *Spark-chime!* Constellations shimmer along the wall seam! One more knock to open the secret cabinet... (Secret Knock ${knockRes.knocks}/3!)`);
       }
     } else if (target.type === 'landmark') {
       const lm = target.data;
@@ -1904,7 +1949,10 @@ class GameApp {
   }
 
   openMinigame() {
-    if (this.battle?.active || this.encounterTransitioning) return;
+    if (this.battle?.active || this.encounterTransitioning) return false;
+    if (typeof storage.isArcadeUnlocked === 'function' && !storage.isArcadeUnlocked()) {
+      return false;
+    }
     if (this.dialogueOpen) this.closeDialogue();
     if (this.pokedex?.isOpen()) this.pokedex.close();
     if (this.isSettingsOpen()) this.closeSettings();
@@ -1912,6 +1960,7 @@ class GameApp {
     this.minigame?.open();
     this.syncControlVisibility();
     this.syncOverworldPause();
+    return true;
   }
 
   openPokedex(tab = 'dex') {

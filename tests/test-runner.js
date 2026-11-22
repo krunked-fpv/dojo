@@ -66,7 +66,12 @@ import {
   rollWildPokemon,
 } from '../js/pokemon.js';
 import {
+  ARCADE_GEM_COOLDOWN_RUNS,
+  ARCADE_SHARD_BUYIN_COST,
+  BATTLES_PER_ARCADE_CHARGE,
+  MAX_ARCADE_CHARGES,
   MAX_CHEER_CHARGES,
+  STEPS_PER_ARCADE_CHARGE,
   STEPS_PER_CHEER_CHARGE,
   STORAGE_KEY,
   StorageManager,
@@ -86,7 +91,13 @@ import {
   resolveMoveParticleShape,
   resolveSpriteMotionStyle,
 } from '../js/battle.js';
-import { StarlightMinigame, WAVE_TEMPLATES } from '../js/minigame.js';
+import {
+  MAX_ARCADE_SHARDS,
+  MIN_ARCADE_REWARD_SCORE,
+  StarlightMinigame,
+  WAVE_TEMPLATES,
+  getUnlockedArcadeGemPool,
+} from '../js/minigame.js';
 
 function assert(condition, message) {
   if (!condition) {
@@ -7913,19 +7924,30 @@ function buildTestSuites() {
               const store = new StorageManager(MIG_KEY);
               assertEqual(store.getSettings().showTouchPad, 'hide', 'settings.showTouchPad preserved');
               store.selectTrainer('violet');
+              assertEqual(store.isArcadeAttuned(), false, 'Violet arcade unattuned initially');
               assertEqual(store.isArcadeUnlocked(), false, 'Violet arcade locked initially');
+              const k0 = store.recordSecretKnock();
+              assertEqual(k0.attuned, false, 'unattuned knock reports attuned === false');
+              assertEqual(k0.knocks, 0, 'unattuned knock does not increment secretKnocks');
+              assertEqual(k0.unlocked, false, 'unattuned knock keeps arcade locked');
+
+              store.getActiveProfile().badges.push('meadow');
+              assertEqual(store.isArcadeAttuned(), true, 'badge attunes Violet arcade');
+              assertEqual(store.isArcadeUnlocked(), false, 'badge alone does not auto-unlock arcade');
+
               const k1 = store.recordSecretKnock();
-              assertEqual(k1.knocks, 1, 'knock 1');
+              assertEqual(k1.knocks, 1, 'attuned knock 1');
               assertEqual(k1.unlocked, false, 'locked after knock 1');
               const k2 = store.recordSecretKnock();
-              assertEqual(k2.knocks, 2, 'knock 2');
+              assertEqual(k2.knocks, 2, 'attuned knock 2');
               assertEqual(k2.unlocked, false, 'locked after knock 2');
               const k3 = store.recordSecretKnock();
-              assertEqual(k3.knocks, 3, 'knock 3');
+              assertEqual(k3.knocks, 3, 'attuned knock 3');
               assertEqual(k3.unlocked, true, 'unlocked on knock 3');
               assertEqual(k3.justUnlocked, true, 'justUnlocked on knock 3');
+              assertEqual(k3.charges, 3, 'unlock starts with 3 charges');
 
-              // 5-caught auto-unlock check
+              // 5-caught attunes without auto-unlocking
               const freshStore = new StorageManager(`${MIG_KEY}_2`);
               try {
                 freshStore.selectTrainer('violet');
@@ -7933,15 +7955,17 @@ function buildTestSuites() {
                 for (const id of [10, 16, 19, 25]) {
                   freshStore.recordCaught(createPokemon(id, 5));
                 }
-                assertEqual(freshStore.isArcadeUnlocked(), true, '5 caught auto-unlocks arcade');
+                assertEqual(freshStore.isArcadeAttuned(), true, '5 caught attunes arcade');
+                assertEqual(freshStore.isArcadeUnlocked(), false, '5 caught does not auto-unlock arcade');
               } finally {
                 window.localStorage.removeItem(`${MIG_KEY}_2`);
               }
 
-              // Ozias v2 preservation + badge auto-unlock
+              // Ozias v2 preservation + legacy plays migration
               store.selectTrainer('ozias');
               const oz = store.getActiveProfile();
-              assertEqual(store.isArcadeUnlocked(oz), true, 'badge auto-unlocks arcade');
+              assertEqual(store.isArcadeUnlocked(oz), true, 'legacy plays/highScore migrates unlocked arcade');
+              assertEqual(oz.arcade.charges, 3, 'legacy unlocked arcade starts with 3 charges');
               assertEqual(oz.arcade.highScore, 250, 'arcade.highScore migrated');
               assertEqual(oz.arcade.plays, 2, 'arcade.plays migrated');
               assertEqual(oz.arcade.bestWave, 4, 'arcade.bestWave migrated');
@@ -7966,6 +7990,7 @@ function buildTestSuites() {
               assertEqual(mg.isOpen(), true, 'minigame isOpen() === true');
               assertEqual(app.audio.currentTheme, 'arcade', 'minigame starts arcade BGM');
               assertEqual(mg.getDiagnostics().rafActive, true, 'minigame RAF active on open');
+              assertEqual(oz.arcade.charges, 2, 'opening Sky-Hop consumes 1 charge (3 -> 2)');
 
               const mgCanvas = document.getElementById('minigame-canvas');
               const mRect = mgCanvas.getBoundingClientRect();
@@ -7986,15 +8011,15 @@ function buildTestSuites() {
               assertEqual(zeroRewards.potions, 0, 'computeRewards(0, 1) grants 0 potions');
               assertEqual(Boolean(zeroRewards.cheerCharges), false, 'computeRewards(0, 1) grants 0 cheerCharges');
 
-              mg.score = 520;
-              mg.wave = 5;
-              mg.starsCollected = 18;
+              mg.score = 900;
+              mg.wave = 8;
+              mg.starsCollected = 24;
               const runOut = mg.endRun();
-              assert(Boolean(runOut && runOut.rewards.starShards >= 1), 'endRun returns rewards at 520 pts');
-              assertEqual(runOut.rewards.cheerCharges, 1, '520 pts awards +1 cheerCharge');
+              assert(Boolean(runOut && runOut.rewards.starShards >= 1), 'endRun returns rewards at 900 pts');
+              assertEqual(runOut.rewards.cheerCharges, 1, '900 pts awards +1 cheerCharge');
               assertEqual(mg.getDiagnostics().rafActive, false, 'endRun stops RAF');
-              assertEqual(oz.arcade.highScore, 520, 'highScore persisted');
-              assertEqual(oz.arcade.bestWave, 5, 'bestWave persisted');
+              assertEqual(oz.arcade.highScore, 900, 'highScore persisted');
+              assertEqual(oz.arcade.bestWave, 8, 'bestWave persisted');
               assertEqual(oz.arcade.plays, 3, 'plays incremented');
               assertGreater(oz.bag.starShards, prevShards, 'starShards awarded');
 
@@ -8220,8 +8245,18 @@ function buildTestSuites() {
               assertEqual(celLayer.hidden, false, 'Team Evolution triggers #celebration-layer');
               app.pokedex.close();
 
-              // 12. Secret Sky-Hop Arcade 3-knock unlock on fresh profile state + play + close
-              profile.arcade = { unlocked: false, highScore: 0, plays: 0, bestWave: 0, secretKnocks: 0 };
+              // 12. Secret Sky-Hop Arcade unattuned hint + attuned 3-knock unlock + play + close
+              profile.arcade = {
+                unlocked: false,
+                charges: 0,
+                stepProgress: 0,
+                battleProgress: 0,
+                gemCooldown: 0,
+                highScore: 0,
+                plays: 0,
+                bestWave: 0,
+                secretKnocks: 0,
+              };
               profile.badges = [];
               profile.pokedex.caught = { 1: 1 };
               profile.team = [createPokemon(35, 16, 'crater', { upgradeTier: 3 })];
@@ -8230,10 +8265,19 @@ function buildTestSuites() {
               assertEqual(document.getElementById('hud-btn-arcade').hidden, true, '#hud-btn-arcade hidden while locked');
 
               app.handleWorldInteract({ type: 'arcade', key: SECRET_ARCADE_SPOT.key, data: SECRET_ARCADE_SPOT });
-              assertEqual(app.dialogueOpen, true, 'Knock 1 opens clue dialogue');
+              assertEqual(app.dialogueOpen, true, 'Unattuned inspect opens clue dialogue');
+              assertEqual(profile.arcade.secretKnocks, 0, 'Unattuned inspect keeps secretKnocks === 0');
+              app.closeDialogue();
+
+              profile.badges = ['meadow'];
+              app.refreshHud();
+              assertEqual(document.getElementById('hud-btn-arcade').hidden, true, '#hud-btn-arcade stays hidden until 3 attuned knocks');
+
+              app.handleWorldInteract({ type: 'arcade', key: SECRET_ARCADE_SPOT.key, data: SECRET_ARCADE_SPOT });
+              assertEqual(app.dialogueOpen, true, 'Attuned Knock 1 opens clue dialogue');
               app.closeDialogue();
               app.handleWorldInteract({ type: 'arcade', key: SECRET_ARCADE_SPOT.key, data: SECRET_ARCADE_SPOT });
-              assertEqual(app.dialogueOpen, true, 'Knock 2 opens clue dialogue');
+              assertEqual(app.dialogueOpen, true, 'Attuned Knock 2 opens clue dialogue');
               app.closeDialogue();
               app.handleWorldInteract({ type: 'arcade', key: SECRET_ARCADE_SPOT.key, data: SECRET_ARCADE_SPOT });
               assertEqual(app.minigame.isOpen(), true, 'Knock 3 unlocks and opens Starlight Sky-Hop Mini-Game');
@@ -9021,6 +9065,7 @@ function buildTestSuites() {
               // 4. StarlightMinigame Pause (#minigame-pause-btn, KeyP, visibilitychange), Space replay & orb fallback
               const prevMuted = app.audio.muted;
               app.audio.setMuted(true);
+              storage.unlockArcade();
               mg = new StarlightMinigame({ storage, audio: app.audio });
               mg.open();
               const pauseBtn = document.getElementById('minigame-pause-btn');
@@ -9132,8 +9177,8 @@ function buildTestSuites() {
               iDoc.getElementById('trainer-card-violet').click();
               iDoc.querySelector('.starter-pick-btn').click();
               iframeApp.closeDialogue();
-              const prof = iframeApp.pokedex.storage.getActiveProfile();
-              if (prof?.arcade) prof.arcade.unlocked = true;
+              iframeApp.pokedex.storage.unlockArcade();
+              iframeApp.refreshHud();
               iframeApp.hudInstallGroupEl.hidden = false;
               iframeApp.hudArcadeBtn.hidden = false;
 
@@ -9409,13 +9454,14 @@ function buildTestSuites() {
               engine.destroy();
               engine = null;
 
-              // 4. Sky-Hop score >= 120 grants +1 💖 (1 -> 2)
+              // 4. Sky-Hop score >= 180 (Wave 2+) grants +1 💖 (1 -> 2)
+              store.unlockArcade();
               mg = new StarlightMinigame({ storage: store, audio: noopAudio });
-              mg.score = 120;
+              mg.score = 180;
               mg.wave = 2;
               const skyOut = mg.endRun();
-              assertEqual(skyOut.rewards.cheerCharges, 1, 'Sky-Hop 120 pts awards +1 💖 Cheer Heart');
-              assertEqual(prof.bag.cheerCharges, 2, 'Sky-Hop 120 pts raises cheerCharges 1 -> 2');
+              assertEqual(skyOut.rewards.cheerCharges, 1, 'Sky-Hop 180 pts (Wave 2) awards +1 💖 Cheer Heart');
+              assertEqual(prof.bag.cheerCharges, 2, 'Sky-Hop 180 pts raises cheerCharges 1 -> 2');
               mg.destroy();
               mg = null;
 
@@ -9672,34 +9718,35 @@ function buildTestSuites() {
               assertEqual(store.useItem('starShards'), false, 'useItem rejects starShards');
               assertEqual(store.useItem('__proto__'), false, 'useItem rejects __proto__');
 
-              // 5. Sky-Hop < 60 vs 60 vs 120+ & Game Over UI message
+              // 5. Sky-Hop < 80 vs 80 vs 180+ (Wave 2+) & Game Over UI message
+              store.unlockArcade();
               mg = new StarlightMinigame({ storage: store, audio: noopAudio });
-              for (const low of [0, 59, -5, NaN, Infinity]) {
-                const r = mg.computeRewards(low, 5);
+              for (const low of [0, 79, -5, NaN, Infinity]) {
+                const r = mg.computeRewards(low, 8);
                 assertEqual(r.starShards, 0, `Sky-Hop computeRewards(${low}) starShards === 0`);
                 assertEqual(r.potions, 0, `Sky-Hop computeRewards(${low}) potions === 0`);
                 assertEqual(Boolean(r.cheerCharges), false, `Sky-Hop computeRewards(${low}) cheerCharges === 0`);
               }
-              const r60 = mg.computeRewards(60, 1);
-              assertEqual(r60.starShards, 1, 'Sky-Hop 60 pts awards 1 starShard');
-              assertEqual(r60.potions, 1, 'Sky-Hop 60 pts awards 1 potion');
-              assertEqual(Boolean(r60.cheerCharges), false, 'Sky-Hop 60 pts awards 0 cheerCharges');
-              const r120 = mg.computeRewards(120, 1);
-              assertEqual(r120.starShards, 2, 'Sky-Hop 120 pts awards 2 starShards');
-              assertEqual(r120.potions, 1, 'Sky-Hop 120 pts awards 1 potion');
-              assertEqual(r120.cheerCharges, 1, 'Sky-Hop 120 pts awards +1 cheerCharge');
+              const r80 = mg.computeRewards(80, 1);
+              assertEqual(r80.starShards, 1, 'Sky-Hop 80 pts awards 1 starShard');
+              assertEqual(r80.potions, 1, 'Sky-Hop 80 pts awards 1 potion');
+              assertEqual(Boolean(r80.cheerCharges), false, 'Sky-Hop 80 pts awards 0 cheerCharges');
+              const r180 = mg.computeRewards(180, 2);
+              assertEqual(r180.starShards, 2, 'Sky-Hop 180 pts (Wave 2) awards 2 starShards');
+              assertEqual(r180.potions, 1, 'Sky-Hop 180 pts (Wave 2) awards 1 potion');
+              assertEqual(r180.cheerCharges, 1, 'Sky-Hop 180 pts (Wave 2) awards +1 cheerCharge');
 
               prof.bag.starShards = 0;
               prof.bag.cheerCharges = 0;
               mg.open();
-              mg.score = 45;
+              mg.score = 75;
               mg.wave = 1;
               mg.endRun();
-              assertEqual(prof.bag.starShards, 0, 'Sky-Hop 45 pts awards 0 starShards');
-              assertEqual(prof.bag.cheerCharges, 0, 'Sky-Hop 45 pts awards 0 cheerCharges');
+              assertEqual(prof.bag.starShards, 0, 'Sky-Hop 75 pts awards 0 starShards');
+              assertEqual(prof.bag.cheerCharges, 0, 'Sky-Hop 75 pts awards 0 cheerCharges');
               assert(
-                (document.getElementById('minigame-results-card')?.textContent || '').includes('Score 60+ pts to win Star Shards & prizes!'),
-                'Sky-Hop <60 Game Over shows retry tip',
+                (document.getElementById('minigame-results-card')?.textContent || '').includes('Score 80+ pts to win Star Shards & prizes!'),
+                'Sky-Hop <80 Game Over shows retry tip',
               );
               mg.close();
               mg.destroy();
@@ -9833,6 +9880,449 @@ function buildTestSuites() {
               app.refreshHud();
               app.syncControlVisibility();
               app.syncOverworldPause();
+            }
+          },
+        },
+      ],
+    },
+    {
+      name: '46. Sprint 12 Secret Sky-Hop Discovery, Limited Charges, Challenge & Economy Scaling',
+      tests: [
+        {
+          name: 'Reset re-locks Sky-Hop, disguises Village wall, shows Guide/Signpost hints, and unlocks only after 3 attuned knocks',
+          fn() {
+            const app = window.__starlightApp;
+            assert(Boolean(app), 'GameApp mounted');
+
+            const prevRawSave = window.localStorage.getItem(STORAGE_KEY);
+            const wasBootHidden = app.bootScreenEl.hidden;
+            const wasStarterHidden = app.starterScreenEl.hidden;
+            const wasShellHidden = app.gameShellEl.hidden;
+            const wasOverworldActive = app.overworld.active;
+
+            try {
+              window.localStorage.removeItem(STORAGE_KEY);
+              storage.state = storage.load();
+              storage.selectTrainer('violet');
+              storage.chooseStarter(1);
+              app.enterOverworld(false);
+              app.closeDialogue();
+
+              const prof = storage.getActiveProfile();
+              assertEqual(storage.isArcadeUnlocked(prof), false, 'fresh profile starts with arcade locked');
+              assertEqual(storage.isArcadeAttuned(prof), false, 'fresh profile starts unattuned');
+              assertEqual(storage.getArcadeState(prof).charges, 0, 'locked profile has 0 charges');
+              assertEqual(document.getElementById('hud-btn-arcade').hidden, true, '#hud-btn-arcade hidden on fresh profile');
+              assertEqual(app.openMinigame(), false, 'openMinigame() blocked while locked');
+
+              // Disguised wall & signpost clue
+              const wallTarget = app.overworld.getInteractiveAtTile(SECRET_ARCADE_SPOT.x, SECRET_ARCADE_SPOT.y);
+              assertEqual(wallTarget?.type, 'arcade', 'secret wall keeps arcade interact type');
+              assertEqual(wallTarget?.unlocked, false, 'secret wall target marked unlocked === false');
+              assertEqual(wallTarget?.label, '🔍 Mysterious Wall', 'locked secret wall disguised as Mysterious Wall');
+              assert(
+                SIGNPOSTS['10,14'].includes('cottage wall') && SIGNPOSTS['10,14'].includes('5 Pokémon'),
+                'Village signpost hints at hidden cottage wall',
+              );
+
+              // Guide tab shows mystery rumor while unattuned
+              app.openPokedex('guide');
+              const rumorText = document.querySelector('#pokedex-body .guide-arcade-card')?.textContent || '';
+              assert(rumorText.includes('Secret Starlight Rumor') && rumorText.includes('1/5'), 'Guide tab shows mystery rumor before attunement');
+              assertEqual(document.getElementById('guide-arcade-play-btn'), null, 'Guide tab hides play button while locked');
+              app.pokedex.close();
+
+              // Unattuned inspect gives rune hint without counting knocks
+              app.handleWorldInteract(wallTarget);
+              assertEqual(app.dialogueOpen, true, 'unattuned wall interact opens hint dialogue');
+              assert(app.worldDialogueTextEl.textContent.includes('1 Island Badge'), 'unattuned dialogue hints at 1 Badge / 5 species');
+              assertEqual(prof.arcade.secretKnocks, 0, 'unattuned inspect does not increment secretKnocks');
+              app.closeDialogue();
+
+              // Attune by catching 5 unique species -> still hidden & locked until 3 knocks!
+              for (const id of [10, 16, 19, 25]) {
+                storage.recordCaught(createPokemon(id, 5));
+              }
+              app.refreshHud();
+              assertEqual(storage.isArcadeAttuned(prof), true, '5 species caught attunes Starlight');
+              assertEqual(storage.isArcadeUnlocked(prof), false, '5 species caught does NOT auto-unlock arcade');
+              assertEqual(document.getElementById('hud-btn-arcade').hidden, true, '#hud-btn-arcade stays hidden after attunement until discovered');
+
+              app.openPokedex('guide');
+              const attunedGuideText = document.querySelector('#pokedex-body .guide-arcade-card')?.textContent || '';
+              assert(attunedGuideText.includes('Starlight Attuned') && attunedGuideText.includes('0/3'), 'Guide tab updates to attuned knock hint');
+              app.pokedex.close();
+
+              // Knock 1 & 2 stay locked, Knock 3 unlocks with 3 charges
+              app.handleWorldInteract(app.overworld.getInteractiveAtTile(SECRET_ARCADE_SPOT.x, SECRET_ARCADE_SPOT.y));
+              assertEqual(prof.arcade.secretKnocks, 1, 'attuned knock 1 recorded');
+              app.closeDialogue();
+              app.handleWorldInteract(app.overworld.getInteractiveAtTile(SECRET_ARCADE_SPOT.x, SECRET_ARCADE_SPOT.y));
+              assertEqual(prof.arcade.secretKnocks, 2, 'attuned knock 2 recorded');
+              app.closeDialogue();
+              app.handleWorldInteract(app.overworld.getInteractiveAtTile(SECRET_ARCADE_SPOT.x, SECRET_ARCADE_SPOT.y));
+              assertEqual(storage.isArcadeUnlocked(prof), true, 'attuned knock 3 unlocks arcade');
+              assertEqual(app.minigame.isOpen(), true, 'knock 3 opens Sky-Hop');
+              assertEqual(prof.arcade.charges, 2, 'opening on knock 3 starts first flight (3 -> 2)');
+              assertEqual(document.getElementById('hud-btn-arcade').hidden, false, '#hud-btn-arcade shown after unlock');
+              assertEqual(document.getElementById('hud-btn-arcade').dataset.charges, '2', '#hud-btn-arcade shows remaining charge badge');
+              assertEqual(
+                app.overworld.getInteractiveAtTile(SECRET_ARCADE_SPOT.x, SECRET_ARCADE_SPOT.y)?.label,
+                '🕹️ Starlight Sky-Hop Cabinet',
+                'overworld interact label switches to Cabinet once unlocked',
+              );
+              app.minigame.close();
+
+              // Reset trainer & reset all re-hide and re-lock everything
+              storage.resetTrainerProgress('violet');
+              app.showBootScreen();
+              assertEqual(document.getElementById('hud-btn-arcade').hidden, true, 'reset + showBootScreen hides #hud-btn-arcade');
+              const resetViolet = storage.getProfile('violet');
+              assertEqual(resetViolet.arcade.unlocked, false, 'resetTrainerProgress clears arcade.unlocked');
+              assertEqual(resetViolet.arcade.charges, 0, 'resetTrainerProgress clears arcade.charges');
+              assertEqual(resetViolet.arcade.secretKnocks, 0, 'resetTrainerProgress clears secretKnocks');
+
+              storage.selectTrainer('ozias');
+              storage.chooseStarter(4);
+              storage.unlockArcade();
+              storage.resetAllProgress();
+              assertEqual(storage.getProfile('ozias').arcade.unlocked, false, 'resetAllProgress clears arcade.unlocked');
+              assertEqual(storage.getProfile('ozias').arcade.charges, 0, 'resetAllProgress clears arcade.charges');
+            } finally {
+              app.minigame?.close?.();
+              app.pokedex?.close?.();
+              app.closeDialogue?.();
+              app.clearCelebration?.();
+              if (prevRawSave === null) window.localStorage.removeItem(STORAGE_KEY);
+              else window.localStorage.setItem(STORAGE_KEY, prevRawSave);
+              storage.state = storage.load();
+              app.applyTrainerTheme(storage.getActiveTrainerId() || 'violet');
+              app.bootScreenEl.hidden = wasBootHidden;
+              app.starterScreenEl.hidden = wasStarterHidden;
+              app.gameShellEl.hidden = wasShellHidden;
+              app.overworld.setActive(wasOverworldActive);
+              if (!wasOverworldActive) app.audio?.stopBGM?.();
+              if (!wasBootHidden) app.showBootScreen();
+              else app.refreshHud();
+            }
+          },
+        },
+        {
+          name: 'Arcade charge depletion, 50-step/2-battle/Shrine/Rival recharge, catch no-double-count & 5-Shard buy-in sink',
+          async fn() {
+            const TEST_KEY = 'starlight_pokemon_test_s46_charges_v1';
+            const noopAudio = {
+              muted: true,
+              unlock() {},
+              playMenuBlip() {},
+              playBattleStart() {},
+              playAttackHit() {},
+              playHealChime() {},
+              playBallThrow() {},
+              playBallWobble() {},
+              playCatchSuccess() {},
+              playVictoryFanfare() {},
+              playBuddyCheer() {},
+              playBuddyEndure() {},
+              playBadgeFanfare() {},
+              playRunEscape() {},
+              playPokemonCry() {},
+              playArcadeUnlockFanfare() {},
+              playArcadeStar() {},
+              playArcadeBoost() {},
+              playArcadeBump() {},
+              playBGM() {},
+              stopBGM() {},
+            };
+            const origRand = Math.random;
+            let engine = null;
+            let mg = null;
+
+            try {
+              window.localStorage.removeItem(TEST_KEY);
+              const store = new StorageManager(TEST_KEY);
+              store.updateSettings({ battlePace: 'fast' });
+              store.selectTrainer('violet');
+              store.chooseStarter(1);
+              store.unlockArcade();
+              const prof = store.getActiveProfile();
+
+              assertEqual(MAX_ARCADE_CHARGES, 3, 'MAX_ARCADE_CHARGES === 3');
+              assertEqual(STEPS_PER_ARCADE_CHARGE, 50, 'STEPS_PER_ARCADE_CHARGE === 50');
+              assertEqual(BATTLES_PER_ARCADE_CHARGE, 2, 'BATTLES_PER_ARCADE_CHARGE === 2');
+              assertEqual(ARCADE_SHARD_BUYIN_COST, 5, 'ARCADE_SHARD_BUYIN_COST === 5');
+
+              mg = new StarlightMinigame({ storage: store, audio: noopAudio });
+              // Spend all 3 charges
+              mg.open();
+              assertEqual(prof.arcade.charges, 2, 'Run 1 consumes charge 3 -> 2');
+              mg.endRun();
+              assertEqual(mg.startNewRun(), true, 'Run 2 starts');
+              assertEqual(prof.arcade.charges, 1, 'Run 2 consumes charge 2 -> 1');
+              mg.endRun();
+              assertEqual(mg.startNewRun(), true, 'Run 3 starts');
+              assertEqual(prof.arcade.charges, 0, 'Run 3 consumes charge 1 -> 0');
+              mg.endRun();
+
+              // 0-charge enforcement on replay button, startNewRun & Space key
+              assertEqual(document.getElementById('minigame-replay-btn').disabled, true, '#minigame-replay-btn disabled at 0 charges');
+              assertEqual(document.getElementById('minigame-shard-buy-btn')?.disabled, true, '#minigame-shard-buy-btn disabled with 0 Star Shards');
+              assertEqual(mg.startNewRun(), false, 'startNewRun() blocked at 0 charges');
+              assertEqual(mg.outOfCharges, true, 'outOfCharges standby state active');
+              window.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', code: 'Space', bubbles: true, cancelable: true }));
+              assertEqual(mg.outOfCharges, true, 'Space key blocked at 0 charges');
+              mg.close();
+
+              // 50-step recharge (+1)
+              for (let s = 1; s < STEPS_PER_ARCADE_CHARGE; s++) {
+                const res = store.updatePosition(8, 15, 'down', true);
+                assertEqual(res.stepArcadeChargeEarned, false, `step ${s}/50 does not award charge`);
+              }
+              const step50 = store.updatePosition(8, 15, 'down', true);
+              assertEqual(step50.stepArcadeChargeEarned, true, 'step 50/50 awards +1 arcade charge');
+              assertEqual(prof.arcade.charges, 1, 'charges 0 -> 1 after 50 steps');
+
+              // 2-battle recharge (+1) & wild catch no double-count
+              store.recordBattleWin();
+              assertEqual(prof.arcade.battleProgress, 1, '1st battle win sets battleProgress === 1');
+              assertEqual(prof.arcade.charges, 1, '1st battle win keeps charges === 1');
+              store.recordBattleWin();
+              assertEqual(prof.arcade.battleProgress, 0, '2nd battle win resets battleProgress === 0');
+              assertEqual(prof.arcade.charges, 2, '2nd battle win awards +1 charge (1 -> 2)');
+
+              // Wild catch calls recordCaught + recordBattleWin -> strictly +1 battleProgress total
+              engine = new BattleEngine({
+                storage: store,
+                audio: noopAudio,
+                onBattleEnd() {},
+                onBadgesUnlocked() {},
+                onHudRefresh() {},
+              });
+              const wildEnemy = createPokemon(16, 4, 'forest');
+              wildEnemy.hp = 1;
+              const catchStartP = engine.start({ enemy: wildEnemy, biomeId: 'forest' });
+              const timer = setInterval(() => engine.finishTypewriter(), 10);
+              try {
+                await catchStartP;
+                Math.random = () => 0.0;
+                await engine.handleThrowBall('pokeball');
+              } finally {
+                clearInterval(timer);
+                Math.random = origRand;
+              }
+              assertEqual(prof.arcade.battleProgress, 1, 'wild catch increments battleProgress strictly by +1 (no double-count)');
+              engine.destroy();
+              engine = null;
+
+              // Shrine clear, Shrine Trial, Rival win (+1 each, capped at 3)
+              prof.arcade.charges = 0;
+              store.markShrineCleared('forest_shrine');
+              assertEqual(prof.arcade.charges, 1, 'first Shrine clear awards +1 charge');
+              store.markShrineCleared('forest_shrine');
+              assertEqual(prof.arcade.charges, 1, 'repeat markShrineCleared does not double-award');
+              store.recordShrineTrialWin('forest_shrine');
+              assertEqual(prof.arcade.charges, 2, 'Shrine Trial win awards +1 charge');
+              store.markRivalDefeated('rival_leo');
+              assertEqual(prof.arcade.charges, 3, 'Rival win awards +1 charge');
+              store.markRivalDefeated('rival_leo');
+              assertEqual(prof.arcade.charges, 3, 'charges capped at MAX_ARCADE_CHARGES = 3');
+              assertEqual(prof.arcade.stepProgress, 0, 'stepProgress reset at max charges');
+              assertEqual(prof.arcade.battleProgress, 0, 'battleProgress reset at max charges');
+
+              // Shard buy-in sink (cost 5 > max reward 4 -> net <= -1)
+              const fullBuy = store.buyArcadeChargeWithShards();
+              assertEqual(fullBuy.purchased, false, 'buy-in rejected when charges full');
+              assertEqual(fullBuy.reason, 'full_charges', 'reason === full_charges');
+
+              prof.arcade.charges = 0;
+              prof.bag.starShards = 4;
+              const poorBuy = store.buyArcadeChargeWithShards();
+              assertEqual(poorBuy.purchased, false, 'buy-in rejected with 4 shards');
+              assertEqual(poorBuy.reason, 'insufficient_shards', 'reason === insufficient_shards');
+
+              prof.bag.starShards = 5;
+              const okBuy = store.buyArcadeChargeWithShards();
+              assertEqual(okBuy.purchased, true, 'buy-in succeeds with 5 shards & 0 charges');
+              assertEqual(okBuy.remainingShards, 0, '5 shards deducted cleanly');
+              assertEqual(prof.arcade.charges, 1, 'buy-in grants +1 charge');
+
+              mg.open();
+              mg.score = 1200;
+              mg.wave = 10;
+              const maxRun = mg.endRun();
+              assertEqual(maxRun.rewards.starShards, MAX_ARCADE_SHARDS, 'max shard reward strictly capped at 4');
+              assert(prof.bag.starShards < 5, `Shard buy-in is always a net sink (4 < 5, got ${prof.bag.starShards})`);
+              mg.close();
+            } finally {
+              Math.random = origRand;
+              engine?.destroy();
+              mg?.destroy();
+              window.localStorage.removeItem(TEST_KEY);
+            }
+          },
+        },
+        {
+          name: 'Sky-Hop harder mechanics (paused Dash cooldown, Void Meteor shatter, combo decay, crosswind) & 6-tier badge-gated rewards',
+          fn() {
+            const TEST_KEY = 'starlight_pokemon_test_s46_challenge_v1';
+            const noopAudio = {
+              muted: true,
+              unlock() {},
+              playMenuBlip() {},
+              playHealChime() {},
+              playPokemonCry() {},
+              playArcadeUnlockFanfare() {},
+              playArcadeStar() {},
+              playArcadeBoost() {},
+              playArcadeBump() {},
+              playBGM() {},
+            };
+            let mg = null;
+
+            try {
+              window.localStorage.removeItem(TEST_KEY);
+              const store = new StorageManager(TEST_KEY);
+              store.selectTrainer('violet');
+              store.chooseStarter(1);
+              store.unlockArcade();
+              const prof = store.getActiveProfile();
+
+              mg = new StarlightMinigame({ storage: store, audio: noopAudio });
+              mg.open();
+
+              // 1. Dash cooldown does not tick while Dash is active
+              assertEqual(mg.activateDash(), true, 'activateDash() succeeds');
+              const initialCd = mg.dashCooldown;
+              assertEqual(initialCd, 4.6, 'dashCooldown starts at 4.6s');
+              mg.update(0.5);
+              assertGreater(mg.dashTimer, 0, 'dashTimer still active after 0.5s');
+              assertEqual(mg.dashCooldown, initialCd, 'dashCooldown paused while dashTimer > 0');
+
+              // 2. Void Meteor shatters active Dash without losing a heart, then damages without Dash
+              mg.comboStreak = 10;
+              mg.combo = 3;
+              mg.entities = [{
+                kind: 'void_meteor',
+                x: 132,
+                y: mg.playerY,
+                baseY: mg.playerY,
+                vy: 0,
+                radius: 21,
+                speed: 100,
+                age: 0,
+                bobAmp: 0,
+                bobFreq: 0,
+              }];
+              mg.update(0.016);
+              assertEqual(mg.dashTimer, 0, 'Void Meteor shatters active Dash');
+              assertEqual(mg.combo, 1, 'Void Meteor Dash shatter resets combo');
+              assertEqual(mg.hearts, 3, 'Void Meteor Dash shatter protects heart shield');
+
+              mg.hitInvulnTimer = 0;
+              mg.entities = [{
+                kind: 'void_meteor',
+                x: 132,
+                y: mg.playerY,
+                baseY: mg.playerY,
+                vy: 0,
+                radius: 21,
+                speed: 100,
+                age: 0,
+                bobAmp: 0,
+                bobFreq: 0,
+              }];
+              mg.update(0.016);
+              assertEqual(mg.hearts, 2, 'Void Meteor deals 1 heart damage without Dash');
+
+              // 3. Missed star decays comboStreak by 4
+              mg.comboStreak = 10;
+              mg.combo = 3;
+              mg.entities = [{
+                kind: 'star',
+                x: -40,
+                y: 200,
+                baseY: 200,
+                vy: 0,
+                radius: 15,
+                speed: 300,
+                age: 0,
+                bobAmp: 0,
+                bobFreq: 0,
+              }];
+              mg.update(0.016);
+              assertEqual(mg.comboStreak, 6, 'missing a star decays comboStreak by 4 (10 -> 6)');
+              assertEqual(mg.combo, 2, 'combo updates cleanly with decayed streak');
+
+              // 4. Wave escalation: Wave 2 storm_orb, Wave 3 void_meteor, Wave 4 storm gate, Wave 5 heart + crosswind
+              mg._beginWave(2);
+              assert(mg.pendingSpawns.some((s) => s.kind === 'storm_orb'), 'Wave 2 spawns storm_orb');
+              mg._beginWave(3);
+              assert(mg.pendingSpawns.some((s) => s.kind === 'void_meteor'), 'Wave 3 spawns void_meteor');
+              assertEqual(mg.pendingSpawns.some((s) => s.kind === 'heart'), false, 'Wave 3 no longer spawns free hearts');
+              mg._beginWave(4);
+              assert(mg.pendingSpawns.filter((s) => s.kind === 'cloud').length >= 3, 'Wave 4 adds Twin Storm Gate clouds');
+              mg._beginWave(5);
+              assert(mg.pendingSpawns.some((s) => s.kind === 'heart'), 'Wave 5 spawns scarce heart when hurt');
+              mg.waveElapsed = 0.7;
+              mg.update(0.02);
+              assert(Math.abs(mg.windVy) > 0, 'Wave 5+ applies sky crosswind');
+
+              // 5. 6-tier computeRewards, badge-gated gem pool & gemCooldown
+              const t0 = mg.computeRewards(79, 8);
+              assertEqual(t0.starShards, 0, 'Tier 0 (<80) yields 0 shards');
+              const t1 = mg.computeRewards(80, 1);
+              assertEqual(t1.starShards, 1, 'Tier 1 (80, W1): 1 shard');
+              assertEqual(t1.potions, 1, 'Tier 1 (80, W1): 1 potion');
+              const t2 = mg.computeRewards(180, 2);
+              assertEqual(t2.starShards, 2, 'Tier 2 (180, W2): 2 shards');
+              assertEqual(t2.cheerCharges, 1, 'Tier 2 (180, W2): 1 cheer');
+              const t3 = mg.computeRewards(300, 3);
+              assertEqual(t3.greatBalls, 1, 'Tier 3 (300, W3): 1 greatBall');
+              const t4 = mg.computeRewards(450, 5);
+              assertEqual(t4.starShards, 3, 'Tier 4 (450, W5): 3 shards');
+              assertEqual(t4.potions, 2, 'Tier 4 (450, W5): 2 potions');
+              const t5 = mg.computeRewards(650, 6);
+              assertEqual(t5.starShards, 4, 'Tier 5 (650, W6): 4 shards');
+              assertEqual(t5.greatBalls, 2, 'Tier 5 (650, W6): 2 greatBalls');
+              assertEqual(t5.starBalls, 1, 'Tier 5 (650, W6): 1 starBall');
+
+              // Badge-gated gem pools
+              prof.badges = [];
+              const pool0 = getUnlockedArcadeGemPool(prof);
+              assertEqual(pool0.includes('tera_gem'), false, '0-badge pool excludes endgame tera_gem');
+              assert(pool0.includes('fire_gem') && pool0.includes('moon_gem'), '0-badge pool includes early gems');
+
+              prof.badges = ['meadow', 'flame', 'cascade'];
+              const pool3 = getUnlockedArcadeGemPool(prof);
+              assert(pool3.includes('ice_gem') && pool3.includes('astral_gem'), '3-badge pool unlocks mid-game gems');
+              assertEqual(pool3.includes('tera_gem'), false, '3-badge pool still excludes endgame tera_gem');
+
+              prof.badges = ['meadow', 'flame', 'cascade', 'thunder', 'boulder', 'magma', 'aurora', 'starlight'];
+              const pool8 = getUnlockedArcadeGemPool(prof);
+              assert(pool8.includes('tera_gem') && pool8.includes('crown_gem'), '8-badge pool unlocks endgame gems');
+
+              // Tier 6 gem drop & cooldown enforcement
+              prof.arcade.gemCooldown = 0;
+              mg.score = 900;
+              mg.wave = 8;
+              const tier6GemRun = mg.endRun();
+              const droppedGems = Object.values(tier6GemRun.rewards.gems || {}).reduce((s, n) => s + n, 0);
+              assertEqual(droppedGems, 1, 'Tier 6 (900, W8) drops 1 badge-gated gem when off cooldown');
+              assertEqual(prof.arcade.gemCooldown, ARCADE_GEM_COOLDOWN_RUNS, 'gem drop sets gemCooldown === 2');
+
+              // Next run on cooldown awards bonus Star Ball instead of a 2nd gem
+              assertEqual(mg.startNewRun(), true, 'next run starts');
+              mg.score = 950;
+              mg.wave = 8;
+              const cooldownRun = mg.endRun();
+              assertEqual(Boolean(cooldownRun.rewards.gems), false, 'Tier 6 on cooldown drops 0 gems');
+              assertEqual(cooldownRun.rewards.starBalls, 2, 'Tier 6 on cooldown awards +1 bonus Star Ball (total 2)');
+              assertEqual(prof.arcade.gemCooldown, 1, 'non-gem run decrements gemCooldown (2 -> 1)');
+
+              mg.close();
+            } finally {
+              mg?.destroy();
+              window.localStorage.removeItem(TEST_KEY);
             }
           },
         },

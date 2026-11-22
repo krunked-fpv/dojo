@@ -1511,12 +1511,14 @@ export class OverworldEngine {
       };
     }
     if (SECRET_ARCADE_SPOT && SECRET_ARCADE_SPOT.x === tx && SECRET_ARCADE_SPOT.y === ty) {
+      const unlocked = Boolean(this.getProfile?.()?.arcade?.unlocked);
       return {
         type: 'arcade',
         key,
         x: tx,
         y: ty,
-        label: `${SECRET_ARCADE_SPOT.icon} ${SECRET_ARCADE_SPOT.name}`,
+        unlocked,
+        label: unlocked ? `${SECRET_ARCADE_SPOT.icon} ${SECRET_ARCADE_SPOT.name}` : '🔍 Mysterious Wall',
         data: SECRET_ARCADE_SPOT,
       };
     }
@@ -1538,7 +1540,9 @@ export class OverworldEngine {
 
   refreshInteractHint() {
     const target = this.getInteractiveTarget();
-    const hintKey = target ? `${target.type}:${target.key}:${target.opened ? '1' : '0'}` : 'none';
+    const hintKey = target
+      ? `${target.type}:${target.key}:${target.opened ? '1' : '0'}:${target.unlocked ? '1' : '0'}`
+      : 'none';
     if (hintKey !== this.lastHintKey) {
       this.lastHintKey = hintKey;
       this.onInteractHint?.(target);
@@ -2898,11 +2902,20 @@ export class OverworldEngine {
         ctx.fillStyle = '#cbd5e1';
         ctx.fillRect(sx, sy + ts - 4, ts, 4);
         if (SECRET_ARCADE_SPOT && tx === SECRET_ARCADE_SPOT.x && ty === SECRET_ARCADE_SPOT.y) {
-          // Cozy timber alcove recess behind the Secret Starlight Arcade Cabinet
-          ctx.fillStyle = '#78350f';
-          ctx.fillRect(sx + 3, sy + 1, ts - 6, ts - 1);
-          ctx.fillStyle = '#fef3c7';
-          ctx.fillRect(sx + 4, sy + 2, ts - 8, ts - 6);
+          const arcadeUnlocked = Boolean(this.getProfile?.()?.arcade?.unlocked);
+          if (arcadeUnlocked) {
+            // Cozy timber alcove recess behind the Secret Starlight Arcade Cabinet
+            ctx.fillStyle = '#78350f';
+            ctx.fillRect(sx + 3, sy + 1, ts - 6, ts - 1);
+            ctx.fillStyle = '#fef3c7';
+            ctx.fillRect(sx + 4, sy + 2, ts - 8, ts - 6);
+          } else {
+            // Disguised cottage plaster wall with subtle hidden panel seam
+            ctx.fillStyle = 'rgba(100, 116, 139, 0.35)';
+            ctx.fillRect(sx + 5, sy + 4, 1, ts - 8);
+            ctx.fillRect(sx + ts - 6, sy + 4, 1, ts - 8);
+            ctx.fillRect(sx + 5, sy + 4, ts - 10, 1);
+          }
         } else if (tx === 4 || tx === 13) {
           ctx.fillStyle = '#78350f';
           ctx.fillRect(sx + 9, sy + 8, 14, 24);
@@ -3924,14 +3937,57 @@ export class OverworldEngine {
   drawSecretArcadeCabinet(ctx, sx, sy, nowMs = 0, profile = null) {
     sx = Math.round(sx);
     sy = Math.round(sy);
-    const badgeUnlocked = Boolean(profile?.arcade?.unlocked);
-    const powered = Boolean(
-      badgeUnlocked ||
+    const unlocked = Boolean(profile?.arcade?.unlocked);
+    const attuned = Boolean(
       (profile?.badges?.length || 0) >= 1 ||
       Object.keys(profile?.pokedex?.caught || {}).length >= 5,
     );
+    const charges = profile?.arcade?.charges === undefined
+      ? (unlocked ? 3 : 0)
+      : (Number(profile.arcade.charges) || 0);
     const pulse = 0.55 + 0.45 * Math.sin(nowMs * 0.006);
     ctx.save();
+
+    if (!unlocked) {
+      // Disguised cottage wall panel with tiny star-etched seam until unlocked
+      if (attuned) {
+        ctx.globalAlpha = 0.14 + pulse * 0.16;
+        ctx.fillStyle = '#38bdf8';
+        ctx.beginPath();
+        ctx.arc(sx + 16, sy + 15, 10, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.globalAlpha = attuned ? 0.55 + pulse * 0.35 : 0.36;
+      ctx.fillStyle = attuned ? '#0284c7' : '#94a3b8';
+      ctx.fillRect(sx + 7, sy + 6, 18, 1);
+      ctx.fillRect(sx + 7, sy + 6, 1, 20);
+      ctx.fillRect(sx + 24, sy + 6, 1, 20);
+      ctx.fillRect(sx + 7, sy + 25, 18, 1);
+
+      // Tiny etched 4-point star rune at (sx + 16, sy + 15)
+      const cx = sx + 16;
+      const cy = sy + 15;
+      ctx.globalAlpha = attuned ? 0.65 + pulse * 0.35 : 0.42 + pulse * 0.14;
+      ctx.fillStyle = attuned ? '#fde047' : '#cbd5e1';
+      ctx.fillRect(cx - 2, cy, 5, 1);
+      ctx.fillRect(cx, cy - 2, 1, 5);
+      ctx.fillStyle = attuned ? '#67e8f9' : '#94a3b8';
+      ctx.fillRect(cx, cy, 1, 1);
+
+      if (attuned) {
+        const sparkY = Math.round(sy + 4 - Math.abs(Math.sin(nowMs * 0.005)) * 2);
+        ctx.globalAlpha = 0.5 + pulse * 0.45;
+        ctx.fillStyle = '#fde047';
+        ctx.fillRect(sx + 15, sparkY, 3, 1);
+        ctx.fillRect(sx + 16, sparkY - 1, 1, 3);
+      }
+
+      ctx.restore();
+      return;
+    }
+
+    const powered = charges > 0;
+    const badgeUnlocked = true;
 
     // Soft ambient arcade glow halo behind facade
     ctx.globalAlpha = powered ? (0.18 + pulse * 0.16) : (0.14 + pulse * 0.12);

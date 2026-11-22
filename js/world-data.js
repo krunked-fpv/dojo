@@ -935,7 +935,7 @@ export const WORLD_MAP = RAW_MAP.map((row, y) => {
 });
 
 export const SIGNPOSTS = {
-  '10,14': 'Welcome, {trainer}! Step on the glowing Healing Fountain nearby anytime to restore your team. Paths lead North to Whispering Forest, East through Crystal Cavern to Ember Caldera, and South through Sapphire Lagoon to Starfall Peak!',
+  '10,14': 'Welcome, {trainer}! Step on the glowing Healing Fountain nearby anytime to restore your team. Paths lead North to Whispering Forest, East through Crystal Cavern to Ember Caldera, and South through Sapphire Lagoon to Starfall Peak! Rumor says a star-marked cottage wall east of Professor Willow hides a secret once you earn a Badge or catch 5 Pokémon!',
   '10,8': 'Whispering Forest: Wild Grass, Normal, and Electric Pokémon dance in the tall grass! Follow the glowing rune stones to reach the Forest Shrine.',
   '23,14': 'Crystal Cavern: Watch for shimmering crystal floors! Keep heading East through the lantern tunnels to reach Ember Caldera, or North to Crystal Shrine.',
   '9,20': 'Sapphire Lagoon: Splash through shallow coral pools to meet Water Pokémon—and cross wooden bridges to find the Lagoon Shrine or Starfall Peak to the Southeast!',
@@ -2778,7 +2778,7 @@ export const SECRET_ARCADE_SPOT = {
   key: '11,12',
   icon: '🕹️',
   biome: 'village',
-  description: 'A cozy glowing Starlight Sky-Hop arcade cabinet tucked beside the red-roofed cottage wall! Knock 3 times—or earn a Badge / catch 5 Pokémon—to power it up!',
+  description: 'A hidden star-marked cottage wall east of Professor Willow! Earn 1 Badge or register 5 Pokémon species to attune your Starlight, then knock 3 times to reveal the Starlight Sky-Hop arcade!',
 };
 
 export function getBiomeAt(x, y) {

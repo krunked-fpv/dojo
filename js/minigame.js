@@ -3,6 +3,7 @@
 import * as PokemonMod from './pokemon.js';
 import { EVOLUTION_ITEMS, SPECIES, TYPES, getBiomeAt } from './config.js';
 import { THEMES } from './audio.js';
+import { ARCADE_SHARD_BUYIN_COST, MAX_ARCADE_CHARGES } from './storage.js';
 
 const CANVAS_W = 760;
 const CANVAS_H = 420;
@@ -11,18 +12,40 @@ const PLAYER_MIN_Y = 40;
 const PLAYER_MAX_Y = CANVAS_H - 40;
 const MAX_HEARTS = 3;
 
+export const MIN_ARCADE_REWARD_SCORE = 80;
+export const MAX_ARCADE_SHARDS = 4;
+
+const BASE_GEM_POOL = ['leaf_gem', 'fire_gem', 'water_gem', 'thunder_gem', 'moon_gem', 'sun_gem'];
+const MID_GEM_POOL = ['ice_gem', 'dusk_gem', 'astral_gem'];
+const ENDGAME_GEM_POOL = ['prism_gem', 'chrono_gem', 'nebula_gem', 'pixie_gem', 'alola_gem', 'crown_gem', 'tera_gem'];
+
+export function getUnlockedArcadeGemPool(profile = null) {
+  const badgeCount = Array.isArray(profile?.badges) ? profile.badges.length : 0;
+  const pool = [...BASE_GEM_POOL];
+  if (badgeCount >= 3) {
+    pool.push(...MID_GEM_POOL);
+  }
+  if (badgeCount >= 8) {
+    pool.push(...ENDGAME_GEM_POOL);
+  }
+  return pool.filter((id) => Boolean(EVOLUTION_ITEMS?.[id]));
+}
+
 export const WAVE_TEMPLATES = [
   {
     id: 'rising_arc',
     name: 'Rising Starlight Arc',
     items: [
       { delay: 0.0, kind: 'star', yFrac: 0.78 },
+      { delay: 0.25, kind: 'cloud', yFrac: 0.5 },
       { delay: 0.35, kind: 'star', yFrac: 0.66 },
       { delay: 0.7, kind: 'star', yFrac: 0.54 },
+      { delay: 0.78, kind: 'cloud', yFrac: 0.32 },
       { delay: 1.05, kind: 'bigstar', yFrac: 0.42 },
+      { delay: 1.25, kind: 'storm_orb', yFrac: 0.56 },
       { delay: 1.4, kind: 'star', yFrac: 0.3 },
       { delay: 1.75, kind: 'star', yFrac: 0.2 },
-      { delay: 1.1, kind: 'cloud', yFrac: 0.78 },
+      { delay: 1.75, kind: 'cloud', yFrac: 0.76 },
     ],
   },
   {
@@ -30,12 +53,15 @@ export const WAVE_TEMPLATES = [
     name: 'Starfall Cascade',
     items: [
       { delay: 0.0, kind: 'star', yFrac: 0.2 },
+      { delay: 0.28, kind: 'cloud', yFrac: 0.48 },
       { delay: 0.35, kind: 'star', yFrac: 0.32 },
       { delay: 0.7, kind: 'star', yFrac: 0.46 },
+      { delay: 0.85, kind: 'cloud', yFrac: 0.22 },
       { delay: 1.05, kind: 'bigstar', yFrac: 0.6 },
+      { delay: 1.22, kind: 'storm_orb', yFrac: 0.46 },
       { delay: 1.4, kind: 'star', yFrac: 0.74 },
       { delay: 1.75, kind: 'star', yFrac: 0.82 },
-      { delay: 0.9, kind: 'cloud', yFrac: 0.22 },
+      { delay: 1.82, kind: 'cloud', yFrac: 0.56 },
     ],
   },
   {
@@ -44,13 +70,15 @@ export const WAVE_TEMPLATES = [
     items: [
       { delay: 0.0, kind: 'star', yFrac: 0.5 },
       { delay: 0.32, kind: 'star', yFrac: 0.34 },
+      { delay: 0.42, kind: 'cloud', yFrac: 0.54 },
       { delay: 0.64, kind: 'star', yFrac: 0.24 },
+      { delay: 0.85, kind: 'cloud', yFrac: 0.78 },
       { delay: 0.96, kind: 'star', yFrac: 0.36 },
+      { delay: 1.15, kind: 'storm_orb', yFrac: 0.5 },
       { delay: 1.28, kind: 'star', yFrac: 0.56 },
       { delay: 1.6, kind: 'bigstar', yFrac: 0.72 },
-      { delay: 1.92, kind: 'star', yFrac: 0.56 },
-      { delay: 0.85, kind: 'cloud', yFrac: 0.78 },
       { delay: 1.85, kind: 'cloud', yFrac: 0.22 },
+      { delay: 1.92, kind: 'star', yFrac: 0.56 },
     ],
   },
   {
@@ -58,13 +86,17 @@ export const WAVE_TEMPLATES = [
     name: 'Twin Sky Lanes',
     items: [
       { delay: 0.0, kind: 'star', yFrac: 0.25 },
+      { delay: 0.0, kind: 'cloud', yFrac: 0.5 },
       { delay: 0.0, kind: 'star', yFrac: 0.75 },
       { delay: 0.45, kind: 'star', yFrac: 0.25 },
       { delay: 0.45, kind: 'star', yFrac: 0.75 },
       { delay: 0.9, kind: 'cloud', yFrac: 0.5 },
+      { delay: 0.9, kind: 'cloud', yFrac: 0.26 },
       { delay: 1.3, kind: 'bigstar', yFrac: 0.25 },
+      { delay: 1.3, kind: 'storm_orb', yFrac: 0.5 },
       { delay: 1.3, kind: 'bigstar', yFrac: 0.75 },
       { delay: 1.85, kind: 'cloud', yFrac: 0.5 },
+      { delay: 1.85, kind: 'cloud', yFrac: 0.74 },
     ],
   },
   {
@@ -73,11 +105,13 @@ export const WAVE_TEMPLATES = [
     items: [
       { delay: 0.0, kind: 'star', yFrac: 0.5 },
       { delay: 0.35, kind: 'star', yFrac: 0.34 },
+      { delay: 0.35, kind: 'cloud', yFrac: 0.5 },
       { delay: 0.35, kind: 'star', yFrac: 0.66 },
       { delay: 0.7, kind: 'star', yFrac: 0.22 },
       { delay: 0.7, kind: 'bigstar', yFrac: 0.5 },
       { delay: 0.7, kind: 'star', yFrac: 0.78 },
       { delay: 1.05, kind: 'star', yFrac: 0.34 },
+      { delay: 1.05, kind: 'storm_orb', yFrac: 0.5 },
       { delay: 1.05, kind: 'star', yFrac: 0.66 },
       { delay: 1.4, kind: 'star', yFrac: 0.5 },
       { delay: 1.85, kind: 'cloud', yFrac: 0.22 },
@@ -90,11 +124,14 @@ export const WAVE_TEMPLATES = [
     items: [
       { delay: 0.0, kind: 'star', yFrac: 0.48 },
       { delay: 0.28, kind: 'star', yFrac: 0.48 },
+      { delay: 0.45, kind: 'cloud', yFrac: 0.3 },
       { delay: 0.58, kind: 'comet', yFrac: 0.48, speedMult: 1.25 },
+      { delay: 0.92, kind: 'storm_orb', yFrac: 0.52 },
       { delay: 1.05, kind: 'cloud', yFrac: 0.24 },
       { delay: 1.05, kind: 'cloud', yFrac: 0.74 },
       { delay: 1.5, kind: 'star', yFrac: 0.48 },
       { delay: 1.8, kind: 'comet', yFrac: 0.35, speedMult: 1.25 },
+      { delay: 1.82, kind: 'cloud', yFrac: 0.64 },
     ],
   },
   {
@@ -102,13 +139,16 @@ export const WAVE_TEMPLATES = [
     name: 'Skyline Zigzag',
     items: [
       { delay: 0.0, kind: 'star', yFrac: 0.24 },
+      { delay: 0.22, kind: 'cloud', yFrac: 0.5 },
       { delay: 0.4, kind: 'star', yFrac: 0.5 },
-      { delay: 0.8, kind: 'star', yFrac: 0.76 },
-      { delay: 1.2, kind: 'bigstar', yFrac: 0.5 },
-      { delay: 1.6, kind: 'star', yFrac: 0.24 },
-      { delay: 2.0, kind: 'star', yFrac: 0.5 },
       { delay: 0.55, kind: 'cloud', yFrac: 0.82 },
+      { delay: 0.8, kind: 'star', yFrac: 0.76 },
+      { delay: 1.05, kind: 'storm_orb', yFrac: 0.48 },
+      { delay: 1.2, kind: 'bigstar', yFrac: 0.5 },
       { delay: 1.45, kind: 'cloud', yFrac: 0.18 },
+      { delay: 1.6, kind: 'star', yFrac: 0.24 },
+      { delay: 1.78, kind: 'cloud', yFrac: 0.58 },
+      { delay: 2.0, kind: 'star', yFrac: 0.5 },
     ],
   },
   {
@@ -117,11 +157,14 @@ export const WAVE_TEMPLATES = [
     items: [
       { delay: 0.0, kind: 'star', yFrac: 0.8 },
       { delay: 0.35, kind: 'star', yFrac: 0.65 },
+      { delay: 0.4, kind: 'cloud', yFrac: 0.44 },
       { delay: 0.7, kind: 'star', yFrac: 0.5 },
-      { delay: 1.05, kind: 'star', yFrac: 0.35 },
-      { delay: 1.4, kind: 'bigstar', yFrac: 0.2 },
       { delay: 0.75, kind: 'cloud', yFrac: 0.22 },
+      { delay: 1.05, kind: 'star', yFrac: 0.35 },
+      { delay: 1.15, kind: 'storm_orb', yFrac: 0.62 },
+      { delay: 1.4, kind: 'bigstar', yFrac: 0.2 },
       { delay: 1.65, kind: 'cloud', yFrac: 0.72 },
+      { delay: 1.75, kind: 'cloud', yFrac: 0.42 },
     ],
   },
   {
@@ -129,12 +172,15 @@ export const WAVE_TEMPLATES = [
     name: 'Astral Orbit Halo',
     items: [
       { delay: 0.1, kind: 'star', yFrac: 0.35 },
+      { delay: 0.1, kind: 'cloud', yFrac: 0.5 },
       { delay: 0.1, kind: 'star', yFrac: 0.65 },
       { delay: 0.45, kind: 'star', yFrac: 0.22 },
       { delay: 0.45, kind: 'comet', yFrac: 0.5 },
       { delay: 0.45, kind: 'star', yFrac: 0.78 },
       { delay: 0.8, kind: 'star', yFrac: 0.35 },
+      { delay: 0.8, kind: 'storm_orb', yFrac: 0.5 },
       { delay: 0.8, kind: 'star', yFrac: 0.65 },
+      { delay: 1.3, kind: 'void_meteor', yFrac: 0.3 },
       { delay: 1.45, kind: 'cloud', yFrac: 0.48 },
     ],
   },
@@ -143,11 +189,13 @@ export const WAVE_TEMPLATES = [
     name: 'Prism Meteor Shower',
     items: [
       { delay: 0.0, kind: 'comet', yFrac: 0.24, speedMult: 1.2 },
+      { delay: 0.2, kind: 'void_meteor', yFrac: 0.56 },
       { delay: 0.4, kind: 'star', yFrac: 0.42 },
       { delay: 0.75, kind: 'comet', yFrac: 0.6, speedMult: 1.2 },
-      { delay: 1.15, kind: 'star', yFrac: 0.78 },
-      { delay: 1.5, kind: 'bigstar', yFrac: 0.46 },
       { delay: 0.9, kind: 'cloud', yFrac: 0.22 },
+      { delay: 1.15, kind: 'star', yFrac: 0.78 },
+      { delay: 1.25, kind: 'storm_orb', yFrac: 0.48 },
+      { delay: 1.5, kind: 'bigstar', yFrac: 0.46 },
       { delay: 1.75, kind: 'cloud', yFrac: 0.76 },
     ],
   },
@@ -156,13 +204,16 @@ export const WAVE_TEMPLATES = [
     name: 'Aurora Sky Bridge',
     items: [
       { delay: 0.0, kind: 'star', yFrac: 0.5 },
+      { delay: 0.25, kind: 'cloud', yFrac: 0.32 },
       { delay: 0.3, kind: 'star', yFrac: 0.5 },
-      { delay: 0.6, kind: 'bigstar', yFrac: 0.5 },
-      { delay: 0.9, kind: 'star', yFrac: 0.5 },
-      { delay: 1.2, kind: 'star', yFrac: 0.5 },
       { delay: 0.45, kind: 'cloud', yFrac: 0.22 },
       { delay: 0.45, kind: 'cloud', yFrac: 0.78 },
+      { delay: 0.6, kind: 'bigstar', yFrac: 0.5 },
+      { delay: 0.9, kind: 'star', yFrac: 0.5 },
+      { delay: 0.95, kind: 'storm_orb', yFrac: 0.66 },
+      { delay: 1.2, kind: 'star', yFrac: 0.5 },
       { delay: 1.45, kind: 'cloud', yFrac: 0.24 },
+      { delay: 1.45, kind: 'void_meteor', yFrac: 0.52 },
       { delay: 1.45, kind: 'cloud', yFrac: 0.76 },
     ],
   },
@@ -171,12 +222,15 @@ export const WAVE_TEMPLATES = [
     name: 'Cosmic Double Helix',
     items: [
       { delay: 0.0, kind: 'star', yFrac: 0.3 },
+      { delay: 0.0, kind: 'cloud', yFrac: 0.5 },
       { delay: 0.0, kind: 'star', yFrac: 0.7 },
       { delay: 0.45, kind: 'star', yFrac: 0.46 },
       { delay: 0.45, kind: 'star', yFrac: 0.54 },
       { delay: 0.9, kind: 'star', yFrac: 0.7 },
+      { delay: 0.9, kind: 'storm_orb', yFrac: 0.5 },
       { delay: 0.9, kind: 'star', yFrac: 0.3 },
       { delay: 1.35, kind: 'bigstar', yFrac: 0.5 },
+      { delay: 1.65, kind: 'void_meteor', yFrac: 0.42 },
       { delay: 1.8, kind: 'cloud', yFrac: 0.22 },
       { delay: 1.8, kind: 'cloud', yFrac: 0.78 },
     ],
@@ -187,12 +241,15 @@ export const WAVE_TEMPLATES = [
     items: [
       { delay: 0.0, kind: 'star', yFrac: 0.26 },
       { delay: 0.25, kind: 'star', yFrac: 0.26 },
+      { delay: 0.35, kind: 'cloud', yFrac: 0.48 },
       { delay: 0.5, kind: 'bigstar', yFrac: 0.26 },
       { delay: 0.65, kind: 'cloud', yFrac: 0.62 },
+      { delay: 1.0, kind: 'storm_orb', yFrac: 0.38 },
       { delay: 1.1, kind: 'star', yFrac: 0.74 },
       { delay: 1.35, kind: 'star', yFrac: 0.74 },
       { delay: 1.6, kind: 'comet', yFrac: 0.74 },
       { delay: 1.7, kind: 'cloud', yFrac: 0.34 },
+      { delay: 1.75, kind: 'void_meteor', yFrac: 0.56 },
     ],
   },
   {
@@ -200,13 +257,16 @@ export const WAVE_TEMPLATES = [
     name: 'Starlight Crown',
     items: [
       { delay: 0.0, kind: 'star', yFrac: 0.68 },
+      { delay: 0.25, kind: 'cloud', yFrac: 0.42 },
       { delay: 0.35, kind: 'star', yFrac: 0.44 },
       { delay: 0.7, kind: 'star', yFrac: 0.6 },
+      { delay: 0.85, kind: 'storm_orb', yFrac: 0.48 },
       { delay: 1.05, kind: 'bigstar', yFrac: 0.25 },
+      { delay: 1.05, kind: 'cloud', yFrac: 0.78 },
       { delay: 1.4, kind: 'star', yFrac: 0.6 },
+      { delay: 1.55, kind: 'void_meteor', yFrac: 0.36 },
       { delay: 1.75, kind: 'star', yFrac: 0.44 },
       { delay: 2.1, kind: 'star', yFrac: 0.68 },
-      { delay: 1.05, kind: 'cloud', yFrac: 0.78 },
     ],
   },
 ];
@@ -238,6 +298,7 @@ export class StarlightMinigame {
     this.closeBtn = typeof document !== 'undefined' ? document.getElementById('minigame-close-btn') : null;
     this.dashBtn = typeof document !== 'undefined' ? document.getElementById('minigame-dash-btn') : null;
     this.partnerPillEl = typeof document !== 'undefined' ? document.getElementById('minigame-partner-pill') : null;
+    this.hudChargesEl = typeof document !== 'undefined' ? document.getElementById('minigame-hud-charges') : null;
     this.hudScoreEl = typeof document !== 'undefined' ? document.getElementById('minigame-hud-score') : null;
     this.hudWaveEl = typeof document !== 'undefined' ? document.getElementById('minigame-hud-wave') : null;
     this.hudHeartsEl = typeof document !== 'undefined' ? document.getElementById('minigame-hud-hearts') : null;
@@ -250,6 +311,7 @@ export class StarlightMinigame {
 
     this._open = false;
     this.paused = false;
+    this.outOfCharges = false;
     this.rafId = null;
     this.lastFrameMs = 0;
 
@@ -259,6 +321,7 @@ export class StarlightMinigame {
     this.pendingSpawns = [];
     this.waveElapsed = 0;
     this.waveBannerTimer = 0;
+    this.windVy = 0;
 
     this.score = 0;
     this.wave = 1;
@@ -535,8 +598,124 @@ export class StarlightMinigame {
     this.startNewRun();
   }
 
+  _getArcadeStateSnapshot() {
+    if (typeof this.storage?.getArcadeState === 'function') {
+      return this.storage.getArcadeState();
+    }
+    const profile = this.storage?.getActiveProfile?.();
+    return {
+      unlocked: Boolean(profile?.arcade?.unlocked ?? true),
+      charges: profile?.arcade?.charges ?? MAX_ARCADE_CHARGES,
+      maxCharges: MAX_ARCADE_CHARGES,
+      stepProgress: 0,
+      stepsPerCharge: 50,
+      stepsUntilNext: 50,
+      battleProgress: 0,
+      battlesPerCharge: 2,
+      battlesUntilNext: 2,
+      shardBuyInCost: ARCADE_SHARD_BUYIN_COST,
+      starShards: Number(profile?.bag?.starShards) || 0,
+      canBuyWithShards: false,
+      gemCooldown: Number(profile?.arcade?.gemCooldown) || 0,
+    };
+  }
+
+  _bindBuyInButton() {
+    const buyBtn = this.resultsCardEl?.querySelector?.('#minigame-shard-buy-btn') || null;
+    if (!buyBtn) return;
+    buyBtn.addEventListener('click', () => {
+      this.audio?.unlock?.();
+      const buyRes = this.storage?.buyArcadeChargeWithShards?.();
+      if (buyRes?.purchased) {
+        this.audio?.playArcadeStar?.(4);
+        this.onRewardsEarned?.(null, null);
+        this.startNewRun();
+      } else {
+        this.audio?.playMenuBlip?.(340);
+      }
+    });
+  }
+
+  _enterStandbyScreen(reason = 'empty_charges') {
+    this._stopLoop();
+    this.paused = false;
+    this.runEnded = true;
+    this.outOfCharges = true;
+    this.entities = [];
+    this.particles = [];
+    this.pendingSpawns = [];
+    this.keysHeld.clear();
+    this.pointerActive = false;
+    this.activePointerId = null;
+    this.pointerTargetY = null;
+
+    const st = this._getArcadeStateSnapshot();
+    const isLocked = reason === 'locked' || !st.unlocked;
+
+    if (this.resultsCardEl) {
+      if (isLocked) {
+        this.resultsCardEl.innerHTML = `
+          <span class="minigame-tier-pill">🔒 HIDDEN CABINET</span>
+          <h3>🔒 Sky-Hop Arcade Locked</h3>
+          <p class="minigame-next-tier">Earn 1 Island Badge or register 5 Pokémon species, then knock 3 times on the star-marked cottage wall in Starlight Village!</p>
+        `;
+      } else {
+        this.resultsCardEl.innerHTML = `
+          <span class="minigame-tier-pill">⚡ OUT OF CHARGES (${st.charges}/${st.maxCharges} 🎟️)</span>
+          <h3>🎟️ Sky-Hop Needs a Recharge!</h3>
+          <div class="minigame-standby-hints">
+            <span>👣 ${st.stepsUntilNext} steps (${st.stepProgress}/${st.stepsPerCharge}) → +1 🎟️</span>
+            <span>⚔️ ${st.battlesUntilNext} battle${st.battlesUntilNext === 1 ? '' : 's'} (${st.battleProgress}/${st.battlesPerCharge}) → +1 🎟️</span>
+            <span>⛩️ Shrine / Rival Win → +1 🎟️</span>
+          </div>
+          <button
+            id="minigame-shard-buy-btn"
+            type="button"
+            class="setting-toggle-btn is-primary minigame-buy-btn"
+            ${st.canBuyWithShards ? '' : 'disabled aria-disabled="true"'}
+          >
+            ${st.canBuyWithShards
+              ? `✨ Buy +1 Flight (${st.shardBuyInCost} ✨ • Have ${st.starShards} ✨)`
+              : `🔒 Buy +1 Flight (${st.starShards}/${st.shardBuyInCost} ✨)`}
+          </button>
+        `;
+        this._bindBuyInButton();
+      }
+    }
+
+    if (this.replayBtn) {
+      this.replayBtn.disabled = true;
+      this.replayBtn.setAttribute('aria-disabled', 'true');
+      this.replayBtn.textContent = isLocked
+        ? '🔒 Locked'
+        : `🔒 Play Again (0/${st.maxCharges} 🎟️)`;
+    }
+    if (this.resultsEl) {
+      this.resultsEl.hidden = false;
+    }
+
+    this.syncHud();
+    this.render(typeof performance !== 'undefined' ? performance.now() : Date.now());
+  }
+
   startNewRun() {
     this._stopLoop();
+
+    if (this.storage && typeof this.storage.isArcadeUnlocked === 'function' && !this.storage.isArcadeUnlocked()) {
+      this._enterStandbyScreen('locked');
+      return false;
+    }
+
+    if (this.storage && typeof this.storage.consumeArcadeCharge === 'function') {
+      const chargeRes = this.storage.consumeArcadeCharge();
+      if (!chargeRes?.consumed) {
+        this._enterStandbyScreen(chargeRes?.reason || 'empty_charges');
+        this.onRewardsEarned?.(null, null);
+        return false;
+      }
+    }
+
+    this.outOfCharges = false;
     this.paused = false;
     this.score = 0;
     this.wave = 1;
@@ -546,6 +725,7 @@ export class StarlightMinigame {
     this.starsCollected = 0;
     this.runEnded = false;
     this.runRecorded = false;
+    this.windVy = 0;
 
     this.playerY = CANVAS_H * 0.5;
     this.playerVy = 0;
@@ -561,14 +741,21 @@ export class StarlightMinigame {
 
     this.entities = [];
     this.particles = [];
+    if (this.replayBtn) {
+      this.replayBtn.disabled = false;
+      this.replayBtn.removeAttribute('aria-disabled');
+      this.replayBtn.textContent = '🕹️ Play Again';
+    }
     if (this.resultsEl) {
       this.resultsEl.hidden = true;
     }
 
+    this.onRewardsEarned?.(null, null);
     this._beginWave(1);
     this.syncHud();
     this.render(typeof performance !== 'undefined' ? performance.now() : Date.now());
     this._startLoop();
+    return true;
   }
 
   close() {
@@ -610,39 +797,99 @@ export class StarlightMinigame {
 
     const baseItems = Array.isArray(this.currentWave?.items) ? this.currentWave.items : [];
     const flip = waveNum % 2 === 0;
+    const delayScale = Math.max(0.58, 1 - (waveNum - 1) * 0.045);
     this.pendingSpawns = baseItems.map((item) => ({
       ...item,
+      delay: Number((item.delay * delayScale).toFixed(3)),
       yFrac: flip ? Math.max(0.16, Math.min(0.84, 1 - item.yFrac)) : item.yFrac,
       spawned: false,
     }));
 
-    if (waveNum >= 3 && waveNum % 3 === 0 && this.hearts < MAX_HEARTS) {
+    if (waveNum >= 2) {
       this.pendingSpawns.push({
-        delay: 1.5,
+        delay: Number((0.75 * delayScale).toFixed(3)),
+        kind: 'storm_orb',
+        yFrac: flip ? 0.34 : 0.66,
+        spawned: false,
+      });
+    }
+
+    if (waveNum >= 3) {
+      const meteorCount = Math.min(3, 1 + Math.floor((waveNum - 3) / 3));
+      for (let idx = 0; idx < meteorCount; idx += 1) {
+        this.pendingSpawns.push({
+          delay: Number(((0.45 + idx * 0.72) * delayScale).toFixed(3)),
+          kind: 'void_meteor',
+          yFrac: 0.22 + ((waveNum + idx * 2) % 4) * 0.18,
+          spawned: false,
+        });
+      }
+    }
+
+    if (waveNum >= 4 && waveNum % 2 === 0) {
+      const gateDelay = Number((1.55 * delayScale).toFixed(3));
+      this.pendingSpawns.push(
+        { delay: gateDelay, kind: 'cloud', yFrac: 0.36, spawned: false },
+        { delay: gateDelay, kind: 'bigstar', yFrac: 0.5, spawned: false },
+        { delay: gateDelay, kind: 'cloud', yFrac: 0.64, spawned: false },
+      );
+    }
+
+    if (waveNum >= 5 && waveNum % 5 === 0 && this.hearts < MAX_HEARTS) {
+      this.pendingSpawns.push({
+        delay: Number((1.45 * delayScale).toFixed(3)),
         kind: 'heart',
-        yFrac: 0.5,
+        yFrac: flip ? 0.24 : 0.76,
         spawned: false,
       });
     }
   }
 
   _spawnEntity(spec) {
-    const waveSpeedBoost = Math.min(180, (this.wave - 1) * 14);
-    const speed = (225 + waveSpeedBoost) * (spec.speedMult || 1);
-    const y = Math.max(36, Math.min(CANVAS_H - 36, spec.yFrac * CANVAS_H));
+    const waveSpeedBoost = Math.min(265, (this.wave - 1) * 24);
     const kind = spec.kind || 'star';
-    const radius = kind === 'cloud' ? 22 : kind === 'bigstar' ? 22 : kind === 'comet' ? 19 : 16;
+    const defaultSpeedMult = kind === 'void_meteor' ? 1.34 : kind === 'storm_orb' ? 1.16 : 1;
+    const speed = (255 + waveSpeedBoost) * (spec.speedMult || defaultSpeedMult);
+    const y = Math.max(36, Math.min(CANVAS_H - 36, spec.yFrac * CANVAS_H));
+    const radius = kind === 'void_meteor'
+      ? 21
+      : kind === 'storm_orb'
+        ? 20
+        : kind === 'cloud'
+          ? 22
+          : kind === 'bigstar'
+            ? 20
+            : kind === 'comet'
+              ? 18
+              : 15;
+    const spawnX = kind === 'void_meteor' ? CANVAS_W + 96 : CANVAS_W + 34;
+    const vy = kind === 'void_meteor'
+      ? (y > CANVAS_H * 0.5 ? -1 : 1) * (48 + Math.min(34, this.wave * 3))
+      : 0;
+    const bobAmp = kind === 'storm_orb'
+      ? 46 + Math.min(24, this.wave * 2.5)
+      : kind === 'comet'
+        ? 26
+        : kind === 'void_meteor'
+          ? 0
+          : 10;
+    const bobFreq = kind === 'storm_orb'
+      ? 3.6 + Math.min(1.4, this.wave * 0.12)
+      : kind === 'comet'
+        ? 4.5
+        : 2.6;
 
     this.entities.push({
       kind,
-      x: CANVAS_W + 34,
+      x: spawnX,
       y,
       baseY: y,
+      vy,
       radius,
       speed,
       age: 0,
-      bobAmp: kind === 'comet' ? 26 : 10,
-      bobFreq: kind === 'comet' ? 4.5 : 2.6,
+      bobAmp,
+      bobFreq,
     });
   }
 
@@ -650,9 +897,9 @@ export class StarlightMinigame {
     if (!this._open || this.runEnded || this.paused || this.dashCooldown > 0 || this.dashTimer > 0) {
       return false;
     }
-    this.dashTimer = 1.6;
-    this.dashCooldown = 3.2;
-    this.magnetTimer = Math.max(this.magnetTimer, 1.6);
+    this.dashTimer = 1.15;
+    this.dashCooldown = 4.6;
+    this.magnetTimer = Math.max(this.magnetTimer, 1.15);
     this.audio?.playArcadeBoost?.();
     this._spawnTrailParticles(PLAYER_X, this.playerY, 18, true);
     this.syncHud();
@@ -672,8 +919,15 @@ export class StarlightMinigame {
     const isEnter = e.code === 'Enter' || e.code === 'NumpadEnter' || e.key === 'Enter';
     if (this.runEnded) {
       if (!e.repeat && (isSpace || isEnter) && !e.ctrlKey && !e.metaKey && !e.altKey) {
-        if (e.target === this.closeBtn || e.target === this.doneBtn) return;
+        if (e.target === this.closeBtn || e.target === this.doneBtn || e.target?.id === 'minigame-shard-buy-btn') return;
         e.preventDefault();
+        const charges = typeof this.storage?.getArcadeState === 'function'
+          ? this.storage.getArcadeState().charges
+          : 1;
+        if (this.outOfCharges || charges <= 0) {
+          this.audio?.playMenuBlip?.(340);
+          return;
+        }
         this.audio?.unlock?.();
         this.audio?.playMenuBlip?.(740);
         this.startNewRun();
@@ -748,8 +1002,11 @@ export class StarlightMinigame {
     if (!this._open || this.runEnded || this.paused) return;
 
     const clampedDt = Math.min(0.05, Math.max(0.001, dt));
-    if (this.dashTimer > 0) this.dashTimer = Math.max(0, this.dashTimer - clampedDt);
-    if (this.dashCooldown > 0) this.dashCooldown = Math.max(0, this.dashCooldown - clampedDt);
+    if (this.dashTimer > 0) {
+      this.dashTimer = Math.max(0, this.dashTimer - clampedDt);
+    } else if (this.dashCooldown > 0) {
+      this.dashCooldown = Math.max(0, this.dashCooldown - clampedDt);
+    }
     if (this.magnetTimer > 0) this.magnetTimer = Math.max(0, this.magnetTimer - clampedDt);
     if (this.hitInvulnTimer > 0) this.hitInvulnTimer = Math.max(0, this.hitInvulnTimer - clampedDt);
     if (this.shakeTimer > 0) this.shakeTimer = Math.max(0, this.shakeTimer - clampedDt);
@@ -759,7 +1016,7 @@ export class StarlightMinigame {
     const speedMult = this.dashTimer > 0 ? 1.25 : 1.0;
     if (this.keysHeld.has('up') || this.keysHeld.has('down')) {
       const dir = (this.keysHeld.has('down') ? 1 : 0) - (this.keysHeld.has('up') ? 1 : 0);
-      this.playerVy = dir * 320 * speedMult;
+      this.playerVy = dir * 355 * speedMult;
       this.playerY += this.playerVy * clampedDt;
     } else if (this.pointerTargetY !== null) {
       const diff = this.pointerTargetY - this.playerY;
@@ -768,12 +1025,20 @@ export class StarlightMinigame {
         this.playerVy = 0;
         if (!this.pointerActive) this.pointerTargetY = null;
       } else {
-        const followRate = this.pointerActive ? 14 : 9.5;
-        this.playerVy = Math.max(-480, Math.min(480, diff * followRate));
+        const followRate = this.pointerActive ? 15.5 : 10.5;
+        this.playerVy = Math.max(-520, Math.min(520, diff * followRate));
         this.playerY += this.playerVy * clampedDt;
       }
     } else {
       this.playerVy *= Math.pow(0.02, clampedDt);
+    }
+
+    // Wave 5+ gentle rhythmic sky crosswind
+    if (this.wave >= 5) {
+      this.windVy = Math.sin(this.waveElapsed * 1.9) * Math.min(54, (this.wave - 4) * 10);
+      this.playerY += this.windVy * (this.pointerActive ? 0.3 : 1) * clampedDt;
+    } else {
+      this.windVy = 0;
     }
     this.playerY = Math.max(PLAYER_MIN_Y, Math.min(PLAYER_MAX_Y, this.playerY));
 
@@ -806,15 +1071,30 @@ export class StarlightMinigame {
       const ent = this.entities[i];
       ent.age += clampedDt;
       ent.x -= ent.speed * scrollBoost * clampedDt;
-      ent.y = Math.max(28, Math.min(CANVAS_H - 28, ent.baseY + Math.sin(ent.age * ent.bobFreq) * ent.bobAmp));
+
+      if (ent.kind === 'void_meteor') {
+        ent.baseY += (ent.vy || 0) * clampedDt;
+        if (ent.baseY < 42) {
+          ent.baseY = 42;
+          ent.vy = Math.abs(ent.vy || 50);
+        } else if (ent.baseY > CANVAS_H - 42) {
+          ent.baseY = CANVAS_H - 42;
+          ent.vy = -Math.abs(ent.vy || 50);
+        }
+        ent.y = ent.baseY;
+      } else {
+        ent.y = Math.max(28, Math.min(CANVAS_H - 28, ent.baseY + Math.sin(ent.age * ent.bobFreq) * ent.bobAmp));
+      }
+
+      const isHazard = ent.kind === 'cloud' || ent.kind === 'storm_orb' || ent.kind === 'void_meteor';
 
       // Magnet attraction for collectibles
-      if (ent.kind !== 'cloud' && (this.dashTimer > 0 || this.magnetTimer > 0)) {
+      if (!isHazard && (this.dashTimer > 0 || this.magnetTimer > 0)) {
         const dx = PLAYER_X - ent.x;
         const dy = this.playerY - ent.y;
         const dist = Math.hypot(dx, dy);
-        if (dist > 1 && dist < 210) {
-          const pull = 360 * clampedDt;
+        if (dist > 1 && dist < 125) {
+          const pull = 280 * clampedDt;
           ent.x += (dx / dist) * pull;
           ent.baseY += (dy / dist) * pull;
           ent.y = ent.baseY;
@@ -822,12 +1102,47 @@ export class StarlightMinigame {
       }
 
       const dist = Math.hypot(ent.x - PLAYER_X, ent.y - this.playerY);
-      const hitRadius = ent.kind === 'cloud' ? 28 : 34;
+      const hitRadius = ent.kind === 'cloud'
+        ? 28
+        : ent.kind === 'storm_orb'
+          ? 26
+          : ent.kind === 'void_meteor'
+            ? 27
+            : 29;
 
       if (dist <= hitRadius) {
-        if (ent.kind === 'cloud') {
+        if (ent.kind === 'void_meteor') {
           if (this.dashTimer > 0) {
-            this.score += 15;
+            // Void Meteor shatters Star Dash armor without losing a heart
+            this.dashTimer = 0;
+            this.magnetTimer = 0;
+            this.combo = 1;
+            this.comboStreak = 0;
+            this.hitInvulnTimer = 0.55;
+            this.shakeTimer = 0.22;
+            this.audio?.playArcadeBump?.();
+            this._spawnTrailParticles(ent.x, ent.y, 14, true);
+            this.entities.splice(i, 1);
+          } else if (this.hitInvulnTimer <= 0) {
+            this.hearts = Math.max(0, this.hearts - 1);
+            this.combo = 1;
+            this.comboStreak = 0;
+            this.hitInvulnTimer = 1.0;
+            this.shakeTimer = 0.28;
+            this.audio?.playArcadeBump?.();
+            this._spawnTrailParticles(PLAYER_X, this.playerY, 12, true);
+            this.entities.splice(i, 1);
+            if (this.hearts <= 0) {
+              this.endRun();
+              return;
+            }
+          }
+          continue;
+        }
+
+        if (ent.kind === 'cloud' || ent.kind === 'storm_orb') {
+          if (this.dashTimer > 0) {
+            this.score += ent.kind === 'storm_orb' ? 8 : 5;
             this.audio?.playArcadeStar?.(this.combo);
             this._spawnTrailParticles(ent.x, ent.y, 10, true);
             this.entities.splice(i, 1);
@@ -835,7 +1150,7 @@ export class StarlightMinigame {
             this.hearts = Math.max(0, this.hearts - 1);
             this.combo = 1;
             this.comboStreak = 0;
-            this.hitInvulnTimer = 1.4;
+            this.hitInvulnTimer = 1.0;
             this.shakeTimer = 0.28;
             this.audio?.playArcadeBump?.();
             this._spawnTrailParticles(PLAYER_X, this.playerY, 12, true);
@@ -850,7 +1165,7 @@ export class StarlightMinigame {
 
         if (ent.kind === 'heart') {
           this.hearts = Math.min(MAX_HEARTS, this.hearts + 1);
-          this.score += 20;
+          this.score += 15;
           this.audio?.playHealChime?.();
           this._spawnTrailParticles(ent.x, ent.y, 10, true);
           this.entities.splice(i, 1);
@@ -860,11 +1175,11 @@ export class StarlightMinigame {
         // Star collectible
         this.starsCollected += 1;
         this.comboStreak += ent.kind === 'bigstar' ? 2 : 1;
-        this.combo = Math.min(8, 1 + Math.floor(this.comboStreak / 3));
-        const basePts = ent.kind === 'bigstar' ? 30 : ent.kind === 'comet' ? 25 : 10;
+        this.combo = Math.min(5, 1 + Math.floor(this.comboStreak / 5));
+        const basePts = ent.kind === 'bigstar' ? 20 : ent.kind === 'comet' ? 16 : 8;
         this.score += basePts * this.combo;
         if (ent.kind === 'comet') {
-          this.magnetTimer = Math.max(this.magnetTimer, 1.0);
+          this.magnetTimer = Math.max(this.magnetTimer, 0.85);
         }
         this.audio?.playArcadeStar?.(this.combo);
         this._spawnTrailParticles(ent.x, ent.y, ent.kind === 'bigstar' ? 12 : 6, true);
@@ -872,7 +1187,11 @@ export class StarlightMinigame {
         continue;
       }
 
-      if (ent.x < -50) {
+      if (ent.x < -36) {
+        if (ent.kind === 'star' || ent.kind === 'bigstar' || ent.kind === 'comet') {
+          this.comboStreak = Math.max(0, this.comboStreak - 4);
+          this.combo = Math.min(5, 1 + Math.floor(this.comboStreak / 5));
+        }
         this.entities.splice(i, 1);
       }
     }
@@ -891,38 +1210,92 @@ export class StarlightMinigame {
     // Advance wave when spawns complete and screen clears (or wave duration passes)
     const allSpawned = this.pendingSpawns.every((sp) => sp.spawned);
     if (allSpawned && (this.entities.length === 0 || this.waveElapsed >= maxDelay + 3.2)) {
-      this.score += 25;
+      this.score += 12 + Math.min(28, this.wave * 4);
       this._beginWave(this.wave + 1);
     }
 
     this.syncHud();
   }
 
-  computeRewards(score = this.score, wave = this.wave) {
+  _getRewardTierMeta(score = this.score, wave = this.wave) {
     const rawScore = Number(score);
     const safeScore = Number.isFinite(rawScore) ? Math.max(0, Math.floor(rawScore)) : 0;
     const rawWave = Number(wave);
     const safeWave = Number.isFinite(rawWave) ? Math.max(1, Math.floor(rawWave)) : 1;
 
-    if (safeScore < 60) {
+    if (safeScore >= 900 && safeWave >= 8) {
+      return { tier: 6, label: 'Tier 6: Astral Legend', nextHint: 'Max Reward Tier Reached!' };
+    }
+    if (safeScore >= 650 && safeWave >= 6) {
+      return { tier: 5, label: 'Tier 5: Starlight Ace', nextHint: 'Next Tier: 900+ pts & Wave 8 for Evolution Gem / Bonus Star Ball!' };
+    }
+    if (safeScore >= 450 && safeWave >= 5) {
+      return { tier: 4, label: 'Tier 4: Comet Vanguard', nextHint: 'Next Tier: 650+ pts & Wave 6 for +4 ✨, +2 🔵 & +1 🌟!' };
+    }
+    if (safeScore >= 300 && safeWave >= 3) {
+      return { tier: 3, label: 'Tier 3: Nebula Glider', nextHint: 'Next Tier: 450+ pts & Wave 5 for +3 ✨ & +2 🍓!' };
+    }
+    if (safeScore >= 180 && safeWave >= 2) {
+      return { tier: 2, label: 'Tier 2: Starlight Flyer', nextHint: 'Next Tier: 300+ pts & Wave 3 for +1 🔵 Great Ball!' };
+    }
+    if (safeScore >= MIN_ARCADE_REWARD_SCORE) {
+      return { tier: 1, label: 'Tier 1: Sky Rookie', nextHint: 'Next Tier: 180+ pts & Wave 2 for +2 ✨ & +1 💖 Cheer Heart!' };
+    }
+    return { tier: 0, label: 'Flight Warm-Up', nextHint: `Next Tier: ${MIN_ARCADE_REWARD_SCORE}+ pts to win Star Shards & Berry Potions!` };
+  }
+
+  computeRewards(score = this.score, wave = this.wave, profileOverride = null) {
+    const rawScore = Number(score);
+    const safeScore = Number.isFinite(rawScore) ? Math.max(0, Math.floor(rawScore)) : 0;
+    const rawWave = Number(wave);
+    const safeWave = Number.isFinite(rawWave) ? Math.max(1, Math.floor(rawWave)) : 1;
+
+    if (safeScore < MIN_ARCADE_REWARD_SCORE) {
       return { starShards: 0, potions: 0 };
     }
 
-    const starShards = Math.min(8, Math.floor(safeScore / 60));
-    const potions = safeScore >= 240 ? 2 : 1;
-    const greatBalls = safeScore >= 150 ? (safeScore >= 400 ? 2 : 1) : 0;
-    const starBalls = (safeScore >= 320 || (safeScore >= 180 && safeWave >= 5)) ? 1 : 0;
-    const cheerCharges = safeScore >= 120 ? 1 : 0;
+    let starShards = 1;
+    let potions = 1;
+    let greatBalls = 0;
+    let starBalls = 0;
+    let cheerCharges = 0;
 
-    const rewards = { starShards, potions };
+    if (safeScore >= 180 && safeWave >= 2) {
+      starShards = 2;
+      cheerCharges = 1;
+    }
+    if (safeScore >= 300 && safeWave >= 3) {
+      greatBalls = 1;
+    }
+    if (safeScore >= 450 && safeWave >= 5) {
+      starShards = 3;
+      potions = 2;
+    }
+    if (safeScore >= 650 && safeWave >= 6) {
+      starShards = 4;
+      greatBalls = 2;
+      starBalls = 1;
+    }
+
+    const rewards = {
+      starShards: Math.min(MAX_ARCADE_SHARDS, starShards),
+      potions,
+    };
     if (greatBalls > 0) rewards.greatBalls = greatBalls;
     if (starBalls > 0) rewards.starBalls = starBalls;
     if (cheerCharges > 0) rewards.cheerCharges = cheerCharges;
-    if (safeScore >= 500) {
-      const gemKeys = Object.keys(EVOLUTION_ITEMS || {});
-      if (gemKeys.length > 0) {
-        const picked = gemKeys[Math.floor(Math.random() * gemKeys.length)];
-        rewards.gems = { [picked]: 1 };
+
+    if (safeScore >= 900 && safeWave >= 8) {
+      const profile = profileOverride || this.storage?.getActiveProfile?.() || null;
+      const gemCooldown = Math.max(0, Math.floor(Number(profile?.arcade?.gemCooldown) || 0));
+      if (gemCooldown > 0) {
+        rewards.starBalls = (rewards.starBalls || 0) + 1;
+      } else {
+        const pool = getUnlockedArcadeGemPool(profile);
+        if (pool.length > 0) {
+          const picked = pool[Math.floor(Math.random() * pool.length)];
+          rewards.gems = { [picked]: 1 };
+        }
       }
     }
     return rewards;
@@ -971,30 +1344,72 @@ export class StarlightMinigame {
       }
     }
 
+    const arcadeState = this._getArcadeStateSnapshot();
+    this.outOfCharges = arcadeState.charges <= 0;
     this.syncHud();
+
     const rewardChips = this._formatRewardBadges(rewards);
     const hasRewards = rewardChips.length > 0;
     const displayChips = hasRewards
       ? rewardChips
-      : ['✨ Score 60+ pts to win Star Shards & prizes!'];
+      : [`✨ Score ${MIN_ARCADE_REWARD_SCORE}+ pts to win Star Shards & prizes!`];
     const highScore = recordRes?.highScore ?? Math.max(this.score, this.storage?.getActiveProfile?.()?.arcade?.highScore || 0);
     const isNewBest = Boolean(recordRes?.isNewBest) && this.score > 0;
+    const tierMeta = this._getRewardTierMeta(this.score, this.wave);
+
+    const buySectionHtml = arcadeState.charges <= 0
+      ? `
+        <div class="minigame-standby-hints">
+          <span>👣 ${arcadeState.stepsUntilNext} steps → +1 🎟️</span>
+          <span>⚔️ ${arcadeState.battlesUntilNext} battle${arcadeState.battlesUntilNext === 1 ? '' : 's'} → +1 🎟️</span>
+          <span>⛩️ Shrine / Rival → +1 🎟️</span>
+        </div>
+        <button
+          id="minigame-shard-buy-btn"
+          type="button"
+          class="setting-toggle-btn is-primary minigame-buy-btn"
+          ${arcadeState.canBuyWithShards ? '' : 'disabled aria-disabled="true"'}
+        >
+          ${arcadeState.canBuyWithShards
+            ? `✨ Buy +1 Flight (${arcadeState.shardBuyInCost} ✨ • Have ${arcadeState.starShards} ✨)`
+            : `🔒 Buy +1 Flight (${arcadeState.starShards}/${arcadeState.shardBuyInCost} ✨)`}
+        </button>
+      `
+      : '';
 
     if (this.resultsCardEl) {
       this.resultsCardEl.innerHTML = `
         ${isNewBest ? '<span class="minigame-new-best">🏆 NEW HIGH SCORE!</span>' : ''}
+        <span class="minigame-tier-pill">${tierMeta.label}</span>
         <h3>${hasRewards ? '✨ Sky-Hop Flight Complete!' : '🌟 Nice Try, Sky Flyer!'}</h3>
         <div class="minigame-results-stats">
           <span>⭐ Score: <strong>${this.score}</strong></span>
           <span>🌊 Wave: <strong>${this.wave}</strong></span>
           <span>💫 Stars: <strong>${this.starsCollected}</strong></span>
           <span>🏆 Best: <strong>${highScore}</strong></span>
+          <span>🎟️ Charges: <strong>${arcadeState.charges}/${arcadeState.maxCharges}</strong></span>
         </div>
         <div class="minigame-results-rewards">
           ${displayChips.map((c) => `<span class="quest-reward-chip${hasRewards ? '' : ' is-retry-tip'}">${c}</span>`).join('')}
         </div>
+        <p class="minigame-next-tier">${tierMeta.nextHint}</p>
+        ${buySectionHtml}
       `;
+      this._bindBuyInButton();
     }
+
+    if (this.replayBtn) {
+      if (arcadeState.charges > 0) {
+        this.replayBtn.disabled = false;
+        this.replayBtn.removeAttribute('aria-disabled');
+        this.replayBtn.textContent = `🕹️ Play Again (${arcadeState.charges}/${arcadeState.maxCharges} 🎟️)`;
+      } else {
+        this.replayBtn.disabled = true;
+        this.replayBtn.setAttribute('aria-disabled', 'true');
+        this.replayBtn.textContent = `🔒 Play Again (0/${arcadeState.maxCharges} 🎟️)`;
+      }
+    }
+
     if (this.resultsEl) {
       this.resultsEl.hidden = false;
     }
@@ -1019,7 +1434,9 @@ export class StarlightMinigame {
 
   syncHud() {
     const profile = this.storage?.getActiveProfile?.();
+    const arcadeState = this._getArcadeStateSnapshot();
     const best = Math.max(this.score, Number(profile?.arcade?.highScore) || 0);
+    if (this.hudChargesEl) this.hudChargesEl.textContent = `🎟️ ${arcadeState.charges}/${arcadeState.maxCharges}`;
     if (this.hudScoreEl) this.hudScoreEl.textContent = `⭐ ${this.score}`;
     if (this.hudWaveEl) this.hudWaveEl.textContent = `🌊 Wave ${this.wave}`;
     if (this.hudHeartsEl) {
@@ -1122,6 +1539,66 @@ export class StarlightMinigame {
         ctx.textBaseline = 'middle';
         ctx.fillText('⚡', 0, 3);
         ctx.restore();
+      } else if (ent.kind === 'storm_orb') {
+        ctx.save();
+        ctx.translate(ent.x, ent.y);
+        ctx.rotate(ent.age * 4.5);
+        ctx.fillStyle = 'rgba(88, 28, 135, 0.9)';
+        ctx.beginPath();
+        ctx.arc(0, 0, 17, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = '#67e8f9';
+        ctx.lineWidth = 2.5;
+        ctx.stroke();
+        ctx.rotate(-ent.age * 4.5);
+        ctx.fillStyle = '#e0f2fe';
+        ctx.font = 'bold 16px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('🌀', 0, 1);
+        ctx.restore();
+      } else if (ent.kind === 'void_meteor') {
+        if (ent.x > CANVAS_W + 8) {
+          const warnPulse = 0.45 + 0.55 * Math.abs(Math.sin(nowMs * 0.014));
+          ctx.save();
+          ctx.globalAlpha = warnPulse;
+          ctx.fillStyle = '#dc2626';
+          ctx.beginPath();
+          ctx.arc(CANVAS_W - 18, ent.y, 12, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.strokeStyle = '#fecaca';
+          ctx.lineWidth = 2;
+          ctx.stroke();
+          ctx.fillStyle = '#ffffff';
+          ctx.font = 'bold 15px sans-serif';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText('!', CANVAS_W - 18, ent.y + 1);
+          ctx.restore();
+        } else {
+          ctx.save();
+          ctx.translate(ent.x, ent.y);
+          ctx.fillStyle = 'rgba(239, 68, 68, 0.35)';
+          ctx.beginPath();
+          ctx.moveTo(0, -14);
+          ctx.lineTo(36, 0);
+          ctx.lineTo(0, 14);
+          ctx.closePath();
+          ctx.fill();
+          ctx.fillStyle = '#450a0a';
+          ctx.beginPath();
+          ctx.arc(0, 0, 18, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.strokeStyle = '#f87171';
+          ctx.lineWidth = 2.5;
+          ctx.stroke();
+          ctx.fillStyle = '#fca5a5';
+          ctx.font = 'bold 16px sans-serif';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText('☄️', 0, 1);
+          ctx.restore();
+        }
       } else if (ent.kind === 'heart') {
         ctx.save();
         ctx.translate(ent.x, ent.y);
@@ -1198,7 +1675,7 @@ export class StarlightMinigame {
     ctx.font = 'bold 12px sans-serif';
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
-    ctx.fillText(`🌌 ${sky.name}`, 24, 26);
+    ctx.fillText(`🌌 ${sky.name}${this.wave >= 5 ? ' • 💨' : ''}`, 24, 26);
 
     if (this.waveBannerTimer > 0 && this.currentWave) {
       ctx.globalAlpha = Math.min(1, this.waveBannerTimer);
@@ -1335,9 +1812,12 @@ export class StarlightMinigame {
   }
 
   getDiagnostics() {
+    const arcadeState = this._getArcadeStateSnapshot();
     return {
       open: this.isOpen(),
       paused: Boolean(this.paused),
+      outOfCharges: Boolean(this.outOfCharges),
+      charges: arcadeState.charges,
       rafActive: this.rafId !== null,
       waveDeckRemaining: this.waveDeck.length,
       lastWaveId: this.lastWaveId,

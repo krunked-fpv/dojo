@@ -1528,7 +1528,7 @@ export class PokedexUI {
     }
     btn.title = canAfford
       ? `Boost HP/ATK/DEF/SPD +5% to ★${tier + 1}, full heal & gain bonus XP`
-      : `Need ${safeCost} Star Shards (you have ${safeShards}) — earn from battles, catches, Starfall nodes & Sky-Hop (60+ pts)`;
+      : `Need ${safeCost} Star Shards (you have ${safeShards}) — earn from battles, catches, Starfall nodes & Sky-Hop (80+ pts)`;
     btn.addEventListener('click', () => this.triggerPokemonUpgrade(mon));
     return btn;
   }
@@ -1557,7 +1557,7 @@ export class PokedexUI {
       cheerBtn.textContent = compact
         ? `🔒 Cheer (0/${maxCharges} 💖)`
         : `🔒 Cheer (0/${maxCharges} 💖 • ${stepsUntilNext}👣)`;
-      cheerBtn.title = `No Cheer Hearts! Earn +1 💖 every 25 walked steps (${stepsUntilNext} left), per battle win/catch, or scoring 120+ pts in Sky-Hop (max ${maxCharges}).`;
+      cheerBtn.title = `No Cheer Hearts! Earn +1 💖 every 25 walked steps (${stepsUntilNext} left), per battle win/catch, or scoring 180+ pts (Wave 2+) in Sky-Hop (max ${maxCharges}).`;
     } else {
       cheerBtn.textContent = `💖 Cheer Buddy (${safeCharges}/${maxCharges} 💖)`;
       cheerBtn.title = `Spend 1 Cheer Heart to cheer ${displayName} and raise Bond (+10)`;
@@ -2130,48 +2130,71 @@ export class PokedexUI {
       <div class="guide-economy-grid">
         <div class="guide-economy-item">
           <span>✨ <strong>Star Shards</strong></span>
-          <p>Win battles, catch Pokémon, touch Starfall nodes, or score 60+ pts in Sky-Hop to power ⚡ Upgrades.</p>
+          <p>Win battles, catch Pokémon, touch Starfall nodes, or score 80+ pts in Sky-Hop to power ⚡ Upgrades.</p>
         </div>
         <div class="guide-economy-item">
           <span>💖 <strong>Cheer Hearts</strong></span>
-          <p>Earn every ${cheerState.stepsPerCharge} steps, on battle wins/catches, or 120+ pts in Sky-Hop (max ${cheerState.maxCharges} held) to raise Bond (+10).</p>
+          <p>Earn every ${cheerState.stepsPerCharge} steps, on battle wins/catches, or 180+ pts (Wave 2+) in Sky-Hop (max ${cheerState.maxCharges} held) to raise Bond (+10).</p>
         </div>
       </div>
     `;
     wrap.appendChild(economyCard);
 
-    const arcadeUnlocked = Boolean(this.storage?.isArcadeUnlocked?.(profile) ?? profile?.arcade?.unlocked);
-    const arcadeData = profile?.arcade || {};
+    const arcadeState = typeof this.storage?.getArcadeState === 'function'
+      ? this.storage.getArcadeState(profile)
+      : {
+          unlocked: Boolean(this.storage?.isArcadeUnlocked?.(profile) ?? profile?.arcade?.unlocked),
+          attuned: Boolean((profile?.badges?.length || 0) >= 1 || caughtCount >= 5),
+          charges: Number(profile?.arcade?.charges) || 0,
+          maxCharges: 3,
+          stepsUntilNext: 50,
+          battlesUntilNext: 2,
+          highScore: Number(profile?.arcade?.highScore) || 0,
+          bestWave: Number(profile?.arcade?.bestWave) || 0,
+          plays: Number(profile?.arcade?.plays) || 0,
+          secretKnocks: Number(profile?.arcade?.secretKnocks) || 0,
+        };
     const arcadeCard = document.createElement('div');
-    arcadeCard.className = `guide-arcade-card ${arcadeUnlocked ? 'is-unlocked' : 'is-locked'}`;
+    arcadeCard.className = `guide-arcade-card ${arcadeState.unlocked ? 'is-unlocked' : 'is-locked'}`;
     const arcadeCopy = document.createElement('div');
     arcadeCopy.className = 'guide-arcade-copy';
-    if (arcadeUnlocked) {
+    if (arcadeState.unlocked) {
+      const rechargeText = arcadeState.charges >= arcadeState.maxCharges
+        ? 'Full flight charges ready!'
+        : `Recharge: ${arcadeState.stepsUntilNext}👣 or ${arcadeState.battlesUntilNext}⚔️ for +1 🎟️ (Shrine/Rival = +1 🎟️)`;
       arcadeCopy.innerHTML = `
         <strong>🕹️ Secret Starlight Arcade — Sky-Hop Unlocked!</strong>
-        <p>Glide through starlit biome skies with your Lead Pokémon to collect Star Shards, Items &amp; Gems!</p>
+        <p>Brave Plasma Vortexes &amp; Dread Meteors across shifting skies to earn tiered Star Shards, Items &amp; Gems. ${rechargeText}</p>
         <div class="guide-arcade-stats">
-          <span>🏆 Best: ${Number(arcadeData.highScore) || 0}</span>
-          <span>🌊 Best Wave: ${Number(arcadeData.bestWave) || 0}</span>
-          <span>🎮 Flights: ${Number(arcadeData.plays) || 0}</span>
+          <span>🎟️ Charges: ${arcadeState.charges}/${arcadeState.maxCharges}</span>
+          <span>🏆 Best: ${arcadeState.highScore}</span>
+          <span>🌊 Best Wave: ${arcadeState.bestWave}</span>
+          <span>🎮 Flights: ${arcadeState.plays}</span>
         </div>
       `;
       const playArcadeBtn = document.createElement('button');
       playArcadeBtn.id = 'guide-arcade-play-btn';
       playArcadeBtn.type = 'button';
       playArcadeBtn.className = 'mini-btn is-accent guide-arcade-btn';
-      playArcadeBtn.textContent = '🕹️ Play Sky-Hop!';
+      playArcadeBtn.textContent = arcadeState.charges > 0
+        ? `🕹️ Play Sky-Hop! (${arcadeState.charges}/${arcadeState.maxCharges})`
+        : `🎟️ Standby (0/${arcadeState.maxCharges})`;
       playArcadeBtn.addEventListener('click', () => {
         this.audio?.playMenuBlip?.(760);
         this.onOpenArcade?.();
       });
       arcadeCard.appendChild(arcadeCopy);
       arcadeCard.appendChild(playArcadeBtn);
-    } else {
-      const knocks = Number(arcadeData.secretKnocks) || 0;
+    } else if (!arcadeState.attuned) {
       arcadeCopy.innerHTML = `
-        <strong>🕹️ Secret Starlight Arcade (Hidden Mystery)</strong>
-        <p>Rumor tells of a glowing arcade cabinet hidden in Starlight Village! Knock 3 times on the Village cabinet (${knocks}/3), earn any Badge, or catch 5 Pokémon to unlock Sky-Hop.</p>
+        <strong>🔍 Secret Starlight Rumor (Hidden Mystery)</strong>
+        <p>Rumor tells of a star-marked cottage wall east of Professor Willow in Starlight Village! Earn 1 Island Badge or catch 5 Pokémon (${Math.min(5, caughtCount)}/5) to attune your Starlight, then inspect the wall.</p>
+      `;
+      arcadeCard.appendChild(arcadeCopy);
+    } else {
+      arcadeCopy.innerHTML = `
+        <strong>✨ Starlight Attuned — Secret Wall Ready!</strong>
+        <p>Your Starlight hums! Search the star-marked cottage wall east of Professor Willow in Starlight Village and knock 3 times (${Math.min(2, arcadeState.secretKnocks)}/3) to reveal Starlight Sky-Hop.</p>
       `;
       arcadeCard.appendChild(arcadeCopy);
     }
