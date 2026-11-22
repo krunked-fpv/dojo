@@ -6,6 +6,7 @@ import {
   BADGES,
   BIOMES,
   CHESTS,
+  ENCOUNTER_TRAITS,
   EVOLUTION_ITEMS,
   EVOLUTIONS,
   FIELD_QUESTS,
@@ -14,6 +15,7 @@ import {
   MOVES,
   NPCS,
   RIVAL_TRAINERS,
+  SECRET_ARCADE_SPOT,
   SHRINES,
   SIGNPOSTS,
   SOLID_TILES,
@@ -33,6 +35,7 @@ import {
   getBiomeDiscoveryStats,
   getCompassGuidance,
   getSpriteUrls,
+  getTileDepthInfo,
   isTileWalkableAt,
   resolveTrainerLook,
 } from '../js/config.js';
@@ -55,8 +58,10 @@ import {
   getPokemonAbility,
   getScaledRivalParty,
   getScaledShrineGuard,
+  getScaledShrineTrial,
   getTrainerPowerLevel,
   getTypeEffectiveness,
+  resetEncounterHistory,
   resolveSpeciesArchetype,
   rollWildPokemon,
 } from '../js/pokemon.js';
@@ -78,6 +83,7 @@ import {
   resolveMoveParticleShape,
   resolveSpriteMotionStyle,
 } from '../js/battle.js';
+import { StarlightMinigame, WAVE_TEMPLATES } from '../js/minigame.js';
 
 function assert(condition, message) {
   if (!condition) {
@@ -1201,10 +1207,10 @@ function buildTestSuites() {
       ],
     },
     {
-      name: '15. Context-Aware Touch Controls Auto-Hide, Battle Pace & Viewport Non-Overlap',
+      name: '15. Full-Bleed Direct Touch Viewport, Battle Pace & Zero-Overlap Gate',
       tests: [
         {
-          name: 'Touch controls auto-hide in battle/modals, #hud-btn-pad toggles, battlePace cycles, and stage has zero overlap',
+          name: 'D-Pad bar removed, #overworld-canvas full-bleed touch-action:none, battlePace cycles, and battle stage has zero overlap',
           async fn() {
             const app = window.__starlightApp;
             assert(Boolean(app), 'GameApp mounted');
@@ -1232,6 +1238,22 @@ function buildTestSuites() {
               app.overworld.setActive(true);
               app.overworld.syncFromProfile();
 
+              // Verify D-Pad & bottom touch-controls bar are removed
+              assertEqual(document.querySelector('.touch-controls'), null, '.touch-controls removed');
+              assertEqual(document.getElementById('dpad'), null, '#dpad removed');
+              assertEqual(document.getElementById('hud-btn-pad'), null, '#hud-btn-pad removed');
+              assertEqual(document.getElementById('setting-pad-btn'), null, '#setting-pad-btn removed');
+              assertEqual(document.getElementById('quick-dex-btn'), null, '#quick-dex-btn removed');
+
+              const canvasEl = document.getElementById('overworld-canvas');
+              assert(Boolean(canvasEl), '#overworld-canvas present');
+              assertEqual(window.getComputedStyle(canvasEl).touchAction, 'none', '#overworld-canvas touch-action: none');
+              const hudRect = document.querySelector('.hud-bar').getBoundingClientRect();
+              const stageRect = document.querySelector('.viewport-stage').getBoundingClientRect();
+              const canvasRect = canvasEl.getBoundingClientRect();
+              assert(canvasRect.top >= hudRect.bottom - 1, 'canvas fills below .hud-bar');
+              assert(canvasRect.height >= stageRect.height - 2 && canvasRect.height > 200, 'canvas fills full-bleed viewport-stage');
+
               // Verify battlePace cycle via settings button
               assertEqual(storage.getSettings().battlePace, 'cinema', 'initial battlePace is cinema');
               const paceBtn = document.getElementById('setting-pace-btn');
@@ -1243,16 +1265,15 @@ function buildTestSuites() {
               paceBtn.click();
               assertEqual(storage.getSettings().battlePace, 'cinema', 'pace cycles fast -> cinema');
 
-              // Verify modal-open hides .touch-controls
-              const touchControlsEl = document.querySelector('.touch-controls');
-              assert(Boolean(touchControlsEl), '.touch-controls element exists');
+              // Verify modal-open toggles cleanly and clears touch navigation
+              app.overworld.walkToTile(8, 12);
               app.openPokedex('guide');
               assertEqual(document.body.classList.contains('modal-open'), true, 'body.modal-open set when Pokédex opens');
-              assertEqual(window.getComputedStyle(touchControlsEl).display, 'none', '.touch-controls hidden during modal-open');
+              assertEqual(app.overworld.getTouchNavigationState().autoPathLength, 0, 'opening modal clears autoPath');
               app.pokedex.close();
               assertEqual(document.body.classList.contains('modal-open'), false, 'body.modal-open cleared on close');
 
-              // Verify input.clearAll() clears held direction on battle entry
+              // Verify input.clearAll() & clearTouchNavigation() on battle entry
               app.input.pushDirection('right');
               assertEqual(app.input.getDirection(), 'right', 'simulated held direction active before battle');
 
@@ -1262,16 +1283,7 @@ function buildTestSuites() {
 
               assertEqual(document.body.classList.contains('in-battle'), true, 'body.in-battle set on battle entry');
               assertEqual(app.input.getDirection(), null, 'input.clearAll() cleared held direction on battle entry');
-              assertEqual(window.getComputedStyle(touchControlsEl).display, 'none', '.touch-controls auto-hidden in battle');
-
-              // #hud-btn-pad manually toggles touch controls in battle
-              const padBtn = document.getElementById('hud-btn-pad');
-              padBtn.click();
-              assertEqual(document.body.classList.contains('manual-battle-pad'), true, 'manual-battle-pad toggled on via #hud-btn-pad');
-              assert(window.getComputedStyle(touchControlsEl).display !== 'none', '.touch-controls visible when manual-battle-pad active');
-              padBtn.click();
-              assertEqual(document.body.classList.contains('manual-battle-pad'), false, 'manual-battle-pad toggled off via #hud-btn-pad');
-              assertEqual(window.getComputedStyle(touchControlsEl).display, 'none', '.touch-controls hidden again');
+              assertEqual(app.overworld.getTouchNavigationState().autoPathLength, 0, 'battle entry clears touch navigation');
 
               // Wait for sprite setup + battle-stage container-query layout to settle
               const fastTypeTimer = setInterval(() => app.battle.finishTypewriter(), 20);
@@ -1322,7 +1334,6 @@ function buildTestSuites() {
                 window.localStorage.setItem(STORAGE_KEY, prevRawSave);
               }
               storage.state = storage.load();
-              app.manualBattlePad = false;
               app.encounterTransitioning = false;
               app.bootScreenEl.hidden = wasBootHidden;
               app.starterScreenEl.hidden = wasStarterHidden;
@@ -2892,13 +2903,12 @@ function buildTestSuites() {
               app.enterOverworld(true);
               app.applySettings();
 
-              // 2. #hud-btn-dex.has-evo-ready & #quick-dex-btn.has-evo-ready
+              // 2. #hud-btn-dex.has-evo-ready
               assertEqual(app.hudDexBtn.classList.contains('has-evo-ready'), false, 'no .has-evo-ready at Lv.5');
               profile.team[0].level = 10;
               profile.team[0].recalculateStats();
               app.refreshHud();
               assertEqual(app.hudDexBtn.classList.contains('has-evo-ready'), true, '#hud-btn-dex has .has-evo-ready when evolution ready');
-              assertEqual(document.getElementById('quick-dex-btn')?.classList.contains('has-evo-ready'), true, '#quick-dex-btn has .has-evo-ready');
 
               // 3. Team & Box .upgrade-btn + ✨ Shards + Star Rank + ★ MAX RANK
               app.openPokedex('team');
@@ -4599,7 +4609,7 @@ function buildTestSuites() {
 
             // 1. SW & index.html cache/count sanity
             const swText = await (await fetch('./sw.js')).text();
-            assert(swText.includes('starlight-shell-v8') && swText.includes('starlight-assets-v8'), 'sw.js bumped to v8 caches');
+            assert(swText.includes('starlight-shell-v9') && swText.includes('starlight-assets-v9'), 'sw.js bumped to v9 caches');
 
             // 2. v1/v2 save migration with new biomes & solid tiles (30, 33, 36)
             const findFirstTile = (tileId) => {
@@ -5684,9 +5694,9 @@ function buildTestSuites() {
             const app = window.__starlightApp;
             assert(Boolean(app), 'GameApp mounted');
 
-            // 1. SW v8 & index.html static labels
+            // 1. SW v9 & index.html static labels
             const swText = await (await fetch('./sw.js')).text();
-            assert(swText.includes('starlight-shell-v8') && swText.includes('starlight-assets-v8'), 'sw.js uses v8 caches');
+            assert(swText.includes('starlight-shell-v9') && swText.includes('starlight-assets-v9'), 'sw.js uses v9 caches');
             const idxText = await (await fetch('./index.html')).text();
             assert(idxText.includes('1/1025') && idxText.includes('0/28') && idxText.includes('0/20'), 'index.html reflects 1025 Dex, 28 Badges & 20 Shrines');
 
@@ -6879,13 +6889,14 @@ function buildTestSuites() {
       ],
     },
     {
-      name: '38. Sprint 8 Ergonomics & Release Gate: Gen Filter, Cry Buttons, v8 SW, Migration & Zero-Overlap',
+      name: '38. Sprint 8 Ergonomics & Release Gate: Gen Filter, Cry Buttons, v9 SW, Migration & Zero-Overlap',
       tests: [
         {
-          name: 'sw.js v8 (18 SVGs), index.html, README, 18-biome welcome & v1/v2 solid tiles 51/54/57/60 migration hold',
+          name: 'sw.js v9 (18 SVGs + minigame), index.html, README, 18-biome welcome & v1/v2 solid tiles 51/54/57/60 migration hold',
           async fn() {
             const swText = await (await fetch('./sw.js')).text();
-            assert(swText.includes('starlight-shell-v8') && swText.includes('starlight-assets-v8'), 'sw.js uses v8 caches');
+            assert(swText.includes('starlight-shell-v9') && swText.includes('starlight-assets-v9'), 'sw.js uses v9 caches');
+            assert(swText.includes('./js/minigame.js'), 'sw.js precaches ./js/minigame.js');
             assert(swText.includes('./assets/fallback/pokeball.svg'), 'sw.js precaches pokeball.svg');
             for (const typeId of Object.keys(TYPES)) {
               assert(swText.includes(`./assets/fallback/${typeId}.svg`), `sw.js precaches ${typeId}.svg`);
@@ -6896,8 +6907,8 @@ function buildTestSuites() {
 
             const readmeText = await (await fetch('./README.md')).text();
             assert(
-              readmeText.includes('1,025') && readmeText.includes('18') && readmeText.includes('20') && readmeText.includes('28') && readmeText.includes('starlight-shell-v8'),
-              'README reflects Sprint 8 1,025 Gen 1-9 edition',
+              readmeText.includes('1,025') && readmeText.includes('18') && readmeText.includes('20') && readmeText.includes('28') && readmeText.includes('starlight-shell-v9'),
+              'README reflects Sprint 9 release details',
             );
 
             // Solid tiles 51, 54, 57, 60 rescue & v1/v2 migration
@@ -7216,6 +7227,1018 @@ function buildTestSuites() {
               app.closeDialogue();
               app.pokedex.close();
               app.closeSettings();
+              app.hudInstallGroupEl.hidden = true;
+              if (prevRawSave === null) window.localStorage.removeItem(STORAGE_KEY);
+              else window.localStorage.setItem(STORAGE_KEY, prevRawSave);
+              storage.state = storage.load();
+              app.applyTrainerTheme(storage.getActiveTrainerId() || 'violet');
+              app.encounterTransitioning = false;
+              app.bootScreenEl.hidden = wasBootHidden;
+              app.starterScreenEl.hidden = wasStarterHidden;
+              app.gameShellEl.hidden = wasShellHidden;
+              app.overworld.setActive(wasOverworldActive);
+              if (!wasOverworldActive) app.audio?.stopBGM?.();
+              app.applySettings();
+              if (!wasBootHidden) app.showBootScreen();
+              else app.refreshHud();
+              app.syncControlVisibility();
+              app.syncOverworldPause();
+            }
+          },
+        },
+      ],
+    },
+    {
+      name: '39. Sprint 9 Android/Tablet Web Audio Fix & Arcade Audio',
+      tests: [
+        {
+          name: 'Multi-gesture touch unlock avoids _unlockPromise deadlock, flushes _pendingVoices on resume, and handles visibilitychange',
+          async fn() {
+            const OrigAudioContext = window.AudioContext;
+            const OrigWebkitAudioContext = window.webkitAudioContext;
+            const hiddenDescriptor = Object.getOwnPropertyDescriptor(document, 'hidden');
+            let fakeHidden = false;
+
+            const makeParam = (initial = 0) => ({
+              value: initial,
+              setValueAtTime(v) { this.value = v; },
+              linearRampToValueAtTime(v) { this.value = v; },
+              exponentialRampToValueAtTime(v) { this.value = v; },
+              cancelScheduledValues() {},
+              setTargetAtTime(v) { this.value = v; },
+            });
+
+            const instances = [];
+            class MockAudioContext {
+              constructor() {
+                this.state = 'suspended';
+                this.currentTime = 0;
+                this.sampleRate = 44100;
+                this.destination = { kind: 'destination' };
+                this.onstatechange = null;
+                this.resumeCalls = 0;
+                this.resumeMode = 'pending';
+                this.pendingResolvers = [];
+                this.oscillators = [];
+                this.bufferSources = [];
+                this.createdBuffers = [];
+                this.closed = false;
+                instances.push(this);
+              }
+              createGain() {
+                return { gain: makeParam(1), connect() {}, disconnect() {} };
+              }
+              createBiquadFilter() {
+                return { type: 'lowpass', frequency: makeParam(350), Q: makeParam(1), connect() {}, disconnect() {} };
+              }
+              createDynamicsCompressor() {
+                return {
+                  threshold: makeParam(-24),
+                  knee: makeParam(30),
+                  ratio: makeParam(12),
+                  attack: makeParam(0.003),
+                  release: makeParam(0.25),
+                  connect() {},
+                  disconnect() {},
+                };
+              }
+              createPeriodicWave() { return { kind: 'periodicWave' }; }
+              createOscillator() {
+                const osc = {
+                  type: 'sine',
+                  frequency: makeParam(440),
+                  started: false,
+                  stopped: false,
+                  disconnected: false,
+                  onended: null,
+                  connect() {},
+                  disconnect() { this.disconnected = true; },
+                  setPeriodicWave() {},
+                  start() { this.started = true; },
+                  stop() {
+                    this.stopped = true;
+                    if (typeof this.onended === 'function') this.onended();
+                  },
+                };
+                this.oscillators.push(osc);
+                return osc;
+              }
+              createBuffer(channels, length, sampleRate) {
+                const data = new Float32Array(length);
+                const buf = { channels, length, sampleRate, getChannelData: () => data };
+                this.createdBuffers.push(buf);
+                return buf;
+              }
+              createBufferSource() {
+                const src = {
+                  buffer: null,
+                  started: false,
+                  stopped: false,
+                  disconnected: false,
+                  onended: null,
+                  connect() {},
+                  disconnect() { this.disconnected = true; },
+                  start() { this.started = true; },
+                  stop() {
+                    this.stopped = true;
+                    if (typeof this.onended === 'function') this.onended();
+                  },
+                };
+                this.bufferSources.push(src);
+                return src;
+              }
+              resume() {
+                this.resumeCalls += 1;
+                if (this.resumeMode === 'resolve-running') {
+                  this.state = 'running';
+                  this.onstatechange?.();
+                  return Promise.resolve();
+                }
+                return new Promise((resolve) => {
+                  this.pendingResolvers.push(() => {
+                    this.state = 'running';
+                    this.onstatechange?.();
+                    resolve();
+                  });
+                });
+              }
+              close() {
+                this.closed = true;
+                this.state = 'closed';
+                return Promise.resolve();
+              }
+            }
+
+            let mockEngine = null;
+            let liveEngine = null;
+            try {
+              window.AudioContext = MockAudioContext;
+              window.webkitAudioContext = MockAudioContext;
+
+              mockEngine = new AudioEngine({ silent: true, attachUnlockListeners: true });
+              const ctx = mockEngine.ensureContext();
+              assert(Boolean(ctx), 'MockAudioContext created');
+              assertEqual(ctx.state, 'suspended', 'AudioContext starts suspended');
+              assertEqual(mockEngine.masterFilter.type, 'lowpass', 'masterFilter lowpass');
+              assertInRange(mockEngine.masterFilter.frequency.value, 900, 1300, 'masterFilter in 900-1300Hz');
+              assert(Boolean(mockEngine.compressor), 'DynamicsCompressorNode attached');
+
+              // 1. Pending pointerdown resume() + first-tap SFX queued before running
+              window.dispatchEvent(new Event('pointerdown'));
+              assertEqual(ctx.resumeCalls, 1, 'first pointerdown invoked ctx.resume()');
+              assertEqual(mockEngine.unlocked, false, 'still suspended while first resume() pending');
+
+              const queuedRes = mockEngine.triggerVoice({ freq: 760, duration: 0.05 });
+              assertEqual(queuedRes?.queued, true, 'triggerVoice queues while suspended');
+              const cryRes = mockEngine.playPokemonCry(25);
+              assertEqual(cryRes.played, true, 'playPokemonCry returns played: true on first tap');
+              assertGreater(mockEngine.getDiagnostics().queuedVoices, 1, '_pendingVoices queued > 1 entries');
+              assertEqual(ctx.oscillators.length, 0, 'no oscillators created while suspended');
+
+              // 2. Subsequent touchend/click MUST still call ctx.resume() (no _unlockPromise deadlock!)
+              const resumesBeforeTouchend = ctx.resumeCalls;
+              ctx.resumeMode = 'resolve-running';
+              window.dispatchEvent(new Event('touchend'));
+              await Promise.resolve();
+              await Promise.resolve();
+
+              assertEqual(
+                ctx.resumeCalls,
+                resumesBeforeTouchend + 1,
+                'second touchend still invoked ctx.resume() (no deadlock)',
+              );
+              assertEqual(ctx.state, 'running', 'ctx.state transitioned to running');
+              assertEqual(mockEngine.unlocked, true, 'engine marked unlocked');
+              const diagRunning = mockEngine.getDiagnostics();
+              assertEqual(diagRunning.contextState, 'running', 'diagnostics contextState === running');
+              assertEqual(diagRunning.queuedVoices, 0, '_pendingVoices flushed cleanly on running');
+              assertGreater(diagRunning.resumeCount, 1, 'resumeCount >= 2');
+              assertGreater(ctx.oscillators.length, 1, 'queued SFX flushed into oscillators');
+              assert(
+                ctx.createdBuffers.some((b) => b.channels === 1 && b.length === 1 && b.sampleRate === 22050),
+                '1-sample silent wake buffer created',
+              );
+              assert(ctx.bufferSources.some((s) => s.started), 'silent wake buffer started');
+
+              // 3. visibilitychange hidden -> pause without clearing currentTheme; visible -> restart
+              Object.defineProperty(document, 'hidden', { configurable: true, get: () => fakeHidden });
+              mockEngine.playBGM('overworld');
+              assertEqual(mockEngine.currentTheme, 'overworld', 'currentTheme is overworld');
+              assertEqual(mockEngine.getDiagnostics().schedulerActive, true, 'scheduler active while visible');
+
+              fakeHidden = true;
+              document.dispatchEvent(new Event('visibilitychange'));
+              assertEqual(mockEngine.getDiagnostics().schedulerActive, false, 'visibility hidden pauses scheduler');
+              assertEqual(mockEngine.getDiagnostics().activeBgmNodes, 0, 'visibility hidden halts active BGM nodes');
+              assertEqual(mockEngine.currentTheme, 'overworld', 'currentTheme preserved while hidden');
+
+              fakeHidden = false;
+              document.dispatchEvent(new Event('visibilitychange'));
+              assertEqual(mockEngine.getDiagnostics().schedulerActive, true, 'visibility visible restarts scheduler');
+              assertEqual(mockEngine.currentTheme, 'overworld', 'currentTheme still overworld after resume');
+
+              // 4. THEMES.arcade & all 6 Sprint 9 fanfares / SFX + zero node leaks
+              const arcadeTheme = THEMES.arcade;
+              assert(Boolean(arcadeTheme), 'THEMES.arcade exists');
+              assert(arcadeTheme.melody.length >= 64, 'THEMES.arcade >= 64 steps');
+              assertInRange(arcadeTheme.leadGain, 0, 0.12, 'arcade.leadGain <= 0.12');
+              assertInRange(arcadeTheme.arpGain, 0, 0.12, 'arcade.arpGain <= 0.12');
+              assertInRange(arcadeTheme.bassGain, 0, 0.12, 'arcade.bassGain <= 0.12');
+
+              mockEngine.playBGM('arcade');
+              assertEqual(mockEngine.currentTheme, 'arcade', 'playBGM arcade active');
+              mockEngine.playChestFanfare();
+              mockEngine.playQuestCompleteFanfare();
+              mockEngine.playArcadeUnlockFanfare();
+              mockEngine.playArcadeStar(4);
+              mockEngine.playArcadeBoost();
+              mockEngine.playArcadeBump();
+
+              mockEngine.stopBGM();
+              assertEqual(mockEngine.getDiagnostics().activeBgmNodes, 0, 'stopBGM leaves 0 active BGM nodes');
+              assertEqual(mockEngine.getDiagnostics().schedulerActive, false, 'stopBGM stops scheduler');
+              await mockEngine.destroy();
+              mockEngine = null;
+
+              // Also check graceful fallback when createDynamicsCompressor is absent
+              class MinimalMockCtx extends MockAudioContext {}
+              MinimalMockCtx.prototype.createDynamicsCompressor = undefined;
+              window.AudioContext = MinimalMockCtx;
+              window.webkitAudioContext = MinimalMockCtx;
+              liveEngine = new AudioEngine({ silent: true, attachUnlockListeners: false });
+              const minCtx = liveEngine.ensureContext();
+              assert(Boolean(minCtx), 'AudioEngine handles missing createDynamicsCompressor gracefully');
+              assertEqual(liveEngine.compressor, null, 'compressor is null when unsupported');
+            } finally {
+              if (mockEngine) await mockEngine.destroy();
+              if (liveEngine) await liveEngine.destroy();
+              if (hiddenDescriptor) {
+                Object.defineProperty(document, 'hidden', hiddenDescriptor);
+              } else {
+                delete document.hidden;
+              }
+              window.AudioContext = OrigAudioContext;
+              window.webkitAudioContext = OrigWebkitAudioContext;
+            }
+          },
+        },
+      ],
+    },
+    {
+      name: '40. Sprint 9 No D-Pad + Full-Screen Direct Touch Canvas Movement',
+      tests: [
+        {
+          name: 'Legacy D-Pad DOM removed, full-bleed canvas cover math, BFS walkToTile, auto-interact, drag corner-slide, dialogue dismiss & cancellation',
+          async fn() {
+            const app = window.__starlightApp;
+            assert(Boolean(app), 'GameApp mounted');
+
+            const prevRawSave = window.localStorage.getItem(STORAGE_KEY);
+            const wasBootHidden = app.bootScreenEl.hidden;
+            const wasStarterHidden = app.starterScreenEl.hidden;
+            const wasShellHidden = app.gameShellEl.hidden;
+            const wasOverworldActive = app.overworld.active;
+            const origCabinetStyle = app.cabinetEl?.getAttribute('style') ?? null;
+
+            try {
+              // 1. Assert zero D-Pad / old touch-control DOM elements
+              for (const sel of ['#dpad', '.touch-controls', '#btn-a', '#btn-b', '#quick-dex-btn', '#hud-btn-pad', '#setting-pad-btn']) {
+                assertEqual(document.querySelector(sel), null, `${sel} does NOT exist in DOM`);
+              }
+
+              window.localStorage.removeItem(STORAGE_KEY);
+              storage.state = storage.load();
+              storage.selectTrainer('violet');
+              storage.chooseStarter(1);
+              app.enterOverworld(false);
+              app.applySettings();
+
+              app.cabinetEl.style.width = '940px';
+              app.cabinetEl.style.height = '756px';
+              await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+
+              const canvasEl = document.getElementById('overworld-canvas');
+              const hudRect = document.querySelector('.hud-bar').getBoundingClientRect();
+              const canvasRect = canvasEl.getBoundingClientRect();
+              assertEqual(window.getComputedStyle(canvasEl).touchAction, 'none', '#overworld-canvas has touch-action: none');
+              assert(canvasRect.top >= hudRect.bottom - 1, '#overworld-canvas sits cleanly below .hud-bar');
+              assert(canvasRect.height > 756 * 0.85, `#overworld-canvas fills full-bleed viewport (got ${Math.round(canvasRect.height)}px)`);
+
+              const profile = storage.getActiveProfile();
+              const ow = app.overworld;
+              profile.pos = { x: 8, y: 15, dir: 'down' };
+              ow.syncFromProfile();
+
+              // 2. screenToWorldTile center & offset accuracy
+              const centerRes = ow.screenToWorldTile(
+                canvasRect.left + canvasRect.width / 2,
+                canvasRect.top + canvasRect.height / 2,
+              );
+              assertEqual(centerRes.tileX, 8, 'screenToWorldTile center maps to player tileX=8');
+              assertEqual(centerRes.tileY, 15, 'screenToWorldTile center maps to player tileY=15');
+              const downRightRes = ow.screenToWorldTile(
+                canvasRect.left + canvasRect.width / 2 + 64,
+                canvasRect.top + canvasRect.height / 2 + 64,
+              );
+              assert(downRightRes.tileX > 8 && downRightRes.tileY > 15, 'screenToWorldTile maps offset right/down accurately');
+
+              // 3. BFS walkToTile around solid cottage obstacle (12,13) -> (12,10) around walls at y=11..12, x=11..14
+              profile.pos = { x: 12, y: 13, dir: 'up' };
+              ow.syncFromProfile();
+              assertEqual(isTileWalkableAt(12, 12), false, '(12,12) cottage wall is solid');
+              assertEqual(isTileWalkableAt(12, 10), true, '(12,10) north side of cottage is walkable');
+              const queuedAround = ow.walkToTile(12, 10);
+              assertEqual(queuedAround, true, 'walkToTile routes around solid cottage');
+              assertGreater(ow.getTouchNavigationState().autoPathLength, 4, 'BFS path routes around obstacle (>4 steps)');
+              for (let step = 0; step < 260 && (ow.moving || ow.getTouchNavigationState().autoPathLength > 0); step++) {
+                ow.update(0.05, null);
+              }
+              assertEqual(profile.pos.x, 12, 'BFS walk arrived at x=12');
+              assertEqual(profile.pos.y, 10, 'BFS walk arrived at y=10');
+
+              // 4. Tap-to-interact auto-arrival on chest, npc, and secret arcade
+              const interactLog = [];
+              const origOnInteract = ow.onInteract;
+              try {
+                ow.onInteract = (t) => interactLog.push(t);
+
+                // Chest (3,3) from nearby walkable tile (3,5)
+                profile.pos = { x: 3, y: 5, dir: 'up' };
+                ow.syncFromProfile();
+                assertEqual(ow.walkToTile(3, 3), true, 'walkToTile(chest 3,3) queued');
+                for (let s = 0; s < 120 && interactLog.length === 0; s++) ow.update(0.05, null);
+                assertEqual(interactLog[0]?.type, 'chest', 'auto-arrival triggered chest interact');
+
+                // NPC (9,12) from (8,14)
+                interactLog.length = 0;
+                profile.pos = { x: 8, y: 14, dir: 'up' };
+                ow.syncFromProfile();
+                assertEqual(ow.walkToTile(9, 12), true, 'walkToTile(npc 9,12) queued');
+                for (let s = 0; s < 120 && interactLog.length === 0; s++) ow.update(0.05, null);
+                assertEqual(interactLog[0]?.type, 'npc', 'auto-arrival triggered npc interact');
+
+                // Secret Arcade (11,12) from (9,13)
+                interactLog.length = 0;
+                profile.pos = { x: 9, y: 13, dir: 'right' };
+                ow.syncFromProfile();
+                assertEqual(ow.walkToTile(SECRET_ARCADE_SPOT.x, SECRET_ARCADE_SPOT.y), true, 'walkToTile(arcade 11,12) queued');
+                for (let s = 0; s < 120 && interactLog.length === 0; s++) ow.update(0.05, null);
+                assertEqual(interactLog[0]?.type, 'arcade', 'auto-arrival triggered arcade interact');
+              } finally {
+                ow.onInteract = origOnInteract;
+              }
+
+              // 5. Hold/drag-to-steer with corner-slide assist
+              // Stand at (11, 13): up (11,12) is solid arcade, right (12,13) is walkable!
+              profile.pos = { x: 11, y: 13, dir: 'up' };
+              ow.syncFromProfile();
+              const cx = canvasRect.left + canvasRect.width / 2;
+              const cy = canvasRect.top + canvasRect.height / 2;
+              canvasEl.dispatchEvent(new PointerEvent('pointerdown', {
+                pointerId: 7, button: 0, clientX: cx, clientY: cy, bubbles: true, cancelable: true,
+              }));
+              // Drag mostly up (-40px) with perpendicular right (+26px) -> primary 'up' blocked, corner-slide -> 'right'!
+              canvasEl.dispatchEvent(new PointerEvent('pointermove', {
+                pointerId: 7, clientX: cx + 26, clientY: cy - 40, bubbles: true, cancelable: true,
+              }));
+              const steerState = ow.getTouchNavigationState();
+              assertEqual(steerState.touchSteerActive, true, 'drag activates touchSteerActive');
+              assertEqual(steerState.touchSteerDir, 'right', 'corner-slide steers perpendicular right when up is blocked');
+              canvasEl.dispatchEvent(new PointerEvent('pointerup', {
+                pointerId: 7, button: 0, clientX: cx + 26, clientY: cy - 40, bubbles: true, cancelable: true,
+              }));
+              assertEqual(ow.getTouchNavigationState().touchSteerActive, false, 'pointerup clears touchSteerActive');
+
+              // 6. Canvas-tap #world-dialogue dismissal (without triggering unintended walk)
+              profile.pos = { x: 8, y: 15, dir: 'down' };
+              ow.syncFromProfile();
+              app.openDialogue('Tap anywhere on the island to continue!');
+              assertEqual(app.dialogueOpen, true, 'dialogue opened');
+              canvasEl.dispatchEvent(new PointerEvent('pointerdown', {
+                pointerId: 8, button: 0, clientX: cx + 48, clientY: cy - 48, bubbles: true, cancelable: true,
+              }));
+              canvasEl.dispatchEvent(new PointerEvent('pointerup', {
+                pointerId: 8, button: 0, clientX: cx + 48, clientY: cy - 48, bubbles: true, cancelable: true,
+              }));
+              assertEqual(app.dialogueOpen, false, 'tapping #overworld-canvas dismisses #world-dialogue');
+              assertEqual(ow.getTouchNavigationState().autoPathLength, 0, 'canvas-tap dialogue dismiss does not queue walk');
+              assertEqual(profile.pos.x, 8, 'x unchanged after canvas-tap dismiss');
+              assertEqual(profile.pos.y, 15, 'y unchanged after canvas-tap dismiss');
+
+              // 7. clearTouchNavigation() on pause & battle entry
+              profile.pos = { x: 8, y: 15, dir: 'down' };
+              ow.syncFromProfile();
+              ow.walkToTile(8, 12);
+              assertGreater(ow.getTouchNavigationState().autoPathLength, 0, 'autoPath queued before pause');
+              ow.setPaused(true);
+              assertEqual(ow.getTouchNavigationState().autoPathLength, 0, 'setPaused(true) clears autoPath');
+              assertEqual(ow.getTouchNavigationState().touchDestination, null, 'setPaused(true) clears touchDestination');
+              ow.setPaused(false);
+
+              ow.walkToTile(8, 12);
+              assertGreater(ow.getTouchNavigationState().autoPathLength, 0, 'autoPath queued before battle');
+              const battleP = app.battle.start({ enemy: createPokemon(25, 5), biomeId: 'forest' });
+              app.syncControlVisibility();
+              const fastT = setInterval(() => app.battle.finishTypewriter(), 15);
+              try {
+                await battleP;
+              } finally {
+                clearInterval(fastT);
+              }
+              assertEqual(ow.getTouchNavigationState().autoPathLength, 0, 'battle entry clears autoPath');
+              assertEqual(ow.getTouchNavigationState().autoInteractTarget, null, 'battle entry clears autoInteractTarget');
+              app.battle.stop({ outcome: 'escaped', faintedAll: false });
+            } finally {
+              if (origCabinetStyle === null) app.cabinetEl?.removeAttribute('style');
+              else app.cabinetEl?.setAttribute('style', origCabinetStyle);
+              if (app.battle.active) app.battle.stop({ outcome: 'escaped', faintedAll: false });
+              app.closeDialogue();
+              app.pokedex.close();
+              app.closeSettings();
+              if (prevRawSave === null) window.localStorage.removeItem(STORAGE_KEY);
+              else window.localStorage.setItem(STORAGE_KEY, prevRawSave);
+              storage.state = storage.load();
+              app.applyTrainerTheme(storage.getActiveTrainerId() || 'violet');
+              app.encounterTransitioning = false;
+              app.bootScreenEl.hidden = wasBootHidden;
+              app.starterScreenEl.hidden = wasStarterHidden;
+              app.gameShellEl.hidden = wasShellHidden;
+              app.overworld.setActive(wasOverworldActive);
+              if (!wasOverworldActive) app.audio?.stopBGM?.();
+              app.applySettings();
+              if (!wasBootHidden) app.showBootScreen();
+              else app.refreshHud();
+              app.syncControlVisibility();
+              app.syncOverworldPause();
+            }
+          },
+        },
+      ],
+    },
+    {
+      name: '41. Sprint 9 Deepened Non-Repeating Pools & Secret Sky-Hop Mini-Game',
+      tests: [
+        {
+          name: 'Wild 0-repeat deck, depthTier 0..2 scaling, encounterTrait JSON roundtrip, Rival/Shrine Trial rotation & 3 discovery node kinds',
+          fn() {
+            const app = window.__starlightApp;
+            assert(Boolean(app), 'GameApp mounted');
+
+            // 1. Wild encounter 0 consecutive repeats across 50 rolls
+            resetEncounterHistory();
+            let prevId = null;
+            for (let i = 0; i < 50; i++) {
+              const mon = rollWildPokemon('forest', 5);
+              assert(mon.speciesId !== prevId, `numeric roll #${i} repeated species #${prevId}`);
+              prevId = mon.speciesId;
+              assertInRange(mon.level, BIOMES.forest.levelRange[0], BIOMES.forest.levelRange[1], `depthTier 0 level within range`);
+            }
+
+            // Profile roll 50 checks + depthTier scaling + encounterTrait
+            const testProf = {
+              team: [createPokemon(25, 10)],
+              badges: [],
+              shrinesCleared: [],
+              pokedex: { caught: { 25: 1 } },
+              recentEncounters: [],
+            };
+            prevId = null;
+            const observedTraits = new Set();
+            let sumDepth0 = 0;
+            let sumDepth2 = 0;
+            for (let i = 0; i < 50; i++) {
+              const m0 = rollWildPokemon('faeveldt', testProf, { depthTier: 0, forceElite: false });
+              assert(m0.speciesId !== prevId, `profile roll #${i} repeated species #${prevId}`);
+              prevId = m0.speciesId;
+              sumDepth0 += m0.level;
+              if (m0.encounterTrait) observedTraits.add(m0.encounterTrait);
+              const m2 = rollWildPokemon('faeveldt', testProf, { depthTier: 2, forceElite: false });
+              assertEqual(m2.encounterTrait, 'apex', 'depthTier 2 sets encounterTrait === apex');
+              observedTraits.add(m2.encounterTrait);
+              sumDepth2 += m2.level;
+              assert(m2.speciesId !== prevId, `profile roll d2 #${i} repeated species`);
+              prevId = m2.speciesId;
+            }
+            assertGreater(sumDepth2, sumDepth0, 'depthTier 2 yields higher levels than depthTier 0');
+            assert(observedTraits.has('apex') && observedTraits.size >= 3, `encounterTrait variety observed: ${[...observedTraits].join(',')}`);
+            assert(Boolean(ENCOUNTER_TRAITS?.curious && ENCOUNTER_TRAITS?.treasure && ENCOUNTER_TRAITS?.spirited && ENCOUNTER_TRAITS?.apex), 'ENCOUNTER_TRAITS metadata exported');
+
+            // Pokemon toJSON/fromJSON encounterTrait preservation
+            const traitMon = createPokemon(133, 12, 'faeveldt', { encounterTrait: 'treasure' });
+            const roundTripped = Pokemon.fromJSON(traitMon.toJSON());
+            assertEqual(roundTripped.encounterTrait, 'treasure', 'Pokemon.fromJSON preserves encounterTrait');
+
+            // getTileDepthInfo covers all 3 tiers across the world
+            const seenTiers = new Set();
+            for (let y = 0; y < WORLD_ROWS; y += 3) {
+              for (let x = 0; x < WORLD_COLS; x += 3) {
+                const info = getTileDepthInfo(x, y);
+                seenTiers.add(info.depthTier);
+                assert(['Outskirts', 'Heartland', 'Deep Wilds'].includes(info.zoneLabel), `valid zoneLabel ${info.zoneLabel}`);
+              }
+            }
+            assert(seenTiers.has(0) && seenTiers.has(1) && seenTiers.has(2), 'getTileDepthInfo produces depthTier 0, 1, and 2');
+
+            // 2. Rival rematchPool non-repeating consecutive teams across all 17 rivals
+            const rivals = Object.values(RIVAL_TRAINERS);
+            assertEqual(rivals.length, 17, '17 RIVAL_TRAINERS');
+            for (const rival of rivals) {
+              assert(Array.isArray(rival.rematchPool) && rival.rematchPool.length >= 6, `${rival.id} has rematchPool >= 6`);
+              for (const spId of rival.rematchPool) {
+                assert(Boolean(SPECIES[spId]), `${rival.id} rematchPool #${spId} valid species`);
+              }
+              let prevSig = null;
+              for (let rc = 0; rc < 4; rc++) {
+                const prof = {
+                  team: [createPokemon(25, 22)],
+                  badges: ['b1', 'b2'],
+                  rivalsDefeated: [rival.id],
+                  rivalRematchCounts: { [rival.id]: rc },
+                };
+                const party = getScaledRivalParty(rival, prof);
+                const sig = party.map((m) => m.speciesId).join(',');
+                assert(sig !== prevSig, `${rival.id} rematch #${rc} repeats previous team (${sig})`);
+                prevSig = sig;
+              }
+            }
+
+            // 3. Astral Shrine Trial non-repeating consecutive bosses across all 20 shrines
+            const shrines = Object.values(SHRINES);
+            assertEqual(shrines.length, 20, '20 SHRINES');
+            for (const shrine of shrines) {
+              let prevBoss = shrine.guardianId;
+              for (let tc = 0; tc < 4; tc++) {
+                const prof = {
+                  team: [createPokemon(25, 25)],
+                  shrinesCleared: [shrine.id],
+                  shrineTrialCounts: { [shrine.id]: tc },
+                };
+                const trial = getScaledShrineTrial(shrine, prof);
+                assert(trial.guardianId !== prevBoss, `${shrine.id} trial #${tc + 1} repeated boss #${prevBoss}`);
+                assertEqual(trial.isElite, true, `${shrine.id} trial isElite`);
+                assert(trial.upgradeTier >= 2, `${shrine.id} trial upgradeTier >= 2`);
+                prevBoss = trial.guardianId;
+              }
+            }
+
+            // 4. Overworld 3 non-repeating discovery node kinds
+            const nodeKinds = new Set();
+            let prevKind = null;
+            for (let i = 0; i < 18; i++) {
+              app.overworld.rarePatches = [];
+              const k = app.overworld._pickNextDiscoveryNodeKind();
+              assert(k !== prevKind, `discovery node kind did not repeat immediately (${k})`);
+              prevKind = k;
+              nodeKinds.add(k);
+            }
+            assert(nodeKinds.has('shimmer') && nodeKinds.has('starfall') && nodeKinds.has('mystery_cry'), 'all 3 discovery node kinds produced');
+          },
+        },
+        {
+          name: 'SECRET_ARCADE_SPOT map invariants, v1/v2 arcade migration, 3-knock + badge unlock, StarlightMinigame 0-repeat waves, rewards & RAF cleanup',
+          async fn() {
+            const app = window.__starlightApp;
+            assert(Boolean(app), 'GameApp mounted');
+
+            // 1. World invariants & SECRET_ARCADE_SPOT
+            assertEqual(Object.keys(BIOMES).length, 18, '18 BIOMES preserved');
+            assertEqual(Object.keys(SHRINES).length, 20, '20 SHRINES preserved');
+            assertEqual(Object.keys(CHESTS).length, 36, '36 CHESTS preserved');
+            assertEqual(Object.keys(NPCS).length, 23, '23 NPCS preserved');
+            assertEqual(FIELD_QUESTS.length, 23, '23 FIELD_QUESTS preserved');
+            assertEqual(Object.keys(RIVAL_TRAINERS).length, 17, '17 RIVAL_TRAINERS preserved');
+            assertEqual(Object.keys(LANDMARKS).length, 20, '20 LANDMARKS preserved');
+            assertEqual(Object.keys(SIGNPOSTS).length, 18, '18 SIGNPOSTS preserved');
+
+            assert(Boolean(SECRET_ARCADE_SPOT), 'SECRET_ARCADE_SPOT exported');
+            const ax = SECRET_ARCADE_SPOT.x;
+            const ay = SECRET_ARCADE_SPOT.y;
+            assert(SOLID_TILES.has(WORLD_MAP[ay][ax]), `SECRET_ARCADE_SPOT (${ax},${ay}) is solid tile`);
+            assertEqual(isTileWalkableAt(ax, ay), false, `SECRET_ARCADE_SPOT (${ax},${ay}) not walkable`);
+            const hasWalkAdj = [[0, 1], [1, 0], [0, -1], [-1, 0]].some(([dx, dy]) => isTileWalkableAt(ax + dx, ay + dy));
+            assertEqual(hasWalkAdj, true, 'SECRET_ARCADE_SPOT has walkable orthogonal neighbor');
+
+            // 2. v1/v2 migration & 3-knock + badge/5-caught unlock
+            const MIG_KEY = 'starlight_pokemon_test_s41_arcade_v1';
+            let mg = null;
+            try {
+              window.localStorage.setItem(MIG_KEY, JSON.stringify({
+                version: 1,
+                activeTrainerId: 'violet',
+                settings: { showTouchPad: 'hide' },
+                profiles: {
+                  violet: {
+                    trainerId: 'violet',
+                    starterId: 1,
+                    pos: { x: 8, y: 15, dir: 'down' },
+                    team: [{ uid: 'v1', speciesId: 1, level: 6, xp: 0, hp: 22 }],
+                    bag: { potions: 5, greatBalls: 1 },
+                  },
+                  ozias: {
+                    trainerId: 'ozias',
+                    starterId: 4,
+                    pos: { x: 8, y: 15, dir: 'down' },
+                    team: [{ uid: 'o1', speciesId: 4, level: 8, xp: 0, hp: 24 }],
+                    badges: ['meadow'],
+                    arcade: { unlocked: false, highScore: 250, plays: 2, bestWave: 4, secretKnocks: 1 },
+                    rivalRematchCounts: { rival_leo: 2 },
+                    shrineTrialCounts: { forest_shrine: 3 },
+                    recentEncounters: [10, 16, 25],
+                  },
+                },
+              }));
+
+              const store = new StorageManager(MIG_KEY);
+              assertEqual(store.getSettings().showTouchPad, 'hide', 'settings.showTouchPad preserved');
+              store.selectTrainer('violet');
+              assertEqual(store.isArcadeUnlocked(), false, 'Violet arcade locked initially');
+              const k1 = store.recordSecretKnock();
+              assertEqual(k1.knocks, 1, 'knock 1');
+              assertEqual(k1.unlocked, false, 'locked after knock 1');
+              const k2 = store.recordSecretKnock();
+              assertEqual(k2.knocks, 2, 'knock 2');
+              assertEqual(k2.unlocked, false, 'locked after knock 2');
+              const k3 = store.recordSecretKnock();
+              assertEqual(k3.knocks, 3, 'knock 3');
+              assertEqual(k3.unlocked, true, 'unlocked on knock 3');
+              assertEqual(k3.justUnlocked, true, 'justUnlocked on knock 3');
+
+              // 5-caught auto-unlock check
+              const freshStore = new StorageManager(`${MIG_KEY}_2`);
+              try {
+                freshStore.selectTrainer('violet');
+                freshStore.chooseStarter(1);
+                for (const id of [10, 16, 19, 25]) {
+                  freshStore.recordCaught(createPokemon(id, 5));
+                }
+                assertEqual(freshStore.isArcadeUnlocked(), true, '5 caught auto-unlocks arcade');
+              } finally {
+                window.localStorage.removeItem(`${MIG_KEY}_2`);
+              }
+
+              // Ozias v2 preservation + badge auto-unlock
+              store.selectTrainer('ozias');
+              const oz = store.getActiveProfile();
+              assertEqual(store.isArcadeUnlocked(oz), true, 'badge auto-unlocks arcade');
+              assertEqual(oz.arcade.highScore, 250, 'arcade.highScore migrated');
+              assertEqual(oz.arcade.plays, 2, 'arcade.plays migrated');
+              assertEqual(oz.arcade.bestWave, 4, 'arcade.bestWave migrated');
+              assertEqual(oz.rivalRematchCounts.rival_leo, 2, 'rivalRematchCounts migrated');
+              assertEqual(oz.shrineTrialCounts.forest_shrine, 3, 'shrineTrialCounts migrated');
+              assertEqual(oz.recentEncounters.join(','), '10,16,25', 'recentEncounters migrated');
+
+              // 3. StarlightMinigame wave deck, open/drag/dash/endRun/close lifecycle
+              assert(WAVE_TEMPLATES.length >= 12, `WAVE_TEMPLATES >= 12 (got ${WAVE_TEMPLATES.length})`);
+              const prevAudioMuted = app.audio.muted;
+              const prevTheme = app.audio.currentTheme;
+              mg = new StarlightMinigame({ storage: store, audio: app.audio });
+              let prevWaveId = null;
+              for (let i = 0; i < 24; i++) {
+                const w = mg.drawNextWave();
+                assert(w.id !== prevWaveId, `wave draw #${i} repeated ${prevWaveId}`);
+                prevWaveId = w.id;
+              }
+
+              const prevShards = oz.bag.starShards || 0;
+              mg.open();
+              assertEqual(mg.isOpen(), true, 'minigame isOpen() === true');
+              assertEqual(app.audio.currentTheme, 'arcade', 'minigame starts arcade BGM');
+              assertEqual(mg.getDiagnostics().rafActive, true, 'minigame RAF active on open');
+
+              const mgCanvas = document.getElementById('minigame-canvas');
+              const mRect = mgCanvas.getBoundingClientRect();
+              mgCanvas.dispatchEvent(new PointerEvent('pointerdown', {
+                pointerId: 3, clientX: mRect.left + 80, clientY: mRect.top + mRect.height * 0.25, bubbles: true, cancelable: true,
+              }));
+              mgCanvas.dispatchEvent(new PointerEvent('pointermove', {
+                pointerId: 3, clientX: mRect.left + 80, clientY: mRect.top + mRect.height * 0.72, bubbles: true, cancelable: true,
+              }));
+              assert(mg.pointerTargetY !== null && mg.pointerTargetY > 200, 'pointer drag updates pointerTargetY');
+              mgCanvas.dispatchEvent(new PointerEvent('pointerup', { pointerId: 3, bubbles: true, cancelable: true }));
+
+              assertEqual(mg.activateDash(), true, 'activateDash() succeeds');
+              assertGreater(mg.dashTimer, 0, 'dashTimer active');
+
+              mg.score = 520;
+              mg.wave = 5;
+              mg.starsCollected = 18;
+              const runOut = mg.endRun();
+              assert(Boolean(runOut && runOut.rewards.starShards >= 1), 'endRun returns rewards');
+              assertEqual(mg.getDiagnostics().rafActive, false, 'endRun stops RAF');
+              assertEqual(oz.arcade.highScore, 520, 'highScore persisted');
+              assertEqual(oz.arcade.bestWave, 5, 'bestWave persisted');
+              assertEqual(oz.arcade.plays, 3, 'plays incremented');
+              assertGreater(oz.bag.starShards, prevShards, 'starShards awarded');
+
+              mg.close();
+              assertEqual(mg.isOpen(), false, 'minigame closed');
+              assertEqual(mg.getDiagnostics().rafActive, false, 'close() leaves rafActive === false');
+              assert(app.audio.currentTheme !== 'arcade', 'close() restores overworld/biome BGM');
+              if (!prevTheme) app.audio.stopBGM();
+              app.audio.setMuted(prevAudioMuted);
+            } finally {
+              mg?.destroy?.();
+              app.clearCelebration?.();
+              window.localStorage.removeItem(MIG_KEY);
+            }
+          },
+        },
+      ],
+    },
+    {
+      name: '42. Sprint 9 "7-Year-Old on a Tablet" End-to-End Node Playtest & Celebration Gate',
+      tests: [
+        {
+          name: 'Exercises all interactive nodes (Boot -> Lab -> Touch Move -> Sign -> Heal -> Chest -> Quest -> Landmark -> Discovery -> Wild/Rival/Shrine/Trial -> Dex -> Arcade -> Switch) + 1024x768/1280x720 Layout & 60fps',
+          async fn() {
+            const app = window.__starlightApp;
+            assert(Boolean(app), 'GameApp mounted');
+
+            const prevRawSave = window.localStorage.getItem(STORAGE_KEY);
+            const wasBootHidden = app.bootScreenEl.hidden;
+            const wasStarterHidden = app.starterScreenEl.hidden;
+            const wasShellHidden = app.gameShellEl.hidden;
+            const wasOverworldActive = app.overworld.active;
+            const origCabinetStyle = app.cabinetEl?.getAttribute('style') ?? null;
+            const origChestFanfare = app.audio.playChestFanfare.bind(app.audio);
+            const origQuestFanfare = app.audio.playQuestCompleteFanfare.bind(app.audio);
+            const origConfetti = app.battle.spawnCelebrationConfetti.bind(app.battle);
+            const origRandom = Math.random;
+
+            let chestFanfareCalls = 0;
+            let questFanfareCalls = 0;
+            let battleConfettiCalls = 0;
+
+            try {
+              app.audio.playChestFanfare = () => {
+                chestFanfareCalls += 1;
+                return origChestFanfare();
+              };
+              app.audio.playQuestCompleteFanfare = () => {
+                questFanfareCalls += 1;
+                return origQuestFanfare();
+              };
+              app.battle.spawnCelebrationConfetti = (opts) => {
+                battleConfettiCalls += 1;
+                return origConfetti(opts);
+              };
+
+              window.localStorage.removeItem(STORAGE_KEY);
+              storage.state = storage.load();
+              storage.updateSettings({ battlePace: 'fast' });
+              app.applySettings();
+
+              // 1. Boot & Trainer Select -> Starter Lab & Style -> Overworld
+              app.showBootScreen();
+              document.getElementById('trainer-card-violet').click();
+              assertEqual(app.starterScreenEl.hidden, false, 'Boot card navigates to Starter Lab');
+              document.querySelector('.starter-style-chip[data-starter-style-id="twilight"]')?.click();
+              document.querySelector('.starter-acc-chip[data-starter-acc-id="halo"]')?.click();
+              document.querySelector('.starter-aura-chip[data-starter-aura-id="stars"]')?.click();
+              document.querySelector('.starter-pick-btn')?.click();
+              assertEqual(app.gameShellEl.hidden, false, 'Picking starter enters game shell');
+              if (app.dialogueOpen) {
+                // Verify tapping #overworld-canvas or dialogue cleanly advances
+                app.closeDialogue();
+              }
+              const profile = storage.getActiveProfile();
+              const celLayer = document.getElementById('celebration-layer');
+
+              // 2. Tap-to-walk on Overworld & Signpost
+              app.overworld.walkToTile(8, 13);
+              for (let s = 0; s < 80 && (app.overworld.moving || app.overworld.getTouchNavigationState().autoPathLength > 0); s++) {
+                app.overworld.update(0.05, null);
+              }
+              assertEqual(profile.pos.y, 13, 'walkToTile moved Violet north to y=13');
+              app.handleWorldInteract({ type: 'sign', key: '10,14', data: SIGNPOSTS['10,14'] });
+              assertEqual(app.dialogueOpen, true, 'Signpost opens dialogue');
+              document.getElementById('world-dialogue').click();
+              assertEqual(app.dialogueOpen, false, 'Tapping #world-dialogue closes dialogue');
+
+              // 3. Healing Fountain with celebration
+              profile.team[0].hp = 1;
+              app.handleHealSpot(true);
+              assertEqual(profile.team[0].hp, profile.team[0].maxHp, 'Healing Fountain restores full HP');
+              assertEqual(celLayer.hidden, false, 'Healing Fountain triggers #celebration-layer');
+              app.closeDialogue();
+
+              // 4. Treasure Chest -> playChestFanfare + #celebration-layer
+              const chestEntry = Object.entries(CHESTS)[0];
+              app.handleWorldInteract({ type: 'chest', key: chestEntry[0], data: chestEntry[1] });
+              assertEqual(chestFanfareCalls, 1, 'Treasure Chest calls playChestFanfare');
+              assertEqual(celLayer.hidden, false, 'Treasure Chest shows #celebration-layer');
+              assert(profile.chestsOpened.includes(chestEntry[1].id), 'Chest recorded opened');
+              app.closeDialogue();
+
+              // 5. NPC Field Quest -> playQuestCompleteFanfare + #celebration-layer
+              const willowEntry = Object.entries(NPCS).find(([, n]) => n.id === 'npc_willow');
+              const willowQuest = FIELD_QUESTS.find((q) => q.id === willowEntry[1].questId);
+              for (let id = 1; id <= 12; id++) storage.recordCaught(createPokemon(id, 5));
+              app.handleWorldInteract({ type: 'npc', key: willowEntry[0], data: willowEntry[1] });
+              assertEqual(questFanfareCalls, 1, 'Quest completion calls playQuestCompleteFanfare');
+              assertEqual(celLayer.hidden, false, 'Quest completion shows #celebration-layer');
+              assert(profile.questsCompleted.includes(willowQuest.id), 'Quest marked completed');
+              app.closeDialogue();
+
+              // 6. Landmark
+              const lmEntry = Object.entries(LANDMARKS)[0];
+              app.handleWorldInteract({ type: 'landmark', key: lmEntry[0], data: lmEntry[1] });
+              assertEqual(app.dialogueOpen, true, 'Landmark opens dialogue');
+              app.closeDialogue();
+
+              // 7. Overworld Discovery Node (starfall)
+              const shardsBeforeStarfall = profile.bag.starShards || 0;
+              app.handleDiscoveryNode({ kind: 'starfall', biomeId: 'forest', x: 8, y: 12, depthTier: 1 });
+              assertEqual(profile.bag.starShards, shardsBeforeStarfall + 2, 'Starfall awards +2 Star Shards');
+              assertEqual(celLayer.hidden, false, 'Starfall triggers #celebration-layer');
+              app.closeDialogue();
+
+              // 8. 4-Mode #encounter-flash verification
+              const flashEl = document.getElementById('encounter-flash');
+              const calloutEl = document.getElementById('encounter-callout');
+              for (const [mode, expectedSub] of [
+                ['wild', 'WILD'],
+                ['rare', 'SHIMMER'],
+                ['rival', 'RIVAL'],
+                ['shrine', 'SHRINE'],
+              ]) {
+                const p = app.triggerEncounterTransition(mode === 'shrine' ? 'shrine' : mode === 'rival' ? 'rival' : 'battle', { mode });
+                assertEqual(flashEl.hidden, false, `#encounter-flash visible for ${mode}`);
+                assertEqual(flashEl.dataset.mode, mode, `#encounter-flash data-mode === ${mode}`);
+                assert(calloutEl.textContent.toUpperCase().includes(expectedSub), `${mode} callout includes ${expectedSub}`);
+                app.cancelEncounterTransition();
+                await p;
+                assertEqual(flashEl.hidden, true, 'cancelEncounterTransition hides flash');
+              }
+
+              // 9. Wild Battle + Capture Confetti + Curious Bond bonus
+              battleConfettiCalls = 0;
+              profile.team = [createPokemon(35, 25, 'crater', { upgradeTier: 3 })]; // Clefairy #35
+              const curiousWild = createPokemon(133, 6, 'faeveldt', { encounterTrait: 'curious' });
+              curiousWild.hp = 1;
+              const startWildP = app.battle.start({ enemy: curiousWild, biomeId: 'faeveldt' });
+              app.syncControlVisibility();
+              const typeTimer1 = setInterval(() => app.battle.finishTypewriter(), 15);
+              try {
+                await startWildP;
+                Math.random = () => 0.01;
+                const bondBefore = profile.team[0].bond;
+                await app.battle.handleThrowBall('star');
+                assertGreater(battleConfettiCalls, 0, 'Capture triggered spawnCelebrationConfetti');
+                assertEqual(app.battle.active, false, 'Capture ended battle cleanly');
+                assertGreater(profile.team[0].bond, bondBefore, 'Curious capture granted bond bonus');
+              } finally {
+                Math.random = origRandom;
+                clearInterval(typeTimer1);
+                if (app.battle.active) app.battle.stop({ outcome: 'escaped', faintedAll: false });
+              }
+
+              // 10. Rival Battle & Rotating Rematch + Shrine & Astral Shrine Trial (single-counted)
+              const rival = Object.values(RIVAL_TRAINERS)[0];
+              const teamFirst = getScaledRivalParty(rival, profile).map((m) => m.speciesId).join(',');
+              storage.markRivalDefeated(rival.id, rival.rewards);
+              const teamRematch1 = getScaledRivalParty(rival, profile).map((m) => m.speciesId).join(',');
+              storage.markRivalDefeated(rival.id, rival.rematchRewards);
+              const teamRematch2 = getScaledRivalParty(rival, profile).map((m) => m.speciesId).join(',');
+              assert(teamFirst.length > 0 && teamRematch1 !== teamRematch2, 'Rival rematch rotates team');
+
+              const firstShrine = Object.values(SHRINES)[0];
+              storage.markShrineCleared(firstShrine.id);
+              const shardsPreTrial = profile.bag.starShards || 0;
+              const starBallsPreTrial = profile.bag.starBalls || 0;
+              const trialSpec = getScaledShrineTrial(firstShrine, profile);
+              const trialBoss = createPokemon(trialSpec.guardianId, 10, firstShrine.biome, {
+                upgradeTier: trialSpec.upgradeTier,
+                isElite: true,
+              });
+              trialBoss.hp = 1;
+              const trialP = app.battle.start({
+                enemy: trialBoss,
+                biomeId: 'shrine',
+                isShrine: true,
+                shrineData: { ...firstShrine, isAstralTrial: true, trialNumber: trialSpec.trialNumber },
+              });
+              app.syncControlVisibility();
+              const typeTimer2 = setInterval(() => app.battle.finishTypewriter(), 15);
+              try {
+                await trialP;
+                await app.battle.handleEnemyDefeated(app.battle.sessionId);
+              } finally {
+                clearInterval(typeTimer2);
+                if (app.battle.active) app.battle.stop({ outcome: 'escaped', faintedAll: false });
+              }
+              assertEqual(profile.shrineTrialCounts[firstShrine.id], 1, 'Astral Shrine Trial recorded ONCE');
+              assert(profile.bag.starShards >= shardsPreTrial + 3, 'Astral Trial awarded +3 Star Shards');
+              assert(profile.bag.starBalls >= starBallsPreTrial + 1, 'Astral Trial awarded +1 Star Ball');
+              assertEqual(celLayer.hidden, false, 'Astral Trial win triggers #celebration-layer');
+              app.closeDialogue();
+
+              // 11. Pokédex (Gen/Type/Ability/Cry) + Power-Up + Evolution + Buddy Cheer
+              profile.team.push(createPokemon(1, 10, 'forest')); // Bulbasaur ready to evolve
+              profile.bag.starShards = Math.max(profile.bag.starShards || 0, 12);
+              app.openPokedex('dex');
+              document.getElementById('dex-gen-select').value = 'gen1';
+              document.getElementById('dex-gen-select').dispatchEvent(new Event('change', { bubbles: true }));
+              assertEqual(document.querySelectorAll('.dex-grid .dex-card').length, 151, 'Gen 1 filter works');
+              document.querySelector('.dex-card[data-species-id="1"] .dex-cry-btn')?.click();
+
+              app.openPokedex('team');
+              document.querySelector('.team-card .upgrade-btn')?.click();
+              assertEqual(celLayer.hidden, false, 'Team Power-Up triggers #celebration-layer');
+              document.querySelector('.team-card .cheer-btn')?.click();
+              assertEqual(celLayer.hidden, false, 'Buddy Cheer triggers #celebration-layer');
+              document.querySelector('.team-card .evolve-btn')?.click();
+              assertEqual(celLayer.hidden, false, 'Team Evolution triggers #celebration-layer');
+              app.pokedex.close();
+
+              // 12. Secret Sky-Hop Arcade 3-knock unlock on fresh profile state + play + close
+              profile.arcade = { unlocked: false, highScore: 0, plays: 0, bestWave: 0, secretKnocks: 0 };
+              profile.badges = [];
+              profile.pokedex.caught = { 1: 1 };
+              profile.team = [createPokemon(35, 16, 'crater', { upgradeTier: 3 })];
+              profile.box = [];
+              app.refreshHud();
+              assertEqual(document.getElementById('hud-btn-arcade').hidden, true, '#hud-btn-arcade hidden while locked');
+
+              app.handleWorldInteract({ type: 'arcade', key: SECRET_ARCADE_SPOT.key, data: SECRET_ARCADE_SPOT });
+              assertEqual(app.dialogueOpen, true, 'Knock 1 opens clue dialogue');
+              app.closeDialogue();
+              app.handleWorldInteract({ type: 'arcade', key: SECRET_ARCADE_SPOT.key, data: SECRET_ARCADE_SPOT });
+              assertEqual(app.dialogueOpen, true, 'Knock 2 opens clue dialogue');
+              app.closeDialogue();
+              app.handleWorldInteract({ type: 'arcade', key: SECRET_ARCADE_SPOT.key, data: SECRET_ARCADE_SPOT });
+              assertEqual(app.minigame.isOpen(), true, 'Knock 3 unlocks and opens Starlight Sky-Hop Mini-Game');
+              assertEqual(document.getElementById('hud-btn-arcade').hidden, false, '#hud-btn-arcade visible after unlock');
+              app.minigame.activateDash();
+              app.minigame.score = 260;
+              app.minigame.endRun();
+              document.getElementById('minigame-close-btn').click();
+              assertEqual(app.minigame.isOpen(), false, 'Closing mini-game hides modal');
+
+              // 13. HUD overflow & Battle non-overlap at Tablet 1024x768 & Chromebook 1280x720 with Install + Arcade visible
+              app.hudInstallGroupEl.hidden = false;
+              app.hudArcadeBtn.hidden = false;
+              const battleCheckP = app.battle.start({
+                enemy: createPokemon(1024, 36, 'crater', { isElite: true, upgradeTier: 4 }),
+                biomeId: 'crater',
+              });
+              app.syncControlVisibility();
+              const typeTimer3 = setInterval(() => app.battle.finishTypewriter(), 15);
+              try {
+                await battleCheckP;
+              } finally {
+                clearInterval(typeTimer3);
+              }
+              const overlaps = (a, b) => !(
+                a.right <= b.left || a.left >= b.right || a.bottom <= b.top || a.top >= b.bottom
+              );
+              for (const [label, w, h] of [
+                ['Tablet 1024x768', 940, Math.round(768 * 0.985)],
+                ['Chromebook 1280x720', 940, Math.round(720 * 0.985)],
+              ]) {
+                app.cabinetEl.style.width = `${w}px`;
+                app.cabinetEl.style.height = `${h}px`;
+                await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+                const hudBar = document.querySelector('.hud-bar');
+                assert(hudBar.scrollWidth <= hudBar.clientWidth + 2, `${label}: HUD zero overflow w/ Install + Arcade (${hudBar.scrollWidth} <= ${hudBar.clientWidth})`);
+                const enemyCard = document.querySelector('.status-card-enemy').getBoundingClientRect();
+                const playerSprite = document.querySelector('.fighter-sprite-player').getBoundingClientRect();
+                const playerCard = document.querySelector('.status-card-player').getBoundingClientRect();
+                const enemySprite = document.querySelector('.fighter-sprite-enemy').getBoundingClientRect();
+                assertEqual(overlaps(enemyCard, playerSprite), false, `${label}: zero enemyCard vs Clefairy overlap`);
+                assertEqual(overlaps(playerCard, enemySprite), false, `${label}: zero playerCard vs Terapagos overlap`);
+              }
+              app.battle.stop({ outcome: 'escaped', faintedAll: false });
+
+              // 14. Settings & Profile Switch
+              app.openSettings();
+              document.getElementById('setting-switch-trainer-btn').click();
+              assertEqual(app.bootScreenEl.hidden, false, 'Profile switch returns to Boot screen');
+              document.getElementById('trainer-card-ozias').click();
+              assertEqual(storage.getActiveTrainerId(), 'ozias', 'Switched profile cleanly to Ozias');
+
+              // 15. 60fps loop stability
+              const fpsDeadline = performance.now() + 1400;
+              while (app.getDiagnostics().measuredFps <= 0 && performance.now() < fpsDeadline) {
+                await new Promise((r) => setTimeout(r, 60));
+              }
+              const diag = app.getDiagnostics();
+              assertEqual(diag.loopStartCount, 1, 'loopStartCount === 1');
+              assertGreater(diag.measuredFps, 0, `measuredFps > 0 (got ${diag.measuredFps})`);
+            } finally {
+              Math.random = origRandom;
+              app.audio.playChestFanfare = origChestFanfare;
+              app.audio.playQuestCompleteFanfare = origQuestFanfare;
+              app.battle.spawnCelebrationConfetti = origConfetti;
+              if (origCabinetStyle === null) app.cabinetEl?.removeAttribute('style');
+              else app.cabinetEl?.setAttribute('style', origCabinetStyle);
+              if (app.battle.active) app.battle.stop({ outcome: 'escaped', faintedAll: false });
+              app.minigame?.close?.();
+              app.pokedex.close();
+              app.closeSettings();
+              app.closeDialogue();
+              app.clearCelebration?.();
+              app.cancelEncounterTransition?.();
               app.hudInstallGroupEl.hidden = true;
               if (prevRawSave === null) window.localStorage.removeItem(STORAGE_KEY);
               else window.localStorage.setItem(STORAGE_KEY, prevRawSave);
