@@ -21,10 +21,13 @@ import {
 import { Pokemon, createStarterPokemon, getBondTier } from './pokemon.js';
 
 export const STORAGE_KEY = 'starlight_pokemon_save_v1';
+export const MAX_CHEER_CHARGES = 3;
+export const STEPS_PER_CHEER_CHARGE = 25;
 
 const SOLID_TILE_IDS = new Set([3, 4, 8, 11, 12, 14, 16, 17, 18, 21, 25, 30, 33, 36, 39, 42, 45, 48, 51, 54, 57, 60]);
 const VALID_DIRS = new Set(['up', 'down', 'left', 'right']);
 const VALID_PACES = new Set(['cinema', 'classic', 'fast']);
+const ALLOWED_BAG_CONSUMABLES = new Set(['potions', 'greatBalls', 'starBalls', 'cheerCharges']);
 
 const SPECIES_ID_BY_NAME = new Map(
   Object.values(SPECIES || {}).map((sp) => [String(sp.name).trim().toLowerCase(), Number(sp.id)]),
@@ -228,14 +231,7 @@ export function syncProfilePokedex(profile) {
 
   let statsChanged = false;
   if (!isPlainObject(profile.stats)) {
-    profile.stats = {
-      battlesWon: 0,
-      totalCaught,
-      steps: 0,
-      evolutions: 0,
-      shiniesFound: 0,
-      upgrades: 0,
-    };
+    profile.stats = hydrateProfileStats({ totalCaught });
     statsChanged = true;
   } else if (profile.stats.totalCaught !== totalCaught) {
     profile.stats.totalCaught = totalCaught;
@@ -355,13 +351,55 @@ export function sanitizePosition(rawPos) {
   return fallbackNearestSafe(ix, iy, dir);
 }
 
+function isInvalidNumericInput(rawVal) {
+  return (
+    rawVal === null
+    || rawVal === undefined
+    || rawVal === ''
+    || typeof rawVal === 'boolean'
+    || typeof rawVal === 'object'
+    || typeof rawVal === 'symbol'
+    || typeof rawVal === 'function'
+  );
+}
+
 function toNonNegInt(rawVal, fallback = 0) {
-  if (rawVal === null || rawVal === undefined || rawVal === '' || typeof rawVal === 'boolean') {
+  if (isInvalidNumericInput(rawVal)) {
     return fallback;
   }
   if (rawVal === -Infinity) return 0;
   const num = Number(rawVal);
   return Number.isFinite(num) ? Math.max(0, Math.floor(num)) : fallback;
+}
+
+function clampCheerCharges(rawVal, fallback = 0) {
+  const n = toNonNegInt(rawVal, fallback);
+  return Math.max(0, Math.min(MAX_CHEER_CHARGES, n));
+}
+
+function clampCheerStepProgress(rawVal, fallback = 0) {
+  const n = toNonNegInt(rawVal, fallback);
+  return Math.max(0, Math.min(STEPS_PER_CHEER_CHARGE - 1, n));
+}
+
+function normalizeMonBond(rawBond) {
+  if (isInvalidNumericInput(rawBond)) {
+    return 20;
+  }
+  if (rawBond === -Infinity) return 0;
+  const num = Number(rawBond);
+  return Number.isFinite(num) ? Math.max(0, Math.min(100, Math.round(num))) : 20;
+}
+
+function createEmptyBag() {
+  return {
+    potions: 0,
+    greatBalls: 0,
+    starBalls: 0,
+    starShards: 0,
+    cheerCharges: 0,
+    gems: hydrateGems(null),
+  };
 }
 
 function hydrateGems(rawGems) {
@@ -404,13 +442,11 @@ function hydrateAppearance(rawAppearance) {
   };
 }
 
-function hydrateStarShards(rawShards, fallback = 2) {
-  if (rawShards === null || rawShards === undefined || rawShards === '' || typeof rawShards === 'boolean') {
+function hydrateStarShards(rawShards, fallback = 0) {
+  if (rawShards === undefined) {
     return fallback;
   }
-  if (rawShards === -Infinity) return 0;
-  const num = Number(rawShards);
-  return Number.isFinite(num) ? Math.max(0, Math.floor(num)) : fallback;
+  return toNonNegInt(rawShards, 0);
 }
 
 function hydrateCountMap(rawMap) {
@@ -494,12 +530,14 @@ function createFreshProfile(trainerId) {
     rivalRematchCounts: {},
     shrineTrialCounts: {},
     recentEncounters: [],
+    cheerStepProgress: 0,
     arcade: hydrateArcade(null, false),
     bag: {
       potions: 5,
       greatBalls: 3,
       starBalls: 1,
-      starShards: 4,
+      starShards: 0,
+      cheerCharges: 0,
       gems: hydrateGems(null),
     },
     stats: {
@@ -509,6 +547,7 @@ function createFreshProfile(trainerId) {
       evolutions: 0,
       shiniesFound: 0,
       upgrades: 0,
+      cheers: 0,
     },
   };
 }
@@ -602,7 +641,8 @@ function hydrateProfileBag(rawBag) {
     potions: src && src.potions !== undefined ? toNonNegInt(src.potions, 0) : 5,
     greatBalls: src && src.greatBalls !== undefined ? toNonNegInt(src.greatBalls, 0) : 3,
     starBalls: src && src.starBalls !== undefined ? toNonNegInt(src.starBalls, 0) : 0,
-    starShards: src && src.starShards !== undefined ? toNonNegInt(src.starShards, 0) : 2,
+    starShards: src ? hydrateStarShards(src.starShards, 2) : 0,
+    cheerCharges: src && src.cheerCharges !== undefined ? clampCheerCharges(src.cheerCharges, 0) : 0,
     gems: hydrateGems(src?.gems),
   };
 }
@@ -616,6 +656,7 @@ function hydrateProfileStats(rawStats) {
     evolutions: toNonNegInt(src.evolutions, 0),
     shiniesFound: toNonNegInt(src.shiniesFound, 0),
     upgrades: toNonNegInt(src.upgrades, 0),
+    cheers: toNonNegInt(src.cheers, 0),
   };
 }
 
@@ -668,6 +709,7 @@ export function validateAndRepairProfile(raw, trainerIdFallback = null, report =
     rivalRematchCounts: hydrateCountMap(raw.rivalRematchCounts),
     shrineTrialCounts: hydrateCountMap(raw.shrineTrialCounts),
     recentEncounters: hydrateRecentEncounters(raw.recentEncounters),
+    cheerStepProgress: clampCheerStepProgress(raw.cheerStepProgress, 0),
     bag: hydrateProfileBag(raw.bag),
     stats: hydrateProfileStats(raw.stats),
   };
@@ -956,27 +998,37 @@ export class StorageManager {
   }
 
   serializeProfile(profile) {
-    const cleanBag = isPlainObject(profile?.bag)
+    const src = isPlainObject(profile) ? profile : {};
+    const cleanBag = isPlainObject(src.bag)
       ? {
-          potions: toNonNegInt(profile.bag.potions, 0),
-          greatBalls: toNonNegInt(profile.bag.greatBalls, 0),
-          starBalls: toNonNegInt(profile.bag.starBalls, 0),
-          starShards: toNonNegInt(profile.bag.starShards, 0),
-          gems: hydrateGems(profile.bag.gems),
+          potions: toNonNegInt(src.bag.potions, 0),
+          greatBalls: toNonNegInt(src.bag.greatBalls, 0),
+          starBalls: toNonNegInt(src.bag.starBalls, 0),
+          starShards: toNonNegInt(src.bag.starShards, 0),
+          cheerCharges: clampCheerCharges(src.bag.cheerCharges, 0),
+          gems: hydrateGems(src.bag.gems),
         }
-      : { potions: 5, greatBalls: 3, starBalls: 0, starShards: 2, gems: hydrateGems(null) };
+      : {
+          potions: 5,
+          greatBalls: 3,
+          starBalls: 0,
+          starShards: 0,
+          cheerCharges: 0,
+          gems: hydrateGems(null),
+        };
     return {
-      ...profile,
-      appearance: hydrateAppearance(profile.appearance),
-      rivalsDefeated: hydrateUniqueStrings(profile.rivalsDefeated),
-      rivalRematchCounts: hydrateCountMap(profile.rivalRematchCounts),
-      shrineTrialCounts: hydrateCountMap(profile.shrineTrialCounts),
-      recentEncounters: hydrateRecentEncounters(profile.recentEncounters),
-      arcade: hydrateArcade(profile.arcade, false),
+      ...src,
+      appearance: hydrateAppearance(src.appearance),
+      rivalsDefeated: hydrateUniqueStrings(src.rivalsDefeated),
+      rivalRematchCounts: hydrateCountMap(src.rivalRematchCounts),
+      shrineTrialCounts: hydrateCountMap(src.shrineTrialCounts),
+      recentEncounters: hydrateRecentEncounters(src.recentEncounters),
+      cheerStepProgress: clampCheerStepProgress(src.cheerStepProgress, 0),
+      arcade: hydrateArcade(src.arcade, false),
       bag: cleanBag,
-      stats: hydrateProfileStats(profile.stats),
-      team: (Array.isArray(profile.team) ? profile.team : []).map((p) => (typeof p?.toJSON === 'function' ? p.toJSON() : p)),
-      box: (Array.isArray(profile.box) ? profile.box : []).map((p) => (typeof p?.toJSON === 'function' ? p.toJSON() : p)),
+      stats: hydrateProfileStats(src.stats),
+      team: (Array.isArray(src.team) ? src.team : []).map((p) => (typeof p?.toJSON === 'function' ? p.toJSON() : p)),
+      box: (Array.isArray(src.box) ? src.box : []).map((p) => (typeof p?.toJSON === 'function' ? p.toJSON() : p)),
     };
   }
 
@@ -1044,15 +1096,87 @@ export class StorageManager {
     return starter;
   }
 
+  getCheerState(profile = this.getActiveProfile()) {
+    if (!profile || typeof profile !== 'object') {
+      return {
+        charges: 0,
+        maxCharges: MAX_CHEER_CHARGES,
+        stepProgress: 0,
+        stepsPerCharge: STEPS_PER_CHEER_CHARGE,
+        stepsUntilNext: STEPS_PER_CHEER_CHARGE,
+      };
+    }
+    const charges = clampCheerCharges(profile.bag?.cheerCharges, 0);
+    const rawProgress = clampCheerStepProgress(profile.cheerStepProgress, 0);
+    const stepProgress = charges >= MAX_CHEER_CHARGES ? 0 : rawProgress;
+    const stepsUntilNext = charges >= MAX_CHEER_CHARGES ? 0 : STEPS_PER_CHEER_CHARGE - stepProgress;
+    return {
+      charges,
+      maxCharges: MAX_CHEER_CHARGES,
+      stepProgress,
+      stepsPerCharge: STEPS_PER_CHEER_CHARGE,
+      stepsUntilNext,
+    };
+  }
+
+  addCheerCharges(count = 1, persist = true) {
+    const profile = this.getActiveProfile();
+    if (!profile) {
+      return { charges: 0, added: 0, maxCharges: MAX_CHEER_CHARGES };
+    }
+    if (!isPlainObject(profile.bag)) {
+      profile.bag = createEmptyBag();
+    }
+    const prevCharges = clampCheerCharges(profile.bag.cheerCharges, 0);
+    const addCount = toNonNegInt(count, 0);
+    const nextCharges = Math.min(MAX_CHEER_CHARGES, prevCharges + addCount);
+    const added = Math.max(0, nextCharges - prevCharges);
+    profile.bag.cheerCharges = nextCharges;
+    if (nextCharges >= MAX_CHEER_CHARGES) {
+      profile.cheerStepProgress = 0;
+    } else {
+      profile.cheerStepProgress = clampCheerStepProgress(profile.cheerStepProgress, 0);
+    }
+    if (persist) this.save();
+    return { charges: nextCharges, added, maxCharges: MAX_CHEER_CHARGES };
+  }
+
   updatePosition(x, y, dir, incSteps = false) {
     const profile = this.getActiveProfile();
-    if (!profile) return;
+    if (!profile) {
+      return { stepCheerEarned: false, cheerCharges: 0, stepProgress: 0 };
+    }
     profile.pos = { x, y, dir };
+    if (!isPlainObject(profile.bag)) {
+      profile.bag = createEmptyBag();
+    }
+    let stepCheerEarned = false;
+    let cheerCharges = clampCheerCharges(profile.bag.cheerCharges, 0);
+    profile.bag.cheerCharges = cheerCharges;
+    let stepProgress = cheerCharges >= MAX_CHEER_CHARGES
+      ? 0
+      : clampCheerStepProgress(profile.cheerStepProgress, 0);
+
     if (incSteps) {
       if (!isPlainObject(profile.stats)) profile.stats = hydrateProfileStats(null);
       profile.stats.steps = toNonNegInt(profile.stats.steps, 0) + 1;
+      if (Array.isArray(profile.team) && profile.team.length > 0) {
+        if (cheerCharges >= MAX_CHEER_CHARGES) {
+          stepProgress = 0;
+        } else {
+          stepProgress += 1;
+          if (stepProgress >= STEPS_PER_CHEER_CHARGE) {
+            stepProgress = 0;
+            cheerCharges = Math.min(MAX_CHEER_CHARGES, cheerCharges + 1);
+            profile.bag.cheerCharges = cheerCharges;
+            stepCheerEarned = true;
+          }
+        }
+      }
     }
+    profile.cheerStepProgress = stepProgress;
     this.save();
+    return { stepCheerEarned, cheerCharges, stepProgress };
   }
 
   recordSeen(speciesId, persist = true) {
@@ -1157,20 +1281,81 @@ export class StorageManager {
     for (const mon of profile.team) {
       mon.healFull();
     }
-    if (refillMinPotions && profile.bag.potions < 5) {
+    if (!isPlainObject(profile.bag)) {
+      profile.bag = createEmptyBag();
+    }
+    const safePotions = toNonNegInt(profile.bag.potions, 0);
+    if (refillMinPotions && safePotions < 5) {
       profile.bag.potions = 5;
     }
     this.save();
   }
 
+  healPokemonWithPotion(monOrUid) {
+    const profile = this.getActiveProfile();
+    if (!profile) {
+      return { healed: false, reason: 'no_profile' };
+    }
+    const targetUid = typeof monOrUid === 'string'
+      ? monOrUid.trim()
+      : (typeof monOrUid?.uid === 'string' ? monOrUid.uid.trim() : '');
+    const ownedMons = [
+      ...(Array.isArray(profile.team) ? profile.team : []),
+      ...(Array.isArray(profile.box) ? profile.box : []),
+    ];
+    const mon = ownedMons.find((m) => m && ((monOrUid && m === monOrUid) || (targetUid && m.uid === targetUid))) || null;
+    if (!mon) {
+      return { healed: false, reason: 'not_found' };
+    }
+
+    const potions = toNonNegInt(profile.bag?.potions, 0);
+    const maxHp = Number.isFinite(Number(mon.maxHp)) && Number(mon.maxHp) > 0 ? Math.round(Number(mon.maxHp)) : 20;
+    const currentHp = Number.isFinite(Number(mon.hp)) ? Math.max(0, Math.round(Number(mon.hp))) : maxHp;
+    if (currentHp >= maxHp) {
+      return { healed: false, reason: 'full_hp', remainingPotions: potions };
+    }
+    if (potions < 1) {
+      if (isPlainObject(profile.bag)) {
+        profile.bag.potions = 0;
+      }
+      return { healed: false, reason: 'insufficient_potions', remainingPotions: 0 };
+    }
+
+    if (!isPlainObject(profile.bag)) {
+      profile.bag = createEmptyBag();
+    }
+    profile.bag.potions = potions - 1;
+    const healDelta = Math.max(18, Math.round(maxHp * 0.45));
+    const healedHp = typeof mon.healAmount === 'function'
+      ? mon.healAmount(healDelta)
+      : (() => {
+          const nextHp = Math.min(maxHp, currentHp + healDelta);
+          mon.hp = nextHp;
+          return Math.max(0, nextHp - currentHp);
+        })();
+    this.save();
+    return {
+      healed: true,
+      healedHp,
+      hp: mon.hp,
+      maxHp: mon.maxHp,
+      remainingPotions: profile.bag.potions,
+    };
+  }
+
   useItem(itemKey) {
     const profile = this.getActiveProfile();
-    if (!profile) return false;
-    if (EVOLUTION_ITEMS[itemKey]) {
+    if (!profile || typeof itemKey !== 'string') return false;
+    if (Object.prototype.hasOwnProperty.call(EVOLUTION_ITEMS, itemKey)) {
       return this.useGem(itemKey);
     }
-    if (!profile.bag) return false;
-    const current = toNonNegInt(profile.bag[itemKey], 0);
+    if (!ALLOWED_BAG_CONSUMABLES.has(itemKey)) {
+      return false;
+    }
+    if (!isPlainObject(profile.bag)) return false;
+    const current = itemKey === 'cheerCharges'
+      ? clampCheerCharges(profile.bag.cheerCharges, 0)
+      : toNonNegInt(profile.bag[itemKey], 0);
     if (current <= 0) return false;
     profile.bag[itemKey] = current - 1;
     this.save();
@@ -1179,13 +1364,14 @@ export class StorageManager {
 
   addGem(gemId, count = 1, persist = true) {
     const profile = this.getActiveProfile();
-    if (!profile || !EVOLUTION_ITEMS[gemId]) return 0;
-    const rawCount = Number(count);
-    const add = Number.isFinite(rawCount) ? Math.max(0, Math.round(rawCount)) : 0;
-    if (!profile.bag || typeof profile.bag !== 'object') {
-      profile.bag = { potions: 0, greatBalls: 0, starBalls: 0, starShards: 0, gems: hydrateGems(null) };
+    if (!profile || typeof gemId !== 'string' || !Object.prototype.hasOwnProperty.call(EVOLUTION_ITEMS, gemId)) {
+      return 0;
     }
-    if (!profile.bag.gems || typeof profile.bag.gems !== 'object') {
+    const add = toNonNegInt(count, 0);
+    if (!isPlainObject(profile.bag)) {
+      profile.bag = createEmptyBag();
+    }
+    if (!isPlainObject(profile.bag.gems)) {
       profile.bag.gems = hydrateGems(null);
     }
     profile.bag.gems[gemId] = toNonNegInt(profile.bag.gems[gemId], 0) + add;
@@ -1195,7 +1381,10 @@ export class StorageManager {
 
   useGem(gemId, persist = true) {
     const profile = this.getActiveProfile();
-    if (!profile || !profile.bag?.gems) return false;
+    if (!profile || typeof gemId !== 'string' || !Object.prototype.hasOwnProperty.call(EVOLUTION_ITEMS, gemId)) {
+      return false;
+    }
+    if (!isPlainObject(profile.bag?.gems)) return false;
     const current = toNonNegInt(profile.bag.gems[gemId], 0);
     if (current <= 0) return false;
     profile.bag.gems[gemId] = current - 1;
@@ -1206,39 +1395,40 @@ export class StorageManager {
   addStarShards(count = 1, persist = true) {
     const profile = this.getActiveProfile();
     if (!profile) return 0;
-    if (!profile.bag || typeof profile.bag !== 'object') {
-      profile.bag = { potions: 0, greatBalls: 0, starBalls: 0, starShards: 0, gems: hydrateGems(null) };
+    if (!isPlainObject(profile.bag)) {
+      profile.bag = createEmptyBag();
     }
-    const rawCount = Number(count);
-    const add = Number.isFinite(rawCount) ? Math.max(0, Math.round(rawCount)) : 0;
+    const add = toNonNegInt(count, 0);
     const prev = hydrateStarShards(profile.bag.starShards, 0);
     profile.bag.starShards = prev + add;
     if (persist) this.save();
     return profile.bag.starShards;
   }
 
-  addRewards({ potions = 0, greatBalls = 0, starBalls = 0, starShards = 0, gems = {} } = {}, persist = true) {
+  addRewards(rawRewards = {}, persist = true) {
     const profile = this.getActiveProfile();
     if (!profile) return;
-    if (!profile.bag || typeof profile.bag !== 'object') {
-      profile.bag = { potions: 0, greatBalls: 0, starBalls: 0, starShards: 0, gems: hydrateGems(null) };
+    if (!isPlainObject(profile.bag)) {
+      profile.bag = createEmptyBag();
     }
-    const safeRoundPos = (v) => {
-      const n = Number(v);
-      return Number.isFinite(n) ? Math.max(0, Math.round(n)) : 0;
-    };
-    const safePotions = safeRoundPos(potions);
-    const safeBalls = safeRoundPos(greatBalls);
-    const safeStarBalls = safeRoundPos(starBalls);
-    const safeShards = safeRoundPos(starShards);
+    const rewards = isPlainObject(rawRewards) ? rawRewards : {};
+    const safePotions = toNonNegInt(rewards.potions, 0);
+    const safeBalls = toNonNegInt(rewards.greatBalls, 0);
+    const safeStarBalls = toNonNegInt(rewards.starBalls, 0);
+    const safeShards = toNonNegInt(rewards.starShards, 0);
+    const safeCheers = toNonNegInt(rewards.cheerCharges, 0);
     profile.bag.potions = toNonNegInt(profile.bag.potions, 0) + safePotions;
     profile.bag.greatBalls = toNonNegInt(profile.bag.greatBalls, 0) + safeBalls;
     profile.bag.starBalls = toNonNegInt(profile.bag.starBalls, 0) + safeStarBalls;
     profile.bag.starShards = hydrateStarShards(profile.bag.starShards, 0) + safeShards;
-    if (gems && typeof gems === 'object') {
-      for (const [gemId, amount] of Object.entries(gems)) {
-        if (EVOLUTION_ITEMS[gemId] && Number.isFinite(Number(amount)) && Number(amount) > 0) {
-          this.addGem(gemId, Number(amount), false);
+    this.addCheerCharges(safeCheers, false);
+    if (isPlainObject(rewards.gems)) {
+      for (const [gemId, amount] of Object.entries(rewards.gems)) {
+        if (Object.prototype.hasOwnProperty.call(EVOLUTION_ITEMS, gemId)) {
+          const safeAmt = toNonNegInt(amount, 0);
+          if (safeAmt > 0) {
+            this.addGem(gemId, safeAmt, false);
+          }
         }
       }
     }
@@ -1251,27 +1441,38 @@ export class StorageManager {
       return { upgraded: false, reason: 'no_profile' };
     }
 
-    const targetUid = typeof monOrUid === 'string' ? monOrUid : monOrUid?.uid;
-    const mon = [...(profile.team || []), ...(profile.box || [])].find((m) => m.uid === targetUid)
-      || (monOrUid instanceof Pokemon ? monOrUid : null);
+    const targetUid = typeof monOrUid === 'string'
+      ? monOrUid.trim()
+      : (typeof monOrUid?.uid === 'string' ? monOrUid.uid.trim() : '');
+    const ownedMons = [
+      ...(Array.isArray(profile.team) ? profile.team : []),
+      ...(Array.isArray(profile.box) ? profile.box : []),
+    ];
+    const mon = ownedMons.find((m) => m && ((monOrUid && m === monOrUid) || (targetUid && m.uid === targetUid))) || null;
     if (!mon) {
       return { upgraded: false, reason: 'not_found' };
     }
 
-    const cost = typeof mon.getUpgradeCost === 'function' ? mon.getUpgradeCost() : null;
+    const currentShards = toNonNegInt(profile.bag?.starShards, 0);
+    if (isPlainObject(profile.bag) && profile.bag.starShards !== currentShards) {
+      profile.bag.starShards = currentShards;
+    }
+    const rawCost = typeof mon.getUpgradeCost === 'function' ? mon.getUpgradeCost() : null;
+    const cost = rawCost !== null && rawCost !== undefined && !isInvalidNumericInput(rawCost) && Number.isFinite(Number(rawCost)) && Number(rawCost) > 0
+      ? Math.floor(Number(rawCost))
+      : null;
     if (cost === null) {
       return {
         upgraded: false,
         reason: 'max_tier',
         cost: null,
-        remainingShards: hydrateStarShards(profile.bag?.starShards, 0),
+        remainingShards: currentShards,
       };
     }
 
-    if (!profile.bag || typeof profile.bag !== 'object') {
-      profile.bag = { potions: 0, greatBalls: 0, starBalls: 0, starShards: 0, gems: hydrateGems(null) };
+    if (!isPlainObject(profile.bag)) {
+      profile.bag = createEmptyBag();
     }
-    const currentShards = hydrateStarShards(profile.bag.starShards, 0);
     if (currentShards < cost) {
       return {
         upgraded: false,
@@ -1295,16 +1496,9 @@ export class StorageManager {
     }
 
     if (!isPlainObject(profile.stats)) {
-      profile.stats = {
-        battlesWon: 0,
-        totalCaught: 0,
-        steps: 0,
-        evolutions: 0,
-        shiniesFound: 0,
-        upgrades: 0,
-      };
+      profile.stats = hydrateProfileStats(null);
     }
-    profile.stats.upgrades = Math.max(0, Math.floor(Number(profile.stats.upgrades) || 0)) + 1;
+    profile.stats.upgrades = toNonNegInt(profile.stats.upgrades, 0) + 1;
     syncProfilePokedex(profile);
     const newBadges = this.evaluateBadges(false);
     this.save();
@@ -1327,7 +1521,9 @@ export class StorageManager {
       return { cheered: false, reason: 'no_profile' };
     }
 
-    const targetUid = typeof monOrUid === 'string' ? monOrUid : monOrUid?.uid;
+    const targetUid = typeof monOrUid === 'string'
+      ? monOrUid.trim()
+      : (typeof monOrUid?.uid === 'string' ? monOrUid.uid.trim() : '');
     const mons = [
       ...(Array.isArray(profile.team) ? profile.team : []),
       ...(Array.isArray(profile.box) ? profile.box : []),
@@ -1337,21 +1533,65 @@ export class StorageManager {
       return { cheered: false, reason: 'not_found' };
     }
 
+    const prevBond = normalizeMonBond(mon.bond);
+    const cheerState = this.getCheerState(profile);
+    if (isPlainObject(profile.bag) && profile.bag.cheerCharges !== cheerState.charges) {
+      profile.bag.cheerCharges = cheerState.charges;
+    }
+    if (prevBond >= 100) {
+      return {
+        cheered: false,
+        reason: 'max_bond',
+        bond: 100,
+        tier: getBondTier(100),
+        remainingCheers: cheerState.charges,
+        newBadges: [],
+      };
+    }
+
+    if (cheerState.charges < 1) {
+      return {
+        cheered: false,
+        reason: 'insufficient_cheers',
+        cost: 1,
+        bond: prevBond,
+        tier: getBondTier(prevBond),
+        remainingCheers: 0,
+        stepsUntilNext: cheerState.stepsUntilNext,
+        newBadges: [],
+      };
+    }
+
+    if (!isPlainObject(profile.bag)) {
+      profile.bag = createEmptyBag();
+    }
+    profile.bag.cheerCharges = cheerState.charges - 1;
+
     if (typeof mon.gainBond === 'function') {
+      mon.bond = prevBond;
       mon.gainBond(10);
     } else {
-      const current = Number(mon.bond);
-      const base = Number.isFinite(current) ? current : 20;
-      mon.bond = Math.max(0, Math.min(100, Math.round(base + 10)));
+      mon.bond = Math.max(0, Math.min(100, Math.round(prevBond + 10)));
     }
+    const nextBond = normalizeMonBond(mon.bond);
+    mon.bond = nextBond;
+
+    if (!isPlainObject(profile.stats)) {
+      profile.stats = hydrateProfileStats(null);
+    }
+    profile.stats.cheers = toNonNegInt(profile.stats.cheers, 0) + 1;
 
     const newBadges = this.evaluateBadges(false);
     this.save();
 
     return {
       cheered: true,
-      bond: mon.bond,
-      tier: getBondTier(mon.bond),
+      cost: 1,
+      remainingCheers: profile.bag.cheerCharges,
+      prevBond,
+      bond: nextBond,
+      bondGain: Math.max(0, nextBond - prevBond),
+      tier: getBondTier(nextBond),
       newBadges,
     };
   }
@@ -1409,13 +1649,42 @@ export class StorageManager {
     const targetId = resolveSpeciesId(toSpeciesId);
     if (!targetId || !SPECIES[targetId]) return null;
 
-    const targetUid = typeof monOrUid === 'string' ? monOrUid : monOrUid?.uid;
-    const mon = [...profile.team, ...profile.box].find((m) => m.uid === targetUid)
-      || (monOrUid instanceof Pokemon ? monOrUid : null);
+    const targetUid = typeof monOrUid === 'string'
+      ? monOrUid.trim()
+      : (typeof monOrUid?.uid === 'string' ? monOrUid.uid.trim() : '');
+    const ownedMons = [
+      ...(Array.isArray(profile.team) ? profile.team : []),
+      ...(Array.isArray(profile.box) ? profile.box : []),
+    ];
+    const mon = ownedMons.find((m) => m && ((monOrUid && m === monOrUid) || (targetUid && m.uid === targetUid))) || null;
     if (!mon) return null;
 
-    if (itemKey) {
-      if (!this.useGem(itemKey, false)) return null;
+    const rules = Array.isArray(EVOLUTIONS?.[mon.speciesId]) ? EVOLUTIONS[mon.speciesId] : [];
+    const hasItemArg = itemKey !== null && itemKey !== undefined && itemKey !== '';
+    if (hasItemArg) {
+      if (typeof itemKey !== 'string') return null;
+      const cleanItemKey = itemKey.trim();
+      if (!cleanItemKey || !Object.prototype.hasOwnProperty.call(EVOLUTION_ITEMS, cleanItemKey)) {
+        return null;
+      }
+      const matchedItemRule = rules.find(
+        (rule) => Number(rule?.to) === targetId && rule?.item === cleanItemKey,
+      );
+      if (!matchedItemRule) return null;
+      if (!this.useGem(cleanItemKey, false)) return null;
+    } else {
+      const monLevel = !isInvalidNumericInput(mon.level) && Number.isFinite(Number(mon.level))
+        ? Math.floor(Number(mon.level))
+        : 0;
+      const matchedLevelRule = rules.find(
+        (rule) => (
+          Number(rule?.to) === targetId
+          && !isInvalidNumericInput(rule?.minLevel)
+          && Number.isFinite(Number(rule.minLevel))
+          && monLevel >= Number(rule.minLevel)
+        ),
+      );
+      if (!matchedLevelRule) return null;
     }
 
     if (!isPlainObject(profile.pokedex) || !isPlainObject(profile.pokedex.caught)) {
@@ -1625,6 +1894,7 @@ export class StorageManager {
     if (!profile) return [];
     if (!isPlainObject(profile.stats)) profile.stats = hydrateProfileStats(null);
     profile.stats.battlesWon = toNonNegInt(profile.stats.battlesWon, 0) + 1;
+    this.addCheerCharges(1, false);
     const newBadges = this.evaluateBadges(false);
     this.save();
     return newBadges;

@@ -155,8 +155,20 @@ export function evaluateTurnEndAbility(mon) {
   };
 }
 
+function isInvalidNumericInput(raw) {
+  return (
+    raw === null
+    || raw === undefined
+    || raw === ''
+    || typeof raw === 'boolean'
+    || typeof raw === 'object'
+    || typeof raw === 'symbol'
+    || typeof raw === 'function'
+  );
+}
+
 export function getBondTier(bond) {
-  const raw = bond === null || bond === undefined || bond === '' ? 0 : Number(bond);
+  const raw = isInvalidNumericInput(bond) ? 0 : Number(bond);
   const safeBond = Number.isFinite(raw) ? Math.max(0, Math.min(100, raw)) : 0;
   if (safeBond >= 85) {
     return { tier: 3, id: 'soulmate', label: 'Best Buddy', icon: '🌟', xpMult: 1.20, critBonus: 0.04, endureChance: 0.25 };
@@ -194,8 +206,7 @@ function normalizeNickname(raw) {
 }
 
 function normalizeBoundedInt(raw, min, max, fallback) {
-  if (raw === null || raw === undefined || raw === '' || typeof raw === 'boolean') return fallback;
-  if (raw === Infinity) return max;
+  if (isInvalidNumericInput(raw)) return fallback;
   if (raw === -Infinity) return min;
   const num = Number(raw);
   return Number.isFinite(num) ? Math.max(min, Math.min(max, Math.round(num))) : fallback;
@@ -206,10 +217,9 @@ function normalizeLevel(raw, fallback = 5) {
 }
 
 function normalizeXp(raw) {
-  if (raw === null || raw === undefined || raw === '' || typeof raw === 'boolean') return 0;
-  if (raw === -Infinity) return 0;
+  if (isInvalidNumericInput(raw)) return 0;
   const num = Number(raw);
-  return Number.isFinite(num) ? Math.max(0, Math.round(num)) : 0;
+  return Number.isFinite(num) ? Math.min(Number.MAX_SAFE_INTEGER, Math.max(0, Math.round(num))) : 0;
 }
 
 function normalizeHp(raw, maxHp) {
@@ -398,7 +408,7 @@ export class Pokemon {
   }
 
   gainBond(delta = 1) {
-    const step = Number(delta);
+    const step = isInvalidNumericInput(delta) ? NaN : Number(delta);
     const add = Number.isFinite(step) ? step : 0;
     const prev = normalizeBond(this.bond);
     this.bond = Math.max(0, Math.min(100, Math.round(prev + add)));
@@ -500,27 +510,32 @@ export class Pokemon {
   }
 
   healAmount(amount) {
+    if (isInvalidNumericInput(amount)) return 0;
     const n = Number(amount);
-    if (!Number.isFinite(n)) return 0;
+    if (!Number.isFinite(n) || n <= 0) return 0;
     const before = normalizeHp(this.hp, this.maxHp);
     this.hp = Math.min(this.maxHp, before + Math.max(1, Math.round(n)));
     return this.hp - before;
   }
 
   takeDamage(amount) {
+    if (isInvalidNumericInput(amount)) return 0;
     const n = Number(amount);
-    if (!Number.isFinite(n)) return 0;
+    if (!Number.isFinite(n) || n <= 0) return 0;
     const before = normalizeHp(this.hp, this.maxHp);
-    this.hp = Math.max(0, before - Math.max(0, Math.round(n)));
+    this.hp = Math.max(0, before - Math.round(n));
     return before - this.hp;
   }
 
   gainXp(amount) {
-    const n = Number(amount);
     const oldLevel = normalizeLevel(this.level, 5);
     this.level = oldLevel;
+    if (!Number.isFinite(Number(this.xpToNext)) || this.xpToNext <= 0) {
+      this.recalculateStats();
+    }
     this.xp = normalizeXp(this.xp);
-    if (!Number.isFinite(n)) {
+    const n = isInvalidNumericInput(amount) ? NaN : Number(amount);
+    if (!Number.isFinite(n) || n <= 0) {
       return {
         leveledUp: false,
         levelsGained: 0,
@@ -528,7 +543,9 @@ export class Pokemon {
         newLevel: oldLevel,
       };
     }
-    this.xp += Math.max(1, Math.round(n));
+    const add = Math.max(1, Math.round(n));
+    const nextXp = this.xp + add;
+    this.xp = Number.isFinite(nextXp) ? Math.min(Number.MAX_SAFE_INTEGER, nextXp) : Number.MAX_SAFE_INTEGER;
     while (this.level < 50 && this.xp >= this.xpToNext) {
       this.xp -= this.xpToNext;
       const oldMax = this.maxHp;
@@ -579,7 +596,12 @@ export class Pokemon {
   getPendingLevelEvolution() {
     const rules = EVOLUTIONS[this.speciesId] || [];
     for (const rule of rules) {
-      if (Number.isFinite(Number(rule.minLevel)) && this.level >= rule.minLevel && SPECIES[rule.to]) {
+      if (
+        !isInvalidNumericInput(rule?.minLevel)
+        && Number.isFinite(Number(rule.minLevel))
+        && this.level >= Number(rule.minLevel)
+        && SPECIES[rule.to]
+      ) {
         return {
           fromId: this.speciesId,
           toId: rule.to,
@@ -596,13 +618,19 @@ export class Pokemon {
     const gems = bagGems && typeof bagGems === 'object' ? bagGems : {};
     return rules
       .filter((rule) => rule.item && EVOLUTION_ITEMS[rule.item] && SPECIES[rule.to])
-      .map((rule) => ({
-        item: rule.item,
-        itemInfo: EVOLUTION_ITEMS[rule.item],
-        toId: rule.to,
-        toSpecies: SPECIES[rule.to],
-        canUse: (Number(gems[rule.item]) || 0) > 0,
-      }));
+      .map((rule) => {
+        const rawCount = gems[rule.item];
+        const count = !isInvalidNumericInput(rawCount) && Number.isFinite(Number(rawCount))
+          ? Math.max(0, Math.floor(Number(rawCount)))
+          : 0;
+        return {
+          item: rule.item,
+          itemInfo: EVOLUTION_ITEMS[rule.item],
+          toId: rule.to,
+          toSpecies: SPECIES[rule.to],
+          canUse: count > 0,
+        };
+      });
   }
 
   evolve(toId) {
@@ -1257,8 +1285,10 @@ export function getBattleShardReward(enemy, options = {}) {
     caught = false,
     includeTraitBonus = true,
   } = options || {};
-  const tier = Math.max(0, Number(enemy?.upgradeTier) || 0);
-  const level = Math.max(1, Number(enemy?.level) || 1);
+  const rawTier = isInvalidNumericInput(enemy?.upgradeTier) ? NaN : Number(enemy.upgradeTier);
+  const tier = Number.isFinite(rawTier) ? Math.max(0, Math.min(MAX_UPGRADE_TIER, Math.floor(rawTier))) : 0;
+  const rawLevel = isInvalidNumericInput(enemy?.level) ? NaN : Number(enemy.level);
+  const level = Number.isFinite(rawLevel) ? Math.max(1, Math.min(50, Math.floor(rawLevel))) : 1;
   const isElite = Boolean(enemy?.isElite);
 
   let reward = 1;
