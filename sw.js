@@ -1,5 +1,5 @@
-const SHELL_CACHE = 'starlight-shell-v7';
-const ASSET_CACHE = 'starlight-assets-v7';
+const SHELL_CACHE = 'starlight-shell-v8';
+const ASSET_CACHE = 'starlight-assets-v8';
 const KEEP_CACHES = new Set([SHELL_CACHE, ASSET_CACHE]);
 
 const CORE_SHELL_URLS = [
@@ -23,6 +23,24 @@ const CORE_SHELL_URLS = [
   './assets/icons/icon-512.png',
   './assets/icons/apple-touch-icon.png',
   './assets/fallback/pokeball.svg',
+  './assets/fallback/grass.svg',
+  './assets/fallback/fire.svg',
+  './assets/fallback/water.svg',
+  './assets/fallback/electric.svg',
+  './assets/fallback/rock.svg',
+  './assets/fallback/psychic.svg',
+  './assets/fallback/normal.svg',
+  './assets/fallback/ice.svg',
+  './assets/fallback/ghost.svg',
+  './assets/fallback/dragon.svg',
+  './assets/fallback/fighting.svg',
+  './assets/fallback/flying.svg',
+  './assets/fallback/poison.svg',
+  './assets/fallback/ground.svg',
+  './assets/fallback/bug.svg',
+  './assets/fallback/steel.svg',
+  './assets/fallback/dark.svg',
+  './assets/fallback/fairy.svg',
 ];
 
 self.addEventListener('install', (event) => {

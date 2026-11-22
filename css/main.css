@@ -1304,6 +1304,38 @@ button {
   color: #94a3b8;
 }
 
+.dex-cry-btn {
+  position: absolute;
+  top: 3px;
+  right: 4px;
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  background: rgba(15, 23, 42, 0.88);
+  color: #f8fafc;
+  font-size: 0.7rem;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  z-index: 2;
+  transition: transform 100ms ease, border-color 120ms ease, background 120ms ease;
+}
+
+.dex-cry-btn:hover,
+.dex-cry-btn:focus-visible {
+  border-color: var(--trainer-accent);
+  background: var(--trainer-accent-dark);
+  transform: scale(1.08);
+  outline: none;
+}
+
+.dex-cry-btn:active {
+  transform: scale(0.94);
+}
+
 .dex-sprite {
   width: 54px;
   height: 54px;
@@ -1375,6 +1407,32 @@ button {
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
+}
+
+.dex-detail-cry-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  border: 1.5px solid var(--trainer-accent);
+  background: var(--trainer-accent-soft);
+  color: #ffffff;
+  font-size: 0.72rem;
+  font-weight: 800;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: transform 100ms ease, background 120ms ease;
+}
+
+.dex-detail-cry-btn:hover,
+.dex-detail-cry-btn:focus-visible {
+  background: var(--trainer-accent-dark);
+  outline: none;
+}
+
+.dex-detail-cry-btn:active {
+  transform: translateY(1px);
 }
 
 .dex-detail-flavor {
@@ -1981,6 +2039,7 @@ button {
   margin: 6px 0 8px;
   font-size: 1.02rem;
   color: #ffffff;
+  overflow-wrap: anywhere;
 }
 
 .guide-compass-stats {
@@ -2080,6 +2139,7 @@ button {
   border-radius: 12px;
   background: #1a233a;
   border: 1.5px solid rgba(255, 255, 255, 0.14);
+  overflow-wrap: anywhere;
 }
 
 .quest-card.is-ready {
@@ -2096,6 +2156,8 @@ button {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
+  min-width: 0;
   gap: 8px;
   font-size: 0.86rem;
 }
@@ -2165,8 +2227,8 @@ button {
   position: relative;
   display: flex;
   align-items: center;
-  flex: 1 1 180px;
-  min-width: 140px;
+  flex: 1 1 155px;
+  min-width: 130px;
   max-width: 100%;
 }
 
@@ -2227,8 +2289,9 @@ button {
 }
 
 .dex-type-select,
-.dex-ability-select {
-  padding: 6px 10px;
+.dex-ability-select,
+.dex-gen-select {
+  padding: 6px 8px;
   border-radius: 10px;
   border: 1.5px solid rgba(255, 255, 255, 0.2);
   background: #0f172a;
@@ -2240,22 +2303,35 @@ button {
   outline: none;
   min-width: 0;
   max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dex-type-select {
+  flex: 0 1 auto;
+  max-width: min(145px, 100%);
 }
 
 .dex-ability-select {
   flex: 0 1 auto;
-  max-width: min(195px, 100%);
-  text-overflow: ellipsis;
+  max-width: min(175px, 100%);
+}
+
+.dex-gen-select {
+  flex: 0 1 auto;
+  max-width: min(175px, 100%);
 }
 
 .dex-type-select:focus,
-.dex-ability-select:focus {
+.dex-ability-select:focus,
+.dex-gen-select:focus {
   border-color: var(--trainer-accent);
 }
 
 @media (max-width: 600px) {
   .dex-type-select,
-  .dex-ability-select {
+  .dex-ability-select,
+  .dex-gen-select {
     flex: 1 1 130px;
     max-width: 100%;
   }
