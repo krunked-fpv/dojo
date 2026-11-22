@@ -2,7 +2,43 @@ import * as Config from './config.js';
 import * as PokemonMod from './pokemon.js';
 
 const FALLBACK_TYPES = {
+  grass: { id: 'grass', label: 'Grass', color: '#22c55e', bg: '#14532d', icon: '🌿' },
+  fire: { id: 'fire', label: 'Fire', color: '#f97316', bg: '#7c2d12', icon: '🔥' },
+  water: { id: 'water', label: 'Water', color: '#38bdf8', bg: '#0c4a6e', icon: '💧' },
+  electric: { id: 'electric', label: 'Electric', color: '#facc15', bg: '#713f12', icon: '⚡' },
+  rock: { id: 'rock', label: 'Rock', color: '#a8a29e', bg: '#44403c', icon: '🪨' },
+  psychic: { id: 'psychic', label: 'Psychic', color: '#f472b6', bg: '#701a75', icon: '✨' },
   normal: { id: 'normal', label: 'Normal', color: '#cbd5e1', bg: '#334155', icon: '⭐' },
+  ice: { id: 'ice', label: 'Ice', color: '#67e8f9', bg: '#164e63', icon: '❄️' },
+  ghost: { id: 'ghost', label: 'Ghost', color: '#a855f7', bg: '#3b0764', icon: '👻' },
+  dragon: { id: 'dragon', label: 'Dragon', color: '#818cf8', bg: '#312e81', icon: '🐉' },
+  fighting: { id: 'fighting', label: 'Fighting', color: '#fb7185', bg: '#881337', icon: '🥊' },
+  flying: { id: 'flying', label: 'Flying', color: '#93c5fd', bg: '#1e3a8a', icon: '🪽' },
+  poison: { id: 'poison', label: 'Poison', color: '#c084fc', bg: '#581c87', icon: '🧪' },
+  ground: { id: 'ground', label: 'Ground', color: '#f59e0b', bg: '#78350f', icon: '⛰️' },
+  bug: { id: 'bug', label: 'Bug', color: '#a3e635', bg: '#365314', icon: '🦋' },
+  steel: { id: 'steel', label: 'Steel', color: '#94a3b8', bg: '#334155', icon: '⚙️' },
+  dark: { id: 'dark', label: 'Dark', color: '#818cf8', bg: '#1e1b4b', icon: '🌙' },
+  fairy: { id: 'fairy', label: 'Fairy', color: '#f9a8d4', bg: '#831843', icon: '🧚' },
+};
+
+const FALLBACK_ITEMS = {
+  fire_gem: { id: 'fire_gem', name: 'Ember Gem', icon: '🔥', color: '#f97316' },
+  water_gem: { id: 'water_gem', name: 'Tide Gem', icon: '💧', color: '#38bdf8' },
+  thunder_gem: { id: 'thunder_gem', name: 'Spark Gem', icon: '⚡', color: '#facc15' },
+  moon_gem: { id: 'moon_gem', name: 'Starlight Gem', icon: '🌙', color: '#e879f9' },
+  leaf_gem: { id: 'leaf_gem', name: 'Verdant Gem', icon: '🍃', color: '#22c55e' },
+  ice_gem: { id: 'ice_gem', name: 'Aurora Gem', icon: '❄️', color: '#67e8f9' },
+  sun_gem: { id: 'sun_gem', name: 'Sunburst Gem', icon: '☀️', color: '#fbbf24' },
+  dusk_gem: { id: 'dusk_gem', name: 'Twilight Gem', icon: '🔮', color: '#9333ea' },
+  astral_gem: { id: 'astral_gem', name: 'Astral Gem', icon: '🌠', color: '#38bdf8' },
+  prism_gem: { id: 'prism_gem', name: 'Prism Gem', icon: '💠', color: '#a78bfa' },
+  chrono_gem: { id: 'chrono_gem', name: 'Chrono Amber', icon: '⏳', color: '#f59e0b' },
+  nebula_gem: { id: 'nebula_gem', name: 'Nebula Core', icon: '☄️', color: '#ec4899' },
+  pixie_gem: { id: 'pixie_gem', name: 'Pixie Ribbon Gem', icon: '🎀', color: '#f9a8d4' },
+  alola_gem: { id: 'alola_gem', name: 'Island Kahuna Shell', icon: '🌺', color: '#38bdf8' },
+  crown_gem: { id: 'crown_gem', name: 'Sovereign Crest', icon: '🛡️', color: '#94a3b8' },
+  tera_gem: { id: 'tera_gem', name: 'Terastal Shard', icon: '💎', color: '#67e8f9' },
 };
 
 const FALLBACK_ABILITIES = {
@@ -34,10 +70,25 @@ const FALLBACK_ABILITIES = {
   aurora_cloak: { id: 'aurora_cloak', name: 'Glacial Crown', icon: '🏔️', type: 'ice', trigger: 'attack' },
   phantom_mirage: { id: 'phantom_mirage', name: 'Specter Veil', icon: '🕯️', type: 'ghost', trigger: 'defense', counterBoostStat: 'spd' },
   rift_sovereign: { id: 'rift_sovereign', name: 'Astral Rift', icon: '☄️', type: 'dragon', trigger: 'entry', stat: 'atk', stages: 1, grantShield: true, shieldTurns: 1 },
+  orichalcum_pulse: { id: 'orichalcum_pulse', name: 'Orichalcum Might', icon: '🥊', type: 'fighting', trigger: 'entry', stat: 'atk', stages: 1 },
+  gale_wings: { id: 'gale_wings', name: 'Skyward Gale', icon: '🪽', type: 'flying', trigger: 'entry', stat: 'spd', stages: 1 },
+  toxic_alchemy: { id: 'toxic_alchemy', name: 'Venom Siphon', icon: '🧪', type: 'poison', trigger: 'attack', drainRatio: 0.2 },
+  stamina_earth: { id: 'stamina_earth', name: 'Terra Stamina', icon: '⛰️', type: 'ground', trigger: 'defense', counterBoostStat: 'def' },
+  swarm_resonance: { id: 'swarm_resonance', name: 'Emerald Swarm', icon: '🦋', type: 'bug', trigger: 'attack' },
+  corviknight_armor: { id: 'corviknight_armor', name: 'Mirror Bastion', icon: '🛡️', type: 'steel', trigger: 'defense' },
+  supreme_overlord: { id: 'supreme_overlord', name: 'Shogun Crest', icon: '♟️', type: 'dark', trigger: 'attack', critBonus: 0.15 },
+  pixilate_aura: { id: 'pixilate_aura', name: 'Pixie Veil', icon: '🧚', type: 'fairy', trigger: 'attack' },
+  disguise_veil: { id: 'disguise_veil', name: 'Playful Disguise', icon: '🎭', type: 'fairy', trigger: 'entry', stat: 'def', stages: 1, grantShield: true, shieldTurns: 1 },
+  tera_prism: { id: 'tera_prism', name: 'Terastal Crown', icon: '💎', type: 'dragon', trigger: 'turn_end', boostStat: 'atk', boostStages: 1 },
 };
 
 function getTypesMap() {
   return Config.TYPES || FALLBACK_TYPES;
+}
+
+function resolveTypeMeta(typeId) {
+  const map = getTypesMap();
+  return map[typeId] || FALLBACK_TYPES[typeId] || map.normal || FALLBACK_TYPES.normal;
 }
 
 function getMovesMap() {
@@ -45,7 +96,7 @@ function getMovesMap() {
 }
 
 function getEvolutionItemsMap() {
-  return Config.EVOLUTION_ITEMS || {};
+  return Config.EVOLUTION_ITEMS || FALLBACK_ITEMS;
 }
 
 function getAbilitiesMap() {
@@ -153,7 +204,7 @@ const HP_COLOR_CRIMSON_A = [220, 38, 38];
 const HP_COLOR_CRIMSON_B = [251, 113, 133];
 
 const ACTION_COOLDOWN_MS = 180;
-const PHYSICAL_MOVE_IDS = new Set([
+export const PHYSICAL_MOVE_IDS = new Set([
   'tackle',
   'quick_attack',
   'spark_dash',
@@ -181,9 +232,21 @@ const PHYSICAL_MOVE_IDS = new Set([
   'canyon_rend',
   'champion_strike',
   'rift_claw',
+  'close_combat',
+  'collision_course',
+  'brave_bird',
+  'poison_jab',
+  'earthquake',
+  'headlong_rush',
+  'x_scissor',
+  'gigaton_hammer',
+  'kowtow_cleave',
+  'play_rough',
+  'dragon_darts',
+  'bitter_blade',
 ]);
 
-const MOVE_FX_CLASS = {
+export const MOVE_FX_CLASS = {
   thunder_fang: 'fx-electric-charge',
   wild_volt: 'fx-electric-charge',
   moonblast: 'fx-moon-charge',
@@ -232,9 +295,60 @@ const MOVE_FX_CLASS = {
   relic_hex: 'fx-relic-hex',
   rift_claw: 'fx-rift-claw',
   cosmos_supernova: 'fx-cosmos-supernova',
+  close_combat: 'fx-close-combat',
+  vacuum_wave: 'fx-vacuum-wave',
+  collision_course: 'fx-collision-course',
+  brave_bird: 'fx-brave-bird',
+  air_slash: 'fx-air-slash',
+  tailwind_grace: 'fx-tailwind-grace',
+  sludge_wave: 'fx-sludge-wave',
+  poison_jab: 'fx-poison-jab',
+  malignant_chain: 'fx-malignant-chain',
+  earthquake: 'fx-earthquake',
+  earth_power: 'fx-earth-power',
+  headlong_rush: 'fx-headlong-rush',
+  bug_buzz: 'fx-bug-buzz',
+  x_scissor: 'fx-x-scissor',
+  quiver_step: 'fx-quiver-step',
+  flash_cannon: 'fx-flash-cannon',
+  gigaton_hammer: 'fx-gigaton-hammer',
+  king_shield: 'fx-king-shield',
+  dark_pulse: 'fx-dark-pulse',
+  kowtow_cleave: 'fx-kowtow-cleave',
+  lunar_shroud: 'fx-lunar-shroud',
+  dazzling_gleam: 'fx-dazzling-gleam',
+  play_rough: 'fx-play-rough',
+  geomancy_bloom: 'fx-geomancy-bloom',
+  water_shuriken: 'fx-water-shuriken',
+  dragon_darts: 'fx-dragon-darts',
+  bitter_blade: 'fx-bitter-blade',
+  electro_drift: 'fx-electro-drift',
 };
 
 const ALL_MOVE_FX_CLASSES = Object.values(MOVE_FX_CLASS);
+
+export const SPRITE_MOTION_STYLES = ['breathe', 'bob', 'float', 'flutter'];
+
+export function resolveSpriteMotionStyle(monOrSpecies) {
+  if (!monOrSpecies) return 'breathe';
+  const rawId = typeof monOrSpecies === 'number' || typeof monOrSpecies === 'string'
+    ? Number(monOrSpecies)
+    : Number(monOrSpecies.speciesId ?? monOrSpecies.id ?? monOrSpecies.species?.id);
+  const species = (Number.isFinite(rawId) && Config.SPECIES?.[rawId]) || monOrSpecies.species || monOrSpecies || null;
+  const type = String(monOrSpecies.type || species?.type || '').toLowerCase();
+
+  if (type === 'flying' || type === 'bug') return 'flutter';
+  if (type === 'ghost' || type === 'psychic' || type === 'fairy' || type === 'dragon') return 'float';
+  if (type === 'electric' || type === 'water' || type === 'fighting' || type === 'dark') return 'bob';
+  if (type === 'ice') return (Number.isFinite(rawId) && rawId % 2 === 0) ? 'float' : 'breathe';
+  if (type === 'grass' || type === 'fire' || type === 'rock' || type === 'ground' || type === 'steel' || type === 'normal') {
+    return 'breathe';
+  }
+  if (Number.isFinite(rawId) && rawId > 0) {
+    return SPRITE_MOTION_STYLES[Math.abs(Math.trunc(rawId)) % SPRITE_MOTION_STYLES.length];
+  }
+  return 'breathe';
+}
 
 function normalizeBallStyle(ballType) {
   if (ballType === true || ballType === 'great') return 'great';
@@ -242,27 +356,33 @@ function normalizeBallStyle(ballType) {
   return 'pokeball';
 }
 
-function resolveMoveParticleShape(move) {
+export function resolveMoveParticleShape(move) {
   if (!move) return 'circle';
   if (move.id === 'star_melody') return 'note';
-  if (move.id === 'moonblast' || move.id === 'psycho_cut' || move.id === 'solar_blade' || move.id === 'razor_shell' || move.id === 'night_daze') return 'crescent';
-  if (move.id === 'thunder_fang' || move.id === 'wild_volt' || move.id === 'plasma_cannon' || move.id === 'volt_tackle' || move.id === 'steppe_bolt' || move.id === 'ion_tempest') return 'lightning';
-  if (move.id === 'iron_crush' || move.id === 'sandstorm_crush' || move.id === 'canyon_rend') return 'stone';
+  if (move.id === 'moonblast' || move.id === 'psycho_cut' || move.id === 'solar_blade' || move.id === 'razor_shell' || move.id === 'night_daze' || move.id === 'air_slash' || move.id === 'dark_pulse' || move.id === 'lunar_shroud') return 'crescent';
+  if (move.id === 'thunder_fang' || move.id === 'wild_volt' || move.id === 'plasma_cannon' || move.id === 'volt_tackle' || move.id === 'steppe_bolt' || move.id === 'ion_tempest' || move.id === 'electro_drift') return 'lightning';
+  if (move.id === 'iron_crush' || move.id === 'sandstorm_crush' || move.id === 'canyon_rend' || move.id === 'earthquake' || move.id === 'headlong_rush') return 'stone';
+  if (move.id === 'earth_power') return 'ember';
   if (move.id === 'spore_burst') return 'spore';
-  if (move.id === 'icicle_spear' || move.id === 'polar_lance') return 'lance';
+  if (move.id === 'icicle_spear' || move.id === 'polar_lance' || move.id === 'poison_jab' || move.id === 'dragon_darts') return 'lance';
   if (move.id === 'prism_laser' || move.id === 'dune_aegis') return 'crystal';
   if (move.id === 'zen_meteor') return 'orb';
-  if (move.id === 'thorn_barrage') return 'petal';
+  if (move.id === 'thorn_barrage' || move.id === 'quiver_step' || move.id === 'geomancy_bloom') return 'petal';
   if (move.id === 'jungle_totem') return 'leaf';
   if (move.id === 'inferno_overdrive' || move.id === 'blaze_kick') return 'ember';
-  if (move.id === 'abyssal_geyser' || move.id === 'champion_strike') return 'wave_arc';
+  if (move.id === 'abyssal_geyser' || move.id === 'champion_strike' || move.id === 'close_combat' || move.id === 'vacuum_wave' || move.id === 'bug_buzz') return 'wave_arc';
   if (move.id === 'pearl_cascade') return 'bubble';
-  if (move.id === 'amber_bastion') return 'hexagon';
+  if (move.id === 'amber_bastion' || move.id === 'gigaton_hammer' || move.id === 'king_shield') return 'hexagon';
   if (move.id === 'chrono_cannon') return 'gear';
-  if (move.id === 'relic_hex') return 'sigil';
-  if (move.id === 'rift_claw') return 'slash';
-  if (move.id === 'cosmos_supernova') return 'star';
-  if (move.fx === 'wind' || move.id === 'sky_wing' || move.id === 'gust' || move.id === 'omen_wind') return 'wind';
+  if (move.id === 'relic_hex' || move.id === 'malignant_chain') return 'sigil';
+  if (move.id === 'rift_claw' || move.id === 'x_scissor' || move.id === 'kowtow_cleave' || move.id === 'bitter_blade') return 'slash';
+  if (move.id === 'cosmos_supernova' || move.id === 'collision_course' || move.id === 'dazzling_gleam') return 'star';
+  if (move.id === 'play_rough') return 'heart';
+  if (move.id === 'flash_cannon') return 'ray';
+  if (move.id === 'water_shuriken') return 'shuriken';
+  if (move.id === 'brave_bird') return 'feather';
+  if (move.id === 'sludge_wave') return 'venom';
+  if (move.fx === 'wind' || move.id === 'sky_wing' || move.id === 'gust' || move.id === 'omen_wind' || move.id === 'tailwind_grace') return 'wind';
   if (move.id === 'phantom_claw' || move.id === 'starlight_claw' || move.id === 'leaf_blade') return 'slash';
   if (move.id === 'doom_desire' || move.id === 'aura_sphere') return 'star';
   if (move.id === 'draco_meteor' || move.id === 'dragon_rush') return 'dragonflame';
@@ -280,6 +400,14 @@ function resolveMoveParticleShape(move) {
     ice: 'crystal',
     ghost: 'wisp',
     dragon: 'dragonflame',
+    fighting: 'wave_arc',
+    flying: 'feather',
+    poison: 'venom',
+    ground: 'stone',
+    bug: 'petal',
+    steel: 'hexagon',
+    dark: 'crescent',
+    fairy: 'star',
     normal: move.fx === 'star' ? 'star' : 'dust',
   };
   return shapeByType[move.type] || 'circle';
@@ -606,6 +734,11 @@ export class BattleEngine {
     const mon = side === 'enemy' ? this.enemy : this.player;
     if (!el) return;
     el.className = `fighter-sprite fighter-sprite-${side} is-idle${mon?.isShiny ? ' is-shiny-sprite' : ''}${side === 'enemy' && mon?.isElite ? ' is-elite-sprite' : ''}`;
+    if (mon) {
+      el.dataset.motion = resolveSpriteMotionStyle(mon);
+    } else {
+      delete el.dataset.motion;
+    }
   }
 
   returnToPlayerInput(sid = this.sessionId) {
@@ -758,6 +891,13 @@ export class BattleEngine {
     this.enemySpriteEl?.classList.toggle('is-shiny-sprite', Boolean(leadEnemy.isShiny));
     this.enemySpriteEl?.classList.toggle('is-elite-sprite', Boolean(leadEnemy.isElite));
     this.playerSpriteEl?.classList.toggle('is-shiny-sprite', Boolean(this.player.isShiny));
+    this.enemySpriteEl?.classList.remove('is-idle', 'enemy-sendout');
+    this.playerSpriteEl?.classList.remove('is-idle', 'player-sendout');
+    if (this.enemySpriteEl) void this.enemySpriteEl.offsetWidth;
+    if (this.playerSpriteEl) void this.playerSpriteEl.offsetWidth;
+    this.enemySpriteEl?.classList.add('enemy-sendout');
+    this.playerSpriteEl?.classList.add('player-sendout');
+    this.audio?.playPokemonCry?.(leadEnemy);
 
     if (leadEnemy.isShiny) {
       this.audio?.playShinySparkle?.();
@@ -792,6 +932,10 @@ export class BattleEngine {
     await this.say(introMsg);
 
     if (!this.isSessionValid(sid)) return;
+    this.enemySpriteEl?.classList.remove('enemy-sendout');
+    this.enemySpriteEl?.classList.add('is-idle');
+    this.playerSpriteEl?.classList.remove('player-sendout');
+    this.playerSpriteEl?.classList.add('is-idle');
     await this.triggerEntryAbility('player', this.player, sid);
     if (!this.isSessionValid(sid)) return;
     await this.triggerEntryAbility('enemy', this.enemy, sid);
@@ -822,14 +966,26 @@ export class BattleEngine {
       this.stageEl.style.transform = '';
       delete this.stageEl.dataset.abilityAura;
     }
-    this.enemySpriteEl?.classList.remove(
-      'windup', 'hit-stop', 'hit-shake', 'evo-glow', 'evo-flash',
-      'enemy-sendout', 'faint-drop', 'is-elite-sprite', 'ability-pulse', ...ALL_MOVE_FX_CLASSES,
-    );
-    this.playerSpriteEl?.classList.remove(
-      'windup', 'hit-stop', 'hit-shake', 'evo-glow', 'evo-flash',
-      'faint-drop', 'ability-pulse', ...ALL_MOVE_FX_CLASSES,
-    );
+    if (this.enemySpriteEl) {
+      delete this.enemySpriteEl.dataset.motion;
+      this.enemySpriteEl.classList.remove(
+        'is-idle', 'windup', 'lunge-right', 'lunge-left', 'quick-lunge-right', 'quick-lunge-left',
+        'hit-stop', 'hit-shake', 'evo-glow', 'evo-flash',
+        'enemy-sendout', 'player-sendout', 'faint-drop',
+        'capture-energize', 'capture-pull', 'capture-shrink',
+        'is-shiny-sprite', 'is-elite-sprite', 'ability-pulse', ...ALL_MOVE_FX_CLASSES,
+      );
+    }
+    if (this.playerSpriteEl) {
+      delete this.playerSpriteEl.dataset.motion;
+      this.playerSpriteEl.classList.remove(
+        'is-idle', 'windup', 'lunge-right', 'lunge-left', 'quick-lunge-right', 'quick-lunge-left',
+        'hit-stop', 'hit-shake', 'evo-glow', 'evo-flash',
+        'enemy-sendout', 'player-sendout', 'faint-drop',
+        'capture-energize', 'capture-pull', 'capture-shrink',
+        'is-shiny-sprite', 'is-elite-sprite', 'ability-pulse', ...ALL_MOVE_FX_CLASSES,
+      );
+    }
     const enemyCard = this.enemyStatusCardEl || this.enemyNameEl?.closest('.status-card-enemy') || document.querySelector('.status-card-enemy');
     enemyCard?.classList.remove('is-elite-card');
 
@@ -924,7 +1080,6 @@ export class BattleEngine {
     if (!this.enemy || !this.player) return;
     const profile = this.storage.getActiveProfile();
     const caughtBefore = Boolean(profile?.pokedex?.caught?.[this.enemy.speciesId]);
-    const typesMap = getTypesMap();
 
     const enemyCard = this.enemyStatusCardEl || this.enemyNameEl?.closest('.status-card-enemy') || document.querySelector('.status-card-enemy');
     enemyCard?.classList.toggle('is-elite-card', Boolean(this.enemy.isElite));
@@ -933,7 +1088,7 @@ export class BattleEngine {
     if (this.enemyNameEl) this.enemyNameEl.textContent = this.enemy.name;
     if (this.enemyLevelEl) this.enemyLevelEl.textContent = `Lv.${this.enemy.level}`;
     this.syncRankPill('enemy', this.enemy);
-    const eType = typesMap[this.enemy.type] || typesMap.normal || FALLBACK_TYPES.normal;
+    const eType = resolveTypeMeta(this.enemy.type);
     if (this.enemyTypeEl) {
       this.enemyTypeEl.textContent = `${eType.icon} ${eType.label}`;
       this.enemyTypeEl.style.background = eType.bg;
@@ -965,7 +1120,7 @@ export class BattleEngine {
     if (this.playerNameEl) this.playerNameEl.textContent = this.player.displayName || this.player.name;
     if (this.playerLevelEl) this.playerLevelEl.textContent = `Lv.${this.player.level}`;
     this.syncRankPill('player', this.player);
-    const pType = typesMap[this.player.type] || typesMap.normal || FALLBACK_TYPES.normal;
+    const pType = resolveTypeMeta(this.player.type);
     if (this.playerTypeEl) {
       this.playerTypeEl.textContent = `${pType.icon} ${pType.label}`;
       this.playerTypeEl.style.background = pType.bg;
@@ -1179,9 +1334,8 @@ export class BattleEngine {
       }
     }
 
-    const typesMap = getTypesMap();
     moves.forEach((move, idx) => {
-      const typeMeta = typesMap[move.type] || typesMap.normal || FALLBACK_TYPES.normal;
+      const typeMeta = resolveTypeMeta(move.type);
       const isNonAttack = move.category === 'heal'
         || move.category === 'buff'
         || move.category === 'shield'
@@ -1569,6 +1723,16 @@ export class BattleEngine {
       aurora_cloak: { rings: ['#67e8f9', '#a7f3d0'], cols: ['#67e8f9', '#34d399', '#c084fc', '#ffffff'], shape: 'hexagon', altShape: 'crystal', orbit: 5.4, stageKind: 'aurora_ribbons', stageCols: ['#34d399', '#67e8f9', '#c084fc'] },
       phantom_mirage: { rings: ['#a855f7', '#2dd4bf'], cols: ['#a855f7', '#2dd4bf', '#e9d5ff'], shape: 'wisp', altShape: 'sigil', orbit: -6.2, stageKind: 'spectral_lanterns', stageCols: ['#2dd4bf', '#a855f7', '#e9d5ff'] },
       rift_sovereign: { rings: ['#ec4899', '#6366f1'], cols: ['#ec4899', '#6366f1', '#67e8f9', '#fde047'], shape: 'sigil', altShape: 'dragonflame', orbit: 7.8, stageKind: 'rift_portal', stageCols: ['#ec4899', '#6366f1', '#67e8f9'] },
+      orichalcum_pulse: { rings: ['#dc2626', '#fbbf24'], cols: ['#ef4444', '#fbbf24', '#fb7185', '#ffffff'], shape: 'wave_arc', altShape: 'star', orbit: 8.8, stageKind: 'orichalcum_burst', stageCols: ['#ef4444', '#fbbf24', '#fde047'] },
+      gale_wings: { rings: ['#38bdf8', '#e0f2fe'], cols: ['#38bdf8', '#7dd3fc', '#e0f2fe', '#ffffff'], shape: 'feather', altShape: 'wind', orbit: 9.4, stageKind: 'skyward_feathers', stageCols: ['#38bdf8', '#bae6fd', '#ffffff'] },
+      toxic_alchemy: { rings: ['#a855f7', '#4ade80'], cols: ['#a855f7', '#c084fc', '#4ade80', '#e9d5ff'], shape: 'venom', altShape: 'bubble', orbit: -6.8, stageKind: 'alchemical_siphon', stageCols: ['#a855f7', '#4ade80', '#e9d5ff'] },
+      stamina_earth: { rings: ['#d97706', '#fde68a'], cols: ['#d97706', '#f59e0b', '#a8a29e', '#fde68a'], shape: 'stone', altShape: 'hexagon', orbit: -5.2, stageKind: 'tectonic_bastion', stageCols: ['#d97706', '#f59e0b', '#fde68a'] },
+      swarm_resonance: { rings: ['#84cc16', '#fde047'], cols: ['#84cc16', '#a3e635', '#34d399', '#fde047'], shape: 'petal', altShape: 'wind', orbit: 9.8, stageKind: 'emerald_swarm', stageCols: ['#84cc16', '#34d399', '#fde047'] },
+      corviknight_armor: { rings: ['#cbd5e1', '#38bdf8'], cols: ['#e2e8f0', '#94a3b8', '#67e8f9', '#ffffff'], shape: 'hexagon', altShape: 'crystal', orbit: -5.6, stageKind: 'mirror_bastion', stageCols: ['#e2e8f0', '#94a3b8', '#67e8f9'] },
+      supreme_overlord: { rings: ['#a855f7', '#ef4444'], cols: ['#6366f1', '#a855f7', '#ef4444', '#fbbf24'], shape: 'sigil', altShape: 'slash', orbit: -7.4, stageKind: 'shogun_crest', stageCols: ['#ef4444', '#a855f7', '#fbbf24'] },
+      pixilate_aura: { rings: ['#f472b6', '#fde047'], cols: ['#f472b6', '#f9a8d4', '#fde047', '#ffffff'], shape: 'star', altShape: 'heart', orbit: 6.6, stageKind: 'pixie_glimmer', stageCols: ['#f472b6', '#f9a8d4', '#fde047'] },
+      disguise_veil: { rings: ['#818cf8', '#f472b6'], cols: ['#818cf8', '#c084fc', '#f472b6', '#e9d5ff'], shape: 'wisp', altShape: 'sigil', orbit: -6.0, stageKind: 'disguise_curtain', stageCols: ['#818cf8', '#c084fc', '#f472b6'] },
+      tera_prism: { rings: ['#22d3ee', '#f472b6'], cols: ['#22d3ee', '#f472b6', '#fde047', '#ffffff'], shape: 'crystal', altShape: 'hexagon', orbit: 8.6, stageKind: 'terastal_crown', stageCols: ['#22d3ee', '#f472b6', '#fde047'] },
     };
     const fallbackByType = {
       grass: 'overgrow',
@@ -1581,6 +1745,14 @@ export class BattleEngine {
       ghost: 'shadow_cloak',
       dragon: 'dragon_heart',
       normal: 'starlight_grace',
+      fighting: 'orichalcum_pulse',
+      flying: 'gale_wings',
+      poison: 'toxic_alchemy',
+      ground: 'stamina_earth',
+      bug: 'swarm_resonance',
+      steel: 'corviknight_armor',
+      dark: 'supreme_overlord',
+      fairy: 'pixilate_aura',
     };
     const cfg = profiles[abilityId] || profiles[fallbackByType[abilityType]] || profiles.starlight_grace;
 
@@ -1697,7 +1869,9 @@ export class BattleEngine {
         await new Promise((r) => setTimeout(r, Math.min(80, bannerMs)));
       }
     } finally {
-      spriteEl?.classList.remove('ability-pulse');
+      if (!this.active || this.isSessionValid(sessionId)) {
+        spriteEl?.classList.remove('ability-pulse');
+      }
       if (this.stageEl && (!this.active || this.isSessionValid(sessionId))) {
         delete this.stageEl.dataset.abilityAura;
       }
@@ -1812,8 +1986,7 @@ export class BattleEngine {
 
   spawnChargeParticles(side, type, pace, move = null) {
     const center = this.getSpriteCenter(side);
-    const typesMap = getTypesMap();
-    const typeColor = (typesMap[type] || typesMap.normal || FALLBACK_TYPES.normal).color;
+    const typeColor = resolveTypeMeta(type).color;
     const lifeScale = pace?.particleLifeScale || 1.2;
     const moveId = move?.id || '';
 
@@ -2057,7 +2230,37 @@ export class BattleEngine {
       rift_claw: { cols: ['#ec4899', '#6366f1', '#67e8f9'], shape: 'slash', ring: '#ec4899', secondaryRing: '#6366f1', orbit: false },
       cosmos_supernova: { cols: ['#f472b6', '#fde047', '#818cf8', '#ffffff'], shape: 'star', ring: '#f472b6', secondaryRing: '#fde047', orbit: false, contractRing: true },
     };
-    const s6 = sprint6Charges[moveId] || sprint7Charges[moveId];
+    const sprint8Charges = {
+      close_combat: { cols: ['#ef4444', '#fb923c', '#fde047'], shape: 'wave_arc', ring: '#ef4444', secondaryRing: '#fbbf24', orbit: true, angVel: 9.2 },
+      vacuum_wave: { cols: ['#f87171', '#e0f2fe', '#ffffff'], shape: 'wave_arc', ring: '#ef4444', secondaryRing: '#ffffff', orbit: false, contractRing: true },
+      collision_course: { cols: ['#dc2626', '#fbbf24', '#ffffff'], shape: 'star', ring: '#dc2626', secondaryRing: '#fbbf24', orbit: false },
+      brave_bird: { cols: ['#38bdf8', '#e0f2fe', '#ffffff'], shape: 'feather', ring: '#38bdf8', secondaryRing: '#ffffff', orbit: true, angVel: 8.8 },
+      air_slash: { cols: ['#7dd3fc', '#bae6fd', '#ffffff'], shape: 'feather', ring: '#7dd3fc', secondaryRing: '#e0f2fe', orbit: false },
+      tailwind_grace: { cols: ['#7dd3fc', '#e0f2fe', '#a7f3d0'], shape: 'feather', ring: '#7dd3fc', secondaryRing: '#ffffff', orbit: true, angVel: 6.4 },
+      sludge_wave: { cols: ['#a855f7', '#4ade80', '#e9d5ff'], shape: 'venom', ring: '#a855f7', secondaryRing: '#4ade80', orbit: true, angVel: -6.8 },
+      poison_jab: { cols: ['#a855f7', '#c084fc', '#4ade80'], shape: 'venom', ring: '#a855f7', secondaryRing: '#c084fc', orbit: false },
+      malignant_chain: { cols: ['#c084fc', '#f43f5e', '#4ade80'], shape: 'sigil', ring: '#a855f7', secondaryRing: '#f43f5e', orbit: true, angVel: -7.2 },
+      earthquake: { cols: ['#d97706', '#f59e0b', '#a8a29e'], shape: 'stone', ring: '#d97706', secondaryRing: '#fde68a', orbit: false },
+      earth_power: { cols: ['#f59e0b', '#ef4444', '#fde68a'], shape: 'ember', ring: '#d97706', secondaryRing: '#ef4444', orbit: true, angVel: 6.0 },
+      headlong_rush: { cols: ['#d97706', '#fbbf24', '#dc2626'], shape: 'stone', ring: '#b45309', secondaryRing: '#fbbf24', orbit: false },
+      bug_buzz: { cols: ['#84cc16', '#34d399', '#fde047'], shape: 'wave_arc', ring: '#84cc16', secondaryRing: '#34d399', orbit: true, angVel: 8.6 },
+      x_scissor: { cols: ['#84cc16', '#bef264', '#ffffff'], shape: 'slash', ring: '#84cc16', secondaryRing: '#bef264', orbit: false },
+      quiver_step: { cols: ['#a3e635', '#f472b6', '#fde047'], shape: 'petal', ring: '#84cc16', secondaryRing: '#f472b6', orbit: true, angVel: 5.8 },
+      flash_cannon: { cols: ['#e2e8f0', '#38bdf8', '#ffffff'], shape: 'crystal', ring: '#cbd5e1', secondaryRing: '#38bdf8', orbit: false, contractRing: true },
+      gigaton_hammer: { cols: ['#f472b6', '#cbd5e1', '#ffffff'], shape: 'hexagon', ring: '#f472b6', secondaryRing: '#e2e8f0', orbit: false },
+      king_shield: { cols: ['#fbbf24', '#cbd5e1', '#ef4444'], shape: 'hexagon', ring: '#fbbf24', secondaryRing: '#e2e8f0', orbit: true, angVel: 4.8 },
+      dark_pulse: { cols: ['#7e22ce', '#6366f1', '#1e1b4b'], shape: 'crescent', ring: '#7e22ce', secondaryRing: '#c084fc', orbit: true, angVel: -7.4 },
+      kowtow_cleave: { cols: ['#a855f7', '#ef4444', '#fbbf24'], shape: 'slash', ring: '#6366f1', secondaryRing: '#ef4444', orbit: false },
+      lunar_shroud: { cols: ['#818cf8', '#c084fc', '#e9d5ff'], shape: 'crescent', ring: '#6366f1', secondaryRing: '#e9d5ff', orbit: true, angVel: -5.4 },
+      dazzling_gleam: { cols: ['#f472b6', '#fde047', '#ffffff'], shape: 'star', ring: '#f472b6', secondaryRing: '#fde047', orbit: false, contractRing: true },
+      play_rough: { cols: ['#f472b6', '#f9a8d4', '#fde047'], shape: 'heart', ring: '#f472b6', secondaryRing: '#f9a8d4', orbit: true, angVel: 7.4 },
+      geomancy_bloom: { cols: ['#f472b6', '#38bdf8', '#fde047', '#4ade80'], shape: 'petal', ring: '#f472b6', secondaryRing: '#fde047', orbit: true, angVel: 6.2 },
+      water_shuriken: { cols: ['#38bdf8', '#bae6fd', '#ffffff'], shape: 'shuriken', ring: '#38bdf8', secondaryRing: '#e0f2fe', orbit: true, angVel: 11.2 },
+      dragon_darts: { cols: ['#6366f1', '#22d3ee', '#f43f5e'], shape: 'lance', ring: '#6366f1', secondaryRing: '#22d3ee', orbit: false },
+      bitter_blade: { cols: ['#ef4444', '#a855f7', '#fde047'], shape: 'ember', ring: '#dc2626', secondaryRing: '#a855f7', orbit: false },
+      electro_drift: { cols: ['#22d3ee', '#a855f7', '#fde047'], shape: 'lightning', ring: '#22d3ee', secondaryRing: '#a855f7', orbit: false, contractRing: true },
+    };
+    const s6 = sprint6Charges[moveId] || sprint7Charges[moveId] || sprint8Charges[moveId];
     if (s6) {
       this.particles.push({
         x: center.x,
@@ -2168,7 +2371,7 @@ export class BattleEngine {
       buff: '#fde047',
       shield: '#67e8f9',
     };
-    const typeColor = typesMap[type]?.color || fxColors[type] || typesMap.normal?.color || '#cbd5e1';
+    const typeColor = fxColors[type] || (typesMap[type]?.color || resolveTypeMeta(type).color);
     const count = options.count || 22;
     const moveId = options.moveId || '';
 
@@ -2215,6 +2418,14 @@ export class BattleEngine {
       ice: 'crystal',
       ghost: 'wisp',
       dragon: 'dragonflame',
+      fighting: 'wave_arc',
+      flying: 'feather',
+      poison: 'venom',
+      ground: 'stone',
+      bug: 'petal',
+      steel: 'hexagon',
+      dark: 'crescent',
+      fairy: 'star',
       heal: 'star',
       buff: 'star',
       shield: 'crystal',
@@ -2228,11 +2439,15 @@ export class BattleEngine {
     if (options.slash) {
       const slashAngles = moveId === 'thunder_fang'
         ? [-0.85, 0.85, -0.45, 0.45, 0.05]
-        : moveId === 'leaf_blade'
+        : moveId === 'leaf_blade' || moveId === 'x_scissor'
           ? [-0.785, 0.785, -0.785, 0.785]
           : moveId === 'psycho_cut'
             ? [-0.65, 0.65, -0.25, 0.25]
-            : [-0.65, 0.65, -0.35, 0.45];
+            : moveId === 'kowtow_cleave'
+              ? [-0.95, 0.18, -0.55]
+              : moveId === 'bitter_blade'
+                ? [-0.75, 0.75, 0]
+                : [-0.65, 0.65, -0.35, 0.45];
       slashAngles.forEach((ang, idx) => {
         this.particles.push({
           x: center.x + (Math.random() - 0.5) * (moveId === 'leaf_blade' ? 12 : 18),
@@ -2629,7 +2844,8 @@ export class BattleEngine {
         });
       }
     } else {
-      if (!this._spawnSprint7Impact(moveId, center, pedestal, lifeScale)) {
+      if (!this._spawnSprint8Impact(moveId, center, pedestal, lifeScale)
+        && !this._spawnSprint7Impact(moveId, center, pedestal, lifeScale)) {
         this._spawnSprint6Impact(moveId, center, pedestal, lifeScale);
       }
     }
@@ -2637,7 +2853,7 @@ export class BattleEngine {
     for (let i = 0; i < count; i++) {
       const angle = (Math.PI * 2 * i) / count + Math.random() * 0.35;
       const speed = 75 + Math.random() * 155;
-      const isBuoyant = shape === 'ember' || shape === 'bubble' || shape === 'wisp' || shape === 'dragonflame' || shape === 'note' || shape === 'spore' || shape === 'petal' || shape === 'wave_arc';
+      const isBuoyant = shape === 'ember' || shape === 'bubble' || shape === 'wisp' || shape === 'dragonflame' || shape === 'note' || shape === 'spore' || shape === 'petal' || shape === 'wave_arc' || shape === 'feather';
       let pShape = shape;
       let pColor = i % 3 === 0 ? '#ffffff' : typeColor;
       if (options.aurora) {
@@ -2695,6 +2911,34 @@ export class BattleEngine {
           relic_hex: { cols: ['#a855f7', '#f59e0b', '#e9d5ff', '#fde047'], shapes: ['sigil', 'wisp'] },
           rift_claw: { cols: ['#ec4899', '#6366f1', '#67e8f9', '#ffffff'], shapes: ['sigil', 'dragonflame'] },
           cosmos_supernova: { cols: ['#f472b6', '#fde047', '#818cf8', '#ffffff'], shapes: ['star', 'dragonflame'] },
+          close_combat: { cols: ['#ef4444', '#fb923c', '#fde047', '#ffffff'], shapes: ['wave_arc', 'star'] },
+          vacuum_wave: { cols: ['#f87171', '#bae6fd', '#ffffff', '#ef4444'], shapes: ['wave_arc', 'wind'] },
+          collision_course: { cols: ['#dc2626', '#fbbf24', '#fb7185', '#ffffff'], shapes: ['star', 'wave_arc'] },
+          brave_bird: { cols: ['#38bdf8', '#e0f2fe', '#ffffff', '#7dd3fc'], shapes: ['feather', 'wind'] },
+          air_slash: { cols: ['#7dd3fc', '#bae6fd', '#ffffff', '#38bdf8'], shapes: ['wind', 'feather'] },
+          tailwind_grace: { cols: ['#7dd3fc', '#e0f2fe', '#a7f3d0', '#ffffff'], shapes: ['feather', 'wind'] },
+          sludge_wave: { cols: ['#a855f7', '#4ade80', '#c084fc', '#e9d5ff'], shapes: ['venom', 'bubble'] },
+          poison_jab: { cols: ['#a855f7', '#c084fc', '#4ade80', '#e9d5ff'], shapes: ['venom', 'star'] },
+          malignant_chain: { cols: ['#a855f7', '#f43f5e', '#4ade80', '#e9d5ff'], shapes: ['sigil', 'venom'] },
+          earthquake: { cols: ['#d97706', '#f59e0b', '#a8a29e', '#fde68a'], shapes: ['stone', 'dust'] },
+          earth_power: { cols: ['#f59e0b', '#ef4444', '#fde68a', '#b45309'], shapes: ['ember', 'stone'] },
+          headlong_rush: { cols: ['#b45309', '#f59e0b', '#ef4444', '#fde68a'], shapes: ['stone', 'dust'] },
+          bug_buzz: { cols: ['#84cc16', '#34d399', '#fde047', '#ffffff'], shapes: ['wave_arc', 'note'] },
+          x_scissor: { cols: ['#84cc16', '#bef264', '#34d399', '#ffffff'], shapes: ['slash', 'wave_arc'] },
+          quiver_step: { cols: ['#a3e635', '#f472b6', '#fde047', '#ffffff'], shapes: ['petal', 'star'] },
+          flash_cannon: { cols: ['#e2e8f0', '#38bdf8', '#94a3b8', '#ffffff'], shapes: ['ray', 'crystal'] },
+          gigaton_hammer: { cols: ['#f472b6', '#e2e8f0', '#94a3b8', '#ffffff'], shapes: ['hexagon', 'star'] },
+          king_shield: { cols: ['#fbbf24', '#e2e8f0', '#ef4444', '#ffffff'], shapes: ['hexagon', 'crystal'] },
+          dark_pulse: { cols: ['#7e22ce', '#6366f1', '#c084fc', '#1e1b4b'], shapes: ['crescent', 'sigil'] },
+          kowtow_cleave: { cols: ['#6366f1', '#ef4444', '#fbbf24', '#e9d5ff'], shapes: ['slash', 'crescent'] },
+          lunar_shroud: { cols: ['#818cf8', '#c084fc', '#e9d5ff', '#ffffff'], shapes: ['crescent', 'wisp'] },
+          dazzling_gleam: { cols: ['#f472b6', '#fde047', '#a855f7', '#ffffff'], shapes: ['star', 'crystal'] },
+          play_rough: { cols: ['#f472b6', '#f9a8d4', '#fde047', '#ffffff'], shapes: ['heart', 'dust'] },
+          geomancy_bloom: { cols: ['#f472b6', '#38bdf8', '#fde047', '#4ade80'], shapes: ['petal', 'star'] },
+          water_shuriken: { cols: ['#38bdf8', '#bae6fd', '#0284c7', '#ffffff'], shapes: ['shuriken', 'bubble'] },
+          dragon_darts: { cols: ['#6366f1', '#22d3ee', '#f43f5e', '#fde047'], shapes: ['lance', 'dragonflame'] },
+          bitter_blade: { cols: ['#ef4444', '#a855f7', '#fde047', '#fb7185'], shapes: ['ember', 'slash'] },
+          electro_drift: { cols: ['#22d3ee', '#a855f7', '#fde047', '#ffffff'], shapes: ['lightning', 'ray'] },
         };
         const ov = moveOverrides[moveId];
         if (ov) {
@@ -3653,12 +3897,487 @@ export class BattleEngine {
     }
   }
 
+  _spawnSprint8Impact(moveId, center, pedestal, lifeScale) {
+    switch (moveId) {
+      case 'close_combat': {
+        for (let i = 0; i < 6; i++) {
+          const ang = (Math.PI * 2 * i) / 6 + (Math.random() - 0.5) * 0.3;
+          this.particles.push({
+            x: center.x + (Math.random() - 0.5) * 28,
+            y: center.y + (Math.random() - 0.5) * 22,
+            vx: Math.cos(ang) * 95,
+            vy: Math.sin(ang) * 95,
+            gravity: 0,
+            life: -(i * 0.02),
+            maxLife: 0.34 * lifeScale,
+            color: i % 2 === 0 ? '#ef4444' : '#fbbf24',
+            size: 13 + Math.random() * 4,
+            rotation: ang,
+            spin: 0,
+            shape: 'wave_arc',
+          });
+        }
+        return true;
+      }
+      case 'vacuum_wave': {
+        for (let r = 0; r < 2; r++) {
+          this.particles.push({
+            x: center.x,
+            y: center.y,
+            vx: 0,
+            vy: 0,
+            gravity: 0,
+            life: -(r * 0.045),
+            maxLife: 0.38 * lifeScale,
+            color: r === 0 ? '#f87171' : '#bae6fd',
+            size: 16,
+            maxRadius: 92 + r * 28,
+            lineWidth: 3.4,
+            shape: 'ring',
+          });
+        }
+        return true;
+      }
+      case 'collision_course': {
+        this.particles.push({
+          x: center.x,
+          y: center.y,
+          vx: 0,
+          vy: 0,
+          gravity: 0,
+          life: 0,
+          maxLife: 0.48 * lifeScale,
+          color: '#fbbf24',
+          size: 20,
+          maxRadius: 118,
+          lineWidth: 4.5,
+          shape: 'ring',
+        });
+        for (let i = 0; i < 10; i++) {
+          const ang = (Math.PI * 2 * i) / 10;
+          this.particles.push({
+            x: center.x,
+            y: center.y,
+            vx: Math.cos(ang) * 165,
+            vy: Math.sin(ang) * 165,
+            gravity: 35,
+            life: 0,
+            maxLife: 0.44 * lifeScale,
+            color: i % 2 === 0 ? '#dc2626' : '#fbbf24',
+            size: 9,
+            rotation: ang,
+            spin: 6,
+            shape: i % 2 === 0 ? 'ray' : 'star',
+          });
+        }
+        return true;
+      }
+      case 'brave_bird': {
+        for (let i = 0; i < 12; i++) {
+          const ang = (Math.PI * 2 * i) / 12;
+          this.particles.push({
+            x: center.x + (Math.random() - 0.5) * 20,
+            y: center.y + (Math.random() - 0.5) * 20,
+            vx: Math.cos(ang) * 140,
+            vy: Math.sin(ang) * 110 - 30,
+            gravity: -28,
+            life: -(i * 0.014),
+            maxLife: 0.48 * lifeScale,
+            color: i % 3 === 0 ? '#ffffff' : i % 2 === 0 ? '#bae6fd' : '#38bdf8',
+            size: 7.5 + Math.random() * 2.5,
+            rotation: ang,
+            spin: (Math.random() - 0.5) * 8,
+            shape: 'feather',
+          });
+        }
+        return true;
+      }
+      case 'air_slash': {
+        [-0.75, 0.75, 0].forEach((ang, idx) => {
+          this.particles.push({
+            x: center.x,
+            y: center.y,
+            vx: Math.cos(ang) * 75,
+            vy: Math.sin(ang) * 75,
+            gravity: 0,
+            life: -(idx * 0.025),
+            maxLife: 0.36 * lifeScale,
+            color: idx === 2 ? '#ffffff' : '#7dd3fc',
+            size: 16,
+            rotation: ang,
+            spin: 2.5,
+            shape: 'wind',
+          });
+        });
+        return true;
+      }
+      case 'tailwind_grace': {
+        for (let i = 0; i < 8; i++) {
+          const ang = (Math.PI * 2 * i) / 8;
+          this.particles.push({
+            x: center.x + Math.cos(ang) * 24,
+            y: center.y + 18,
+            vx: Math.cos(ang) * 48,
+            vy: -78 - Math.random() * 44,
+            gravity: -25,
+            life: -(i * 0.02),
+            maxLife: 0.56 * lifeScale,
+            color: i % 2 === 0 ? '#bae6fd' : '#a7f3d0',
+            size: 7,
+            rotation: ang,
+            spin: 5,
+            shape: 'feather',
+          });
+        }
+        return true;
+      }
+      case 'sludge_wave':
+      case 'poison_jab':
+      case 'malignant_chain': {
+        const dropletCount = moveId === 'sludge_wave' ? 14 : 9;
+        for (let i = 0; i < dropletCount; i++) {
+          const ang = (Math.PI * 2 * i) / dropletCount + Math.random() * 0.25;
+          const spd = 70 + Math.random() * 115;
+          this.particles.push({
+            x: center.x + (Math.random() - 0.5) * 20,
+            y: center.y + (Math.random() - 0.5) * 20,
+            vx: Math.cos(ang) * spd,
+            vy: Math.sin(ang) * spd - 45,
+            gravity: 210,
+            life: -(i * 0.015),
+            maxLife: 0.52 * lifeScale,
+            color: i % 3 === 0 ? '#4ade80' : i % 2 === 0 ? '#c084fc' : '#a855f7',
+            size: 6 + Math.random() * 3.5,
+            rotation: ang,
+            spin: 4,
+            shape: moveId === 'malignant_chain' && i % 2 === 0 ? 'sigil' : 'venom',
+          });
+        }
+        return true;
+      }
+      case 'earthquake':
+      case 'headlong_rush': {
+        this.spawnImpactDust(pedestal, 16, lifeScale);
+        for (let i = 0; i < 10; i++) {
+          const sideSign = i % 2 === 0 ? -1 : 1;
+          this.particles.push({
+            x: pedestal.x + sideSign * (12 + Math.random() * 38),
+            y: pedestal.y - 4,
+            vx: sideSign * (42 + Math.random() * 68),
+            vy: -135 - Math.random() * 85,
+            gravity: 340,
+            life: -(i * 0.018),
+            maxLife: 0.54 * lifeScale,
+            color: i % 3 === 0 ? '#f59e0b' : i % 2 === 0 ? '#d97706' : '#78716c',
+            size: 7 + Math.random() * 5,
+            rotation: Math.random() * Math.PI,
+            spin: (Math.random() - 0.5) * 10,
+            shape: 'stone',
+          });
+        }
+        return true;
+      }
+      case 'earth_power': {
+        for (let i = -1; i <= 1; i++) {
+          this.particles.push({
+            x: pedestal.x + i * 24,
+            y: pedestal.y,
+            vx: i * 18,
+            vy: -165 - Math.random() * 45,
+            gravity: 110,
+            life: -(Math.abs(i) * 0.03),
+            maxLife: 0.52 * lifeScale,
+            color: i === 0 ? '#fde047' : '#f59e0b',
+            size: 9 + Math.random() * 3,
+            rotation: 0,
+            spin: 6,
+            shape: 'ember',
+          });
+        }
+        return true;
+      }
+      case 'bug_buzz': {
+        for (let r = 0; r < 3; r++) {
+          this.particles.push({
+            x: center.x,
+            y: center.y,
+            vx: 0,
+            vy: 0,
+            gravity: 0,
+            life: -(r * 0.055),
+            maxLife: 0.45 * lifeScale,
+            color: r % 2 === 0 ? '#84cc16' : '#34d399',
+            size: 14,
+            maxRadius: 68 + r * 26,
+            lineWidth: 3.2,
+            shape: 'ring',
+          });
+        }
+        return true;
+      }
+      case 'x_scissor': {
+        [-0.785, 0.785].forEach((ang, idx) => {
+          this.particles.push({
+            x: center.x,
+            y: center.y,
+            vx: Math.cos(ang) * 48,
+            vy: Math.sin(ang) * 48,
+            gravity: 0,
+            life: -(idx * 0.03),
+            maxLife: 0.34 * lifeScale,
+            color: idx === 0 ? '#bef264' : '#84cc16',
+            size: 19,
+            rotation: ang,
+            spin: 0,
+            shape: 'slash',
+          });
+        });
+        return true;
+      }
+      case 'quiver_step': {
+        for (let i = 0; i < 10; i++) {
+          const ang = (Math.PI * 2 * i) / 10;
+          this.particles.push({
+            x: center.x + Math.cos(ang) * 22,
+            y: center.y + Math.sin(ang) * 14,
+            vx: Math.cos(ang) * 56,
+            vy: -55 - Math.random() * 45,
+            gravity: -28,
+            life: -(i * 0.02),
+            maxLife: 0.56 * lifeScale,
+            color: i % 3 === 0 ? '#f472b6' : i % 2 === 0 ? '#a3e635' : '#fde047',
+            size: 6.5,
+            rotation: ang,
+            spin: 7,
+            shape: 'petal',
+          });
+        }
+        return true;
+      }
+      case 'flash_cannon': {
+        for (let i = 0; i < 8; i++) {
+          const ang = (Math.PI * 2 * i) / 8;
+          this.particles.push({
+            x: center.x,
+            y: center.y,
+            vx: Math.cos(ang) * 145,
+            vy: Math.sin(ang) * 145,
+            gravity: 0,
+            life: 0,
+            maxLife: 0.38 * lifeScale,
+            color: i % 2 === 0 ? '#e2e8f0' : '#38bdf8',
+            size: 7.5,
+            length: 28,
+            rotation: ang,
+            spin: 0,
+            shape: 'ray',
+          });
+        }
+        return true;
+      }
+      case 'gigaton_hammer': {
+        this.spawnImpactDust(pedestal, 14, lifeScale);
+        this.particles.push({
+          x: center.x,
+          y: center.y + 8,
+          vx: 0,
+          vy: 0,
+          gravity: 0,
+          life: 0,
+          maxLife: 0.46 * lifeScale,
+          color: '#f472b6',
+          size: 22,
+          maxRadius: 114,
+          lineWidth: 4.5,
+          shape: 'ring',
+        });
+        for (let i = 0; i < 8; i++) {
+          const ang = (Math.PI * 2 * i) / 8;
+          this.particles.push({
+            x: center.x,
+            y: center.y,
+            vx: Math.cos(ang) * 135,
+            vy: Math.sin(ang) * 105 - 35,
+            gravity: 220,
+            life: 0,
+            maxLife: 0.46 * lifeScale,
+            color: i % 2 === 0 ? '#e2e8f0' : '#f472b6',
+            size: 8.5,
+            rotation: ang,
+            spin: 6,
+            shape: 'hexagon',
+          });
+        }
+        return true;
+      }
+      case 'king_shield': {
+        for (let i = 0; i < 6; i++) {
+          const ang = (Math.PI * 2 * i) / 6;
+          this.particles.push({
+            x: center.x + Math.cos(ang) * 34,
+            y: center.y + Math.sin(ang) * 26,
+            vx: Math.cos(ang) * 22,
+            vy: Math.sin(ang) * 18 - 14,
+            gravity: -10,
+            life: -(i * 0.025),
+            maxLife: 0.56 * lifeScale,
+            color: i % 2 === 0 ? '#fbbf24' : '#e2e8f0',
+            size: 8.5,
+            rotation: ang,
+            spin: 2.5,
+            shape: 'hexagon',
+          });
+        }
+        return true;
+      }
+      case 'dark_pulse':
+      case 'kowtow_cleave':
+      case 'lunar_shroud': {
+        for (let i = 0; i < 9; i++) {
+          const ang = (Math.PI * 2 * i) / 9;
+          this.particles.push({
+            x: center.x + (moveId === 'lunar_shroud' ? Math.cos(ang) * 26 : 0),
+            y: center.y + (moveId === 'lunar_shroud' ? Math.sin(ang) * 18 : 0),
+            vx: Math.cos(ang) * (moveId === 'lunar_shroud' ? 42 : 120),
+            vy: Math.sin(ang) * (moveId === 'lunar_shroud' ? 32 : 110),
+            gravity: -18,
+            life: -(i * 0.02),
+            maxLife: 0.46 * lifeScale,
+            color: i % 3 === 0 ? '#ef4444' : i % 2 === 0 ? '#a855f7' : '#818cf8',
+            size: 8.5,
+            rotation: ang,
+            spin: 6.5,
+            shape: moveId === 'kowtow_cleave' && i % 2 === 0 ? 'slash' : 'crescent',
+          });
+        }
+        return true;
+      }
+      case 'dazzling_gleam':
+      case 'play_rough':
+      case 'geomancy_bloom': {
+        const rainbow = ['#f472b6', '#fde047', '#38bdf8', '#4ade80', '#c084fc'];
+        for (let i = 0; i < 12; i++) {
+          const ang = (Math.PI * 2 * i) / 12;
+          this.particles.push({
+            x: center.x,
+            y: center.y,
+            vx: Math.cos(ang) * 115,
+            vy: Math.sin(ang) * 105 - 24,
+            gravity: -26,
+            life: -(i * 0.015),
+            maxLife: 0.52 * lifeScale,
+            color: rainbow[i % rainbow.length],
+            size: 7 + Math.random() * 2.5,
+            rotation: ang,
+            spin: 7,
+            shape: moveId === 'play_rough' ? 'heart' : moveId === 'geomancy_bloom' ? 'petal' : 'star',
+          });
+        }
+        return true;
+      }
+      case 'water_shuriken': {
+        for (let i = 0; i < 7; i++) {
+          const ang = (Math.PI * 2 * i) / 7;
+          this.particles.push({
+            x: center.x,
+            y: center.y,
+            vx: Math.cos(ang) * 135,
+            vy: Math.sin(ang) * 115,
+            gravity: 25,
+            life: -(i * 0.025),
+            maxLife: 0.42 * lifeScale,
+            color: i % 2 === 0 ? '#38bdf8' : '#ffffff',
+            size: 7.5,
+            rotation: ang,
+            spin: 14,
+            shape: 'shuriken',
+          });
+        }
+        return true;
+      }
+      case 'dragon_darts': {
+        [-18, 18].forEach((offset, idx) => {
+          this.particles.push({
+            x: center.x + offset,
+            y: center.y - idx * 8,
+            vx: offset * 2.8,
+            vy: -38,
+            gravity: 0,
+            life: -(idx * 0.05),
+            maxLife: 0.44 * lifeScale,
+            color: idx === 0 ? '#22d3ee' : '#f43f5e',
+            size: 10,
+            rotation: idx === 0 ? -0.4 : 0.4,
+            spin: 0,
+            shape: 'lance',
+          });
+        });
+        return true;
+      }
+      case 'bitter_blade': {
+        [-0.75, 0.75].forEach((ang, idx) => {
+          this.particles.push({
+            x: center.x,
+            y: center.y,
+            vx: Math.cos(ang) * 44,
+            vy: Math.sin(ang) * 44,
+            gravity: 0,
+            life: -(idx * 0.025),
+            maxLife: 0.36 * lifeScale,
+            color: idx === 0 ? '#ef4444' : '#a855f7',
+            size: 18,
+            rotation: ang,
+            spin: 0,
+            shape: 'slash',
+          });
+        });
+        for (let i = 0; i < 8; i++) {
+          const ang = (Math.PI * 2 * i) / 8;
+          this.particles.push({
+            x: center.x,
+            y: center.y,
+            vx: Math.cos(ang) * 85,
+            vy: -60 - Math.random() * 55,
+            gravity: -65,
+            life: 0,
+            maxLife: 0.48 * lifeScale,
+            color: i % 2 === 0 ? '#ef4444' : '#c084fc',
+            size: 6.5,
+            shape: 'ember',
+          });
+        }
+        return true;
+      }
+      case 'electro_drift': {
+        for (let i = 0; i < 10; i++) {
+          const ang = (Math.PI * 2 * i) / 10;
+          this.particles.push({
+            x: center.x,
+            y: center.y,
+            vx: Math.cos(ang) * 165,
+            vy: Math.sin(ang) * 145,
+            gravity: 0,
+            life: 0,
+            maxLife: 0.4 * lifeScale,
+            color: i % 3 === 0 ? '#a855f7' : i % 2 === 0 ? '#22d3ee' : '#fde047',
+            size: 8.5,
+            rotation: ang,
+            spin: 8,
+            shape: i % 2 === 0 ? 'lightning' : 'ray',
+          });
+        }
+        return true;
+      }
+      default:
+        return false;
+    }
+  }
+
   spawnPhysicalElementalTrail(attackerSide, defenderSide, move, pace) {
     if (!move || (move.type === 'normal' && move.fx !== 'wind' && move.id !== 'champion_strike')) return;
     const start = this.getSpriteCenter(attackerSide);
     const target = this.getSpriteCenter(defenderSide);
-    const typesMap = getTypesMap();
-    const typeMeta = typesMap[move.type] || typesMap.normal || FALLBACK_TYPES.normal;
+    const typeMeta = resolveTypeMeta(move.type);
     const lifeScale = pace?.particleLifeScale || 1.2;
     const shape = resolveMoveParticleShape(move);
     const dx = target.x - start.x;
@@ -3880,6 +4599,57 @@ export class BattleEngine {
       } else if (move.id === 'rift_claw') {
         color = s % 3 === 0 ? '#67e8f9' : s % 2 === 0 ? '#ec4899' : '#6366f1';
         pShape = s % 2 === 0 ? 'slash' : 'sigil';
+      } else if (move.id === 'close_combat') {
+        color = s % 2 === 0 ? '#ef4444' : '#fbbf24';
+        pShape = s % 2 === 0 ? 'wave_arc' : 'star';
+      } else if (move.id === 'collision_course') {
+        color = s % 3 === 0 ? '#ffffff' : s % 2 === 0 ? '#fbbf24' : '#dc2626';
+        pShape = s % 2 === 0 ? 'ray' : 'star';
+      } else if (move.id === 'brave_bird') {
+        color = s % 3 === 0 ? '#ffffff' : s % 2 === 0 ? '#38bdf8' : '#bae6fd';
+        pShape = s % 2 === 0 ? 'feather' : 'wind';
+      } else if (move.id === 'poison_jab') {
+        color = s % 3 === 0 ? '#4ade80' : s % 2 === 0 ? '#c084fc' : '#a855f7';
+        pShape = s % 2 === 0 ? 'venom' : 'lance';
+      } else if (move.id === 'earthquake' || move.id === 'headlong_rush') {
+        color = move.id === 'headlong_rush' && s % 2 === 0 ? '#ef4444' : (s % 2 === 0 ? '#d97706' : '#f59e0b');
+        pShape = s % 2 === 0 ? 'stone' : 'dust';
+      } else if (move.id === 'x_scissor') {
+        color = s % 2 === 0 ? '#84cc16' : '#bef264';
+        pShape = s % 2 === 0 ? 'slash' : 'wave_arc';
+      } else if (move.id === 'gigaton_hammer') {
+        color = s % 2 === 0 ? '#f472b6' : '#e2e8f0';
+        pShape = s % 2 === 0 ? 'hexagon' : 'star';
+      } else if (move.id === 'kowtow_cleave') {
+        color = s % 3 === 0 ? '#fbbf24' : s % 2 === 0 ? '#ef4444' : '#6366f1';
+        pShape = s % 2 === 0 ? 'slash' : 'crescent';
+      } else if (move.id === 'play_rough') {
+        color = s % 3 === 0 ? '#fde047' : s % 2 === 0 ? '#f472b6' : '#f9a8d4';
+        pShape = s % 2 === 0 ? 'heart' : 'dust';
+      } else if (move.id === 'dragon_darts') {
+        const dist = Math.max(1, Math.hypot(dx, dy));
+        const perpX = -dy / dist;
+        const perpY = dx / dist;
+        [-10, 10].forEach((off, laneIdx) => {
+          this.particles.push({
+            x: px + perpX * off,
+            y: py + perpY * off,
+            vx: Math.cos(angle) * 90,
+            vy: Math.sin(angle) * 90,
+            gravity: 0,
+            life: -(s * 0.012),
+            maxLife: 0.28 * Math.min(1.4, lifeScale),
+            color: laneIdx === 0 ? '#22d3ee' : '#f43f5e',
+            size: 8.5,
+            rotation: angle,
+            spin: 0,
+            shape: 'lance',
+          });
+        });
+        continue;
+      } else if (move.id === 'bitter_blade') {
+        color = s % 3 === 0 ? '#fde047' : s % 2 === 0 ? '#ef4444' : '#a855f7';
+        pShape = s % 2 === 0 ? 'slash' : 'ember';
       }
       this.particles.push({
         x: px + (Math.random() - 0.5) * 16,
@@ -3902,8 +4672,7 @@ export class BattleEngine {
     const pace = this.getPaceConfig();
     const start = this.getSpriteCenter(attackerSide);
     const target = this.getSpriteCenter(defenderSide);
-    const typesMap = getTypesMap();
-    const typeMeta = typesMap[move.type] || typesMap.normal || FALLBACK_TYPES.normal;
+    const typeMeta = resolveTypeMeta(move.type);
 
     const shape = resolveMoveParticleShape(move);
     const steps = pace.streamSteps || 14;
@@ -4185,6 +4954,10 @@ export class BattleEngine {
         continue;
       }
 
+      if (this._emitSprint8StreamStep(move, s, steps, t, px, py, start, target, dx, dy, dist, perpX, perpY, lifeScale)) {
+        if (s < steps - 1) await this.wait(stepWaitMs, sessionId);
+        continue;
+      }
       if (this._emitSprint6StreamStep(move, s, steps, t, px, py, start, target, dx, dy, dist, perpX, perpY, lifeScale)) {
         if (s < steps - 1) await this.wait(stepWaitMs, sessionId);
         continue;
@@ -4247,8 +5020,8 @@ export class BattleEngine {
           x: px + spread,
           y: py + (Math.random() - 0.5) * 16,
           vx: Math.cos(angle) * speed,
-          vy: Math.sin(angle) * speed - (particleShape === 'bubble' || particleShape === 'ember' || particleShape === 'wisp' || particleShape === 'note' ? 32 : 0),
-          gravity: particleShape === 'bubble' || particleShape === 'ember' || particleShape === 'wisp' || particleShape === 'note' ? -55 : 22,
+          vy: Math.sin(angle) * speed - (particleShape === 'bubble' || particleShape === 'ember' || particleShape === 'wisp' || particleShape === 'note' || particleShape === 'feather' ? 32 : 0),
+          gravity: particleShape === 'bubble' || particleShape === 'ember' || particleShape === 'wisp' || particleShape === 'note' || particleShape === 'feather' ? -55 : 22,
           life: 0,
           maxLife: (0.34 + Math.random() * 0.18) * Math.min(1.4, lifeScale),
           color: particleColor,
@@ -4675,6 +5448,266 @@ export class BattleEngine {
           spin: 8,
           shape: idx === 0 ? 'dragonflame' : 'star',
         });
+      });
+      return true;
+    }
+
+    return false;
+  }
+
+  _emitSprint8StreamStep(move, s, steps, t, px, py, start, target, dx, dy, dist, perpX, perpY, lifeScale) {
+    const id = move.id;
+    const angle = Math.atan2(dy, dx);
+    if (id === 'vacuum_wave') {
+      const wave = Math.sin(t * Math.PI * 3) * 14;
+      this.particles.push({
+        x: px + perpX * wave,
+        y: py + perpY * wave,
+        vx: (dx / dist) * 115,
+        vy: (dy / dist) * 115,
+        gravity: 0,
+        life: 0,
+        maxLife: 0.34 * Math.min(1.4, lifeScale),
+        color: s % 2 === 0 ? '#f87171' : '#bae6fd',
+        size: 11,
+        rotation: angle,
+        spin: 0,
+        shape: 'wave_arc',
+      });
+      return true;
+    }
+
+    if (id === 'air_slash') {
+      [-12, 12].forEach((off, idx) => {
+        this.particles.push({
+          x: px + perpX * off,
+          y: py + perpY * off,
+          vx: (dx / dist) * 95,
+          vy: (dy / dist) * 95,
+          gravity: 0,
+          life: 0,
+          maxLife: 0.36 * Math.min(1.4, lifeScale),
+          color: (s + idx) % 2 === 0 ? '#7dd3fc' : '#ffffff',
+          size: idx === 0 ? 11 : 7,
+          rotation: angle + (idx === 0 ? -0.35 : 0.35),
+          spin: idx === 0 ? 4 : 9,
+          shape: idx === 0 ? 'wind' : 'feather',
+        });
+      });
+      return true;
+    }
+
+    if (id === 'sludge_wave') {
+      const cols = ['#a855f7', '#4ade80', '#c084fc'];
+      for (let k = -1; k <= 1; k++) {
+        const swell = Math.sin(t * Math.PI * 3 + k) * 18;
+        this.particles.push({
+          x: px + perpX * (swell + k * 12),
+          y: py + perpY * (swell + k * 12),
+          vx: (dx / dist) * 62,
+          vy: (dy / dist) * 62 - 14,
+          gravity: 40,
+          life: 0,
+          maxLife: 0.42 * Math.min(1.4, lifeScale),
+          color: cols[(s + k + 1) % cols.length],
+          size: k === 0 ? 8 : 6,
+          rotation: angle,
+          spin: 3,
+          shape: k === 0 ? 'venom' : 'bubble',
+        });
+      }
+      return true;
+    }
+
+    if (id === 'malignant_chain') {
+      const chainX = start.x + dx * t;
+      const chainY = start.y + dy * t + Math.sin(t * Math.PI * 5) * 14;
+      this.particles.push({
+        x: chainX,
+        y: chainY,
+        vx: (dx / dist) * 55,
+        vy: (dy / dist) * 55,
+        gravity: 0,
+        life: 0,
+        maxLife: 0.42 * Math.min(1.4, lifeScale),
+        color: s % 2 === 0 ? '#c084fc' : '#f43f5e',
+        size: 7.5,
+        rotation: angle + s * 0.6,
+        spin: 8,
+        shape: s % 3 === 0 ? 'venom' : 'sigil',
+      });
+      return true;
+    }
+
+    if (id === 'earth_power') {
+      const gx = start.x + dx * Math.min(1, t * 1.05);
+      const gy = target.y + 34 - t * 28;
+      this.particles.push({
+        x: gx + (Math.random() - 0.5) * 26,
+        y: gy,
+        vx: (Math.random() - 0.5) * 32,
+        vy: -135 - Math.random() * 55,
+        gravity: 95,
+        life: 0,
+        maxLife: 0.44 * Math.min(1.4, lifeScale),
+        color: s % 3 === 0 ? '#fde047' : s % 2 === 0 ? '#ef4444' : '#d97706',
+        size: 7.5,
+        rotation: Math.random() * Math.PI,
+        spin: 6,
+        shape: s % 2 === 0 ? 'ember' : 'stone',
+      });
+      return true;
+    }
+
+    if (id === 'bug_buzz') {
+      if (s % 2 === 0) {
+        this.particles.push({
+          x: px,
+          y: py,
+          vx: (dx / dist) * 90,
+          vy: (dy / dist) * 90,
+          gravity: 0,
+          life: 0,
+          maxLife: 0.34 * Math.min(1.4, lifeScale),
+          color: s % 4 === 0 ? '#84cc16' : '#34d399',
+          size: 10,
+          maxRadius: 34 + t * 22,
+          lineWidth: 2.8,
+          shape: 'ring',
+        });
+      }
+      this.particles.push({
+        x: px + perpX * Math.sin(t * Math.PI * 4) * 14,
+        y: py + perpY * Math.sin(t * Math.PI * 4) * 14,
+        vx: (dx / dist) * 80,
+        vy: (dy / dist) * 80,
+        gravity: 0,
+        life: 0,
+        maxLife: 0.34 * Math.min(1.4, lifeScale),
+        color: '#bef264',
+        size: 8.5,
+        rotation: angle,
+        spin: 0,
+        shape: 'wave_arc',
+      });
+      return true;
+    }
+
+    if (id === 'flash_cannon') {
+      const beamX = start.x + dx * t;
+      const beamY = start.y + dy * t;
+      [-10, 0, 10].forEach((off, idx) => {
+        this.particles.push({
+          x: beamX + perpX * off,
+          y: beamY + perpY * off,
+          vx: (dx / dist) * 115,
+          vy: (dy / dist) * 115,
+          gravity: 0,
+          life: 0,
+          maxLife: 0.28 * Math.min(1.4, lifeScale),
+          color: idx === 1 ? '#ffffff' : s % 2 === 0 ? '#38bdf8' : '#e2e8f0',
+          size: idx === 1 ? 8 : 6,
+          length: 26,
+          rotation: angle,
+          spin: 0,
+          shape: idx === 1 ? 'ray' : 'crystal',
+        });
+      });
+      return true;
+    }
+
+    if (id === 'dark_pulse') {
+      if (s % 2 === 0) {
+        this.particles.push({
+          x: px,
+          y: py,
+          vx: (dx / dist) * 84,
+          vy: (dy / dist) * 84,
+          gravity: 0,
+          life: 0,
+          maxLife: 0.38 * Math.min(1.4, lifeScale),
+          color: s % 4 === 0 ? '#7e22ce' : '#6366f1',
+          size: 10,
+          maxRadius: 36 + t * 24,
+          lineWidth: 3.0,
+          shape: 'ring',
+        });
+      }
+      this.particles.push({
+        x: px + (Math.random() - 0.5) * 18,
+        y: py + (Math.random() - 0.5) * 18,
+        vx: (dx / dist) * 72,
+        vy: (dy / dist) * 72,
+        gravity: -12,
+        life: 0,
+        maxLife: 0.36 * Math.min(1.4, lifeScale),
+        color: s % 2 === 0 ? '#c084fc' : '#818cf8',
+        size: 7.5,
+        rotation: angle,
+        spin: 7,
+        shape: 'crescent',
+      });
+      return true;
+    }
+
+    if (id === 'dazzling_gleam') {
+      const cols = ['#f472b6', '#fde047', '#ffffff', '#c084fc'];
+      for (let k = -1; k <= 1; k++) {
+        this.particles.push({
+          x: px + perpX * k * 14,
+          y: py + perpY * k * 14,
+          vx: (dx / dist) * 85 + (Math.random() - 0.5) * 35,
+          vy: (dy / dist) * 85 + (Math.random() - 0.5) * 35,
+          gravity: -16,
+          life: 0,
+          maxLife: 0.38 * Math.min(1.4, lifeScale),
+          color: cols[(s + k + 1) % cols.length],
+          size: k === 0 ? 7.5 : 5.5,
+          rotation: angle + k * 0.6,
+          spin: 9,
+          shape: k === 0 ? 'star' : 'crystal',
+        });
+      }
+      return true;
+    }
+
+    if (id === 'water_shuriken') {
+      const lane = (s % 3) - 1;
+      this.particles.push({
+        x: start.x + dx * t + perpX * lane * 12,
+        y: start.y + dy * t + perpY * lane * 12,
+        vx: (dx / dist) * 145,
+        vy: (dy / dist) * 145,
+        gravity: 0,
+        life: 0,
+        maxLife: 0.32 * Math.min(1.4, lifeScale),
+        color: s % 2 === 0 ? '#38bdf8' : '#e0f2fe',
+        size: 8,
+        rotation: angle,
+        spin: 18,
+        shape: 'shuriken',
+      });
+      return true;
+    }
+
+    if (id === 'electro_drift') {
+      const zigzag = ((s % 2 === 0 ? 1 : -1) * 18) * (1 - Math.abs(t - 0.5));
+      const bx = start.x + dx * t + perpX * zigzag;
+      const by = start.y + dy * t + perpY * zigzag;
+      this.particles.push({
+        x: bx,
+        y: by,
+        vx: (dx / dist) * 110,
+        vy: (dy / dist) * 110,
+        gravity: 0,
+        life: 0,
+        maxLife: 0.3 * Math.min(1.4, lifeScale),
+        color: s % 3 === 0 ? '#a855f7' : s % 2 === 0 ? '#22d3ee' : '#fde047',
+        size: 8,
+        length: 28,
+        rotation: angle,
+        spin: 8,
+        shape: s % 2 === 0 ? 'lightning' : 'ray',
       });
       return true;
     }
@@ -5167,6 +6200,55 @@ export class BattleEngine {
         ctx.lineWidth = Math.max(1, 1.5 * (1 - progress * 0.6));
         ctx.beginPath();
         ctx.arc(0, 0, r * 0.78, -Math.PI * 0.32, Math.PI * 0.32);
+        ctx.stroke();
+      } else if (p.shape === 'shuriken') {
+        ctx.rotate((p.rotation || 0) + p.life * 16);
+        const r = p.size * (1.35 - progress * 0.15);
+        ctx.fillStyle = p.color || '#38bdf8';
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 1.1;
+        ctx.beginPath();
+        for (let b = 0; b < 4; b++) {
+          const a0 = (Math.PI * b) / 2;
+          const aMid = a0 + Math.PI / 4;
+          const xTip = Math.cos(a0) * r;
+          const yTip = Math.sin(a0) * r;
+          const xIn = Math.cos(aMid) * (r * 0.32);
+          const yIn = Math.sin(aMid) * (r * 0.32);
+          if (b === 0) ctx.moveTo(xTip, yTip);
+          else ctx.lineTo(xTip, yTip);
+          ctx.lineTo(xIn, yIn);
+        }
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+      } else if (p.shape === 'feather') {
+        ctx.rotate(p.rotation || 0);
+        const len = p.size * 1.65;
+        const w = p.size * 0.52;
+        ctx.fillStyle = p.color || '#bae6fd';
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.ellipse(0, 0, len, w, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(-len * 0.85, 0);
+        ctx.lineTo(len * 0.85, 0);
+        ctx.stroke();
+      } else if (p.shape === 'venom') {
+        ctx.rotate(p.rotation || 0);
+        const s = p.size * (1.15 - progress * 0.12);
+        ctx.fillStyle = p.color || '#a855f7';
+        ctx.strokeStyle = '#e9d5ff';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(0, -s * 1.25);
+        ctx.bezierCurveTo(s * 0.85, -s * 0.1, s * 0.9, s * 0.95, 0, s * 1.15);
+        ctx.bezierCurveTo(-s * 0.9, s * 0.95, -s * 0.85, -s * 0.1, 0, -s * 1.25);
+        ctx.closePath();
+        ctx.fill();
         ctx.stroke();
       } else if (p.shape === 'star' || p.star) {
         ctx.rotate(p.rotation || p.life * 6);
@@ -5834,6 +6916,190 @@ export class BattleEngine {
         ctx.restore();
         break;
       }
+      case 'orichalcum_burst': {
+        ctx.save();
+        ctx.translate(x, y);
+        const rad = 22 + progress * 46;
+        ctx.strokeStyle = c1;
+        ctx.lineWidth = 3.2;
+        ctx.beginPath();
+        ctx.arc(0, 0, rad, 0, Math.PI * 2);
+        ctx.stroke();
+        for (let i = 0; i < 8; i++) {
+          const ang = (Math.PI * 2 * i) / 8 + progress * 2.8;
+          ctx.strokeStyle = i % 2 === 0 ? c0 : c2;
+          ctx.lineWidth = 2.8;
+          ctx.beginPath();
+          ctx.moveTo(Math.cos(ang) * 18, Math.sin(ang) * 18);
+          ctx.lineTo(Math.cos(ang) * (rad + 14), Math.sin(ang) * (rad + 14));
+          ctx.stroke();
+        }
+        ctx.restore();
+        break;
+      }
+      case 'skyward_feathers': {
+        ctx.save();
+        ctx.translate(x, y);
+        for (let i = 0; i < 5; i++) {
+          const ang = -Math.PI * 0.8 + i * 0.4 + Math.sin(progress * 6 + i) * 0.14;
+          const dist = 28 + progress * 34;
+          ctx.save();
+          ctx.translate(Math.cos(ang) * dist, Math.sin(ang) * dist - progress * 14);
+          ctx.rotate(ang + Math.PI * 0.25);
+          ctx.fillStyle = i % 2 === 0 ? c0 : c2;
+          ctx.beginPath();
+          ctx.ellipse(0, 0, 14, 4.5, 0, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.restore();
+        }
+        ctx.restore();
+        break;
+      }
+      case 'alchemical_siphon': {
+        ctx.save();
+        ctx.translate(x, y);
+        for (let i = 0; i < 3; i++) {
+          const ang = progress * 4.2 + (Math.PI * 2 * i) / 3;
+          ctx.strokeStyle = i % 2 === 0 ? c0 : c1;
+          ctx.lineWidth = 2.4;
+          ctx.beginPath();
+          ctx.ellipse(0, 4, 42, 16, ang * 0.25, 0, Math.PI * 1.4);
+          ctx.stroke();
+          ctx.fillStyle = c2;
+          ctx.beginPath();
+          ctx.arc(Math.cos(ang) * 34, Math.sin(ang) * 14 - progress * 24, 5, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        ctx.restore();
+        break;
+      }
+      case 'tectonic_bastion': {
+        for (let i = -1; i <= 1; i++) {
+          const bx = x + i * 28;
+          const lift = Math.min(1, progress * 1.8) * (40 - Math.abs(i) * 8);
+          ctx.fillStyle = i === 0 ? c1 : c0;
+          ctx.strokeStyle = c2;
+          ctx.lineWidth = 1.8;
+          ctx.beginPath();
+          ctx.moveTo(bx - 11, pedY);
+          ctx.lineTo(bx - 7, pedY - lift);
+          ctx.lineTo(bx + 7, pedY - lift - 6);
+          ctx.lineTo(bx + 11, pedY);
+          ctx.closePath();
+          ctx.fill();
+          ctx.stroke();
+        }
+        break;
+      }
+      case 'emerald_swarm': {
+        ctx.save();
+        ctx.translate(x, y);
+        for (let i = 0; i < 8; i++) {
+          const ang = progress * 6.4 + (Math.PI * 2 * i) / 8;
+          const rx = Math.cos(ang) * (32 + (i % 3) * 10);
+          const ry = Math.sin(ang * 1.5) * 22;
+          ctx.fillStyle = i % 2 === 0 ? c0 : c1;
+          ctx.beginPath();
+          ctx.ellipse(rx, ry, 6.5, 3.2, ang, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        ctx.restore();
+        break;
+      }
+      case 'mirror_bastion': {
+        ctx.save();
+        ctx.translate(x, y);
+        ctx.strokeStyle = c0;
+        ctx.lineWidth = 2.6;
+        for (let ring = 0; ring < 2; ring++) {
+          const rad = 32 + ring * 14;
+          ctx.beginPath();
+          for (let i = 0; i <= 6; i++) {
+            const a = (Math.PI * 2 * (i % 6)) / 6 + (ring === 0 ? progress : -progress) * 1.8;
+            const px = Math.cos(a) * rad;
+            const py = Math.sin(a) * rad;
+            if (i === 0) ctx.moveTo(px, py);
+            else ctx.lineTo(px, py);
+          }
+          ctx.strokeStyle = ring === 0 ? c2 : c0;
+          ctx.stroke();
+        }
+        ctx.restore();
+        break;
+      }
+      case 'shogun_crest': {
+        ctx.save();
+        ctx.translate(x, y);
+        ctx.strokeStyle = c2;
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.arc(0, -14, 36, Math.PI * 0.15, Math.PI * 0.85);
+        ctx.stroke();
+        for (let i = -1; i <= 1; i += 2) {
+          ctx.strokeStyle = c0;
+          ctx.lineWidth = 2.8;
+          ctx.beginPath();
+          ctx.moveTo(i * 42, -32);
+          ctx.lineTo(-i * 38, 28);
+          ctx.stroke();
+        }
+        ctx.restore();
+        break;
+      }
+      case 'pixie_glimmer': {
+        ctx.save();
+        ctx.translate(x, y);
+        for (let i = 0; i < 6; i++) {
+          const ang = (Math.PI * 2 * i) / 6 + progress * 3.1;
+          const dist = 28 + Math.sin(progress * 8 + i) * 10;
+          ctx.save();
+          ctx.translate(Math.cos(ang) * dist, Math.sin(ang) * (dist * 0.72));
+          ctx.rotate(ang);
+          ctx.fillStyle = i % 2 === 0 ? c0 : c2;
+          ctx.fillRect(-7, -2, 14, 4);
+          ctx.fillRect(-2, -7, 4, 14);
+          ctx.restore();
+        }
+        ctx.restore();
+        break;
+      }
+      case 'disguise_curtain': {
+        ctx.save();
+        ctx.translate(x, y);
+        for (let i = -2; i <= 2; i++) {
+          const sway = Math.sin(progress * 8 + i) * 7;
+          ctx.strokeStyle = i % 2 === 0 ? c0 : c2;
+          ctx.lineWidth = 3;
+          ctx.beginPath();
+          ctx.moveTo(i * 15, -52);
+          ctx.quadraticCurveTo(i * 15 + sway, -6, i * 18 - sway, 46);
+          ctx.stroke();
+        }
+        ctx.restore();
+        break;
+      }
+      case 'terastal_crown': {
+        ctx.save();
+        ctx.translate(x, y - 16);
+        ctx.strokeStyle = c0;
+        ctx.fillStyle = 'rgba(34, 211, 238, 0.18)';
+        ctx.lineWidth = 2.6;
+        ctx.beginPath();
+        ctx.moveTo(0, -48);
+        ctx.lineTo(36, 0);
+        ctx.lineTo(0, 38);
+        ctx.lineTo(-36, 0);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+        for (let i = 0; i < 4; i++) {
+          const ang = progress * 3.5 + (Math.PI * i) / 2;
+          this._drawSigilShape(ctx, 8, i % 2 === 0 ? c1 : c2);
+          ctx.rotate(ang * 0.25);
+        }
+        ctx.restore();
+        break;
+      }
       case 'prism_array':
       default: {
         ctx.save();
@@ -5951,7 +7217,17 @@ export class BattleEngine {
       || move.id === 'blaze_kick'
       || move.id === 'steppe_bolt'
       || move.id === 'champion_strike'
-      || move.id === 'rift_claw';
+      || move.id === 'rift_claw'
+      || move.id === 'close_combat'
+      || move.id === 'collision_course'
+      || move.id === 'brave_bird'
+      || move.id === 'poison_jab'
+      || move.id === 'headlong_rush'
+      || move.id === 'x_scissor'
+      || move.id === 'kowtow_cleave'
+      || move.id === 'play_rough'
+      || move.id === 'dragon_darts'
+      || move.id === 'bitter_blade';
     const lungeClass = attackerSide === 'player'
       ? (isQuick ? 'quick-lunge-right' : 'lunge-right')
       : (isQuick ? 'quick-lunge-left' : 'lunge-left');
@@ -5971,8 +7247,10 @@ export class BattleEngine {
       atkSprite?.classList.add(lungeClass);
       this.audio?.playElemental?.('heal', move.id);
       this.spawnImpactFX(attackerSide, 'heal', `+${result.heal} HP`, '#86efac', {
+        moveId: move.id,
         ring: true,
-        ringColor: '#4ade80',
+        ringColor: move.id === 'geomancy_bloom' ? '#f472b6' : '#4ade80',
+        secondaryRingColor: move.id === 'geomancy_bloom' ? '#fde047' : '#ffffff',
         fontSize: 22,
         lifeScale: pace.particleLifeScale,
       });
@@ -5989,17 +7267,41 @@ export class BattleEngine {
         this.audio?.playElemental?.('psychic', 'cosmos_mind');
       } else if (move.id === 'jungle_totem') {
         this.audio?.playElemental?.('grass', 'jungle_totem');
+      } else if (move.id === 'tailwind_grace') {
+        this.audio?.playElemental?.('flying', 'tailwind_grace');
+      } else if (move.id === 'quiver_step') {
+        this.audio?.playElemental?.('bug', 'quiver_step');
+      } else if (move.id === 'geomancy_bloom') {
+        this.audio?.playElemental?.('fairy', 'geomancy_bloom');
       }
       this.audio?.playBuffChime?.();
       const statShort = { atk: 'ATK', def: 'DEF', spd: 'SPD' }[result.buffStat || move.buffStat || 'atk'] || 'STAT';
       const fxType = move.type && move.type !== 'normal' ? move.type : 'buff';
+      const isSignatureBuff = move.id === 'cosmos_mind'
+        || move.id === 'jungle_totem'
+        || move.id === 'tailwind_grace'
+        || move.id === 'quiver_step'
+        || move.id === 'geomancy_bloom';
+      const buffRingByMove = {
+        cosmos_mind: '#f472b6',
+        jungle_totem: '#22c55e',
+        tailwind_grace: '#38bdf8',
+        quiver_step: '#84cc16',
+        geomancy_bloom: '#f472b6',
+      };
+      const buffSecRingByMove = {
+        jungle_totem: '#fde047',
+        tailwind_grace: '#a7f3d0',
+        quiver_step: '#f472b6',
+        geomancy_bloom: '#fde047',
+      };
       this.spawnImpactFX(attackerSide, fxType, `${statShort} ▲!`, '#fde047', {
         moveId: move.id,
         ring: true,
-        ringRadius: move.id === 'cosmos_mind' || move.id === 'jungle_totem' ? 102 : 88,
-        ringColor: move.id === 'cosmos_mind' ? '#f472b6' : move.id === 'jungle_totem' ? '#22c55e' : '#fde047',
-        secondaryRingColor: move.id === 'jungle_totem' ? '#fde047' : '#ffffff',
-        count: move.id === 'cosmos_mind' || move.id === 'jungle_totem' ? 28 : 20,
+        ringRadius: isSignatureBuff ? 102 : 88,
+        ringColor: buffRingByMove[move.id] || '#fde047',
+        secondaryRingColor: buffSecRingByMove[move.id] || '#ffffff',
+        count: isSignatureBuff ? 28 : 20,
         fontSize: 22,
         lifeScale: pace.particleLifeScale,
       });
@@ -6016,26 +7318,32 @@ export class BattleEngine {
       const isCotton = move.id === 'cotton_guard';
       const isDuneAegis = move.id === 'dune_aegis';
       const isAmberBastion = move.id === 'amber_bastion';
+      const isKingShield = move.id === 'king_shield';
+      const isLunarShroud = move.id === 'lunar_shroud';
       if (isCalm) {
         this.audio?.playElemental?.('psychic', 'calm_aura');
       } else if (isDuneAegis) {
         this.audio?.playElemental?.('rock', 'dune_aegis');
       } else if (isAmberBastion) {
         this.audio?.playElemental?.('rock', 'amber_bastion');
+      } else if (isKingShield) {
+        this.audio?.playElemental?.('steel', 'king_shield');
+      } else if (isLunarShroud) {
+        this.audio?.playElemental?.('dark', 'lunar_shroud');
       } else {
         this.audio?.playShieldChime?.();
       }
       this.spawnImpactFX(
         attackerSide,
-        isCalm ? 'psychic' : isCotton ? 'buff' : (isDuneAegis || isAmberBastion) ? 'rock' : 'shield',
-        isCalm ? 'CALM AURA!' : isCotton ? 'COTTON GUARD!' : isDuneAegis ? 'MIRAGE BASTION!' : isAmberBastion ? 'RELIC BASTION!' : 'SHIELD UP!',
-        isCalm ? '#e9d5ff' : isCotton ? '#fef08a' : (isDuneAegis || isAmberBastion) ? '#fde68a' : '#67e8f9',
+        isCalm ? 'psychic' : isCotton ? 'buff' : (isDuneAegis || isAmberBastion) ? 'rock' : isKingShield ? 'steel' : isLunarShroud ? 'dark' : 'shield',
+        isCalm ? 'CALM AURA!' : isCotton ? 'COTTON GUARD!' : isDuneAegis ? 'MIRAGE BASTION!' : isAmberBastion ? 'RELIC BASTION!' : isKingShield ? "KING'S SHIELD!" : isLunarShroud ? 'LUNAR SHROUD!' : 'SHIELD UP!',
+        isCalm ? '#e9d5ff' : isCotton ? '#fef08a' : (isDuneAegis || isAmberBastion || isKingShield) ? '#fde68a' : isLunarShroud ? '#c084fc' : '#67e8f9',
         {
           moveId: move.id,
           ring: true,
-          ringRadius: isCalm ? 98 : (isDuneAegis || isAmberBastion) ? 104 : 94,
-          ringColor: isCalm ? '#c084fc' : isCotton ? '#fde047' : (isDuneAegis || isAmberBastion) ? '#f59e0b' : '#67e8f9',
-          secondaryRingColor: isCalm ? '#67e8f9' : (isDuneAegis || isAmberBastion) ? '#fef3c7' : '#ffffff',
+          ringRadius: isCalm ? 98 : (isDuneAegis || isAmberBastion || isKingShield || isLunarShroud) ? 104 : 94,
+          ringColor: isCalm ? '#c084fc' : isCotton ? '#fde047' : (isDuneAegis || isAmberBastion) ? '#f59e0b' : isKingShield ? '#fbbf24' : isLunarShroud ? '#818cf8' : '#67e8f9',
+          secondaryRingColor: isCalm ? '#67e8f9' : (isDuneAegis || isAmberBastion || isKingShield) ? '#fef3c7' : isLunarShroud ? '#e9d5ff' : '#ffffff',
           count: isCalm ? 16 : 22,
           fontSize: 21,
           lifeScale: pace.particleLifeScale,
@@ -6092,6 +7400,9 @@ export class BattleEngine {
         'sandstorm_crush', 'prism_laser', 'zen_meteor', 'dragon_rush',
         'inferno_overdrive', 'abyssal_geyser', 'ion_tempest', 'canyon_rend',
         'chrono_cannon', 'polar_lance', 'relic_hex', 'rift_claw', 'cosmos_supernova',
+        'close_combat', 'collision_course', 'brave_bird', 'earthquake', 'earth_power',
+        'headlong_rush', 'flash_cannon', 'gigaton_hammer', 'kowtow_cleave',
+        'dazzling_gleam', 'geomancy_bloom', 'electro_drift',
       ]);
       const maxHp = Math.max(1, defender?.maxHp || 30);
       const dmgIntensity = (result.damage / maxHp) * 18
@@ -6115,6 +7426,11 @@ export class BattleEngine {
         canyon_rend: '#f59e0b',
         champion_strike: '#fb7185',
         rift_claw: '#ec4899',
+        air_slash: '#bae6fd',
+        poison_jab: '#c084fc',
+        x_scissor: '#bef264',
+        kowtow_cleave: '#ef4444',
+        bitter_blade: '#a855f7',
       };
       const ringColorByMove = {
         moonblast: '#f472b6',
@@ -6158,6 +7474,34 @@ export class BattleEngine {
         relic_hex: '#a855f7',
         rift_claw: '#ec4899',
         cosmos_supernova: '#f472b6',
+        close_combat: '#ef4444',
+        vacuum_wave: '#f87171',
+        collision_course: '#dc2626',
+        brave_bird: '#38bdf8',
+        air_slash: '#7dd3fc',
+        tailwind_grace: '#38bdf8',
+        sludge_wave: '#a855f7',
+        poison_jab: '#a855f7',
+        malignant_chain: '#c084fc',
+        earthquake: '#d97706',
+        earth_power: '#f59e0b',
+        headlong_rush: '#b45309',
+        bug_buzz: '#84cc16',
+        x_scissor: '#84cc16',
+        quiver_step: '#a3e635',
+        flash_cannon: '#e2e8f0',
+        gigaton_hammer: '#f472b6',
+        king_shield: '#fbbf24',
+        dark_pulse: '#7e22ce',
+        kowtow_cleave: '#6366f1',
+        lunar_shroud: '#818cf8',
+        dazzling_gleam: '#f472b6',
+        play_rough: '#f472b6',
+        geomancy_bloom: '#f472b6',
+        water_shuriken: '#38bdf8',
+        dragon_darts: '#6366f1',
+        bitter_blade: '#ef4444',
+        electro_drift: '#22d3ee',
       };
       const secondaryRingByMove = {
         moonblast: '#c084fc',
@@ -6198,6 +7542,34 @@ export class BattleEngine {
         relic_hex: '#f59e0b',
         rift_claw: '#6366f1',
         cosmos_supernova: '#fde047',
+        close_combat: '#fbbf24',
+        vacuum_wave: '#bae6fd',
+        collision_course: '#fbbf24',
+        brave_bird: '#ffffff',
+        air_slash: '#e0f2fe',
+        tailwind_grace: '#a7f3d0',
+        sludge_wave: '#4ade80',
+        poison_jab: '#c084fc',
+        malignant_chain: '#f43f5e',
+        earthquake: '#fde68a',
+        earth_power: '#ef4444',
+        headlong_rush: '#fbbf24',
+        bug_buzz: '#34d399',
+        x_scissor: '#bef264',
+        quiver_step: '#f472b6',
+        flash_cannon: '#38bdf8',
+        gigaton_hammer: '#e2e8f0',
+        king_shield: '#e2e8f0',
+        dark_pulse: '#c084fc',
+        kowtow_cleave: '#ef4444',
+        lunar_shroud: '#e9d5ff',
+        dazzling_gleam: '#fde047',
+        play_rough: '#f9a8d4',
+        geomancy_bloom: '#fde047',
+        water_shuriken: '#e0f2fe',
+        dragon_darts: '#22d3ee',
+        bitter_blade: '#a855f7',
+        electro_drift: '#a855f7',
       };
       const bigBurstMoves = new Set([
         'hyper_nova', 'thunder_tempest', 'wild_volt', 'magma_cannon',
@@ -6206,12 +7578,15 @@ export class BattleEngine {
         'sandstorm_crush', 'prism_laser', 'zen_meteor', 'dragon_rush',
         'inferno_overdrive', 'abyssal_geyser', 'ion_tempest', 'canyon_rend',
         'chrono_cannon', 'polar_lance', 'relic_hex', 'rift_claw', 'cosmos_supernova',
+        'close_combat', 'collision_course', 'brave_bird', 'sludge_wave', 'earthquake',
+        'earth_power', 'headlong_rush', 'bug_buzz', 'flash_cannon', 'gigaton_hammer',
+        'dark_pulse', 'dazzling_gleam', 'geomancy_bloom', 'electro_drift',
       ]);
       this.spawnImpactFX(defenderSide, impactType, `-${result.damage}`, dmgColor, {
         moveId: move.id,
-        dust: isPhysical || move.id === 'magma_cannon' || move.id === 'eruption_flare' || move.id === 'draco_meteor' || move.id === 'sandstorm_crush' || move.id === 'dragon_rush' || move.id === 'canyon_rend' || move.id === 'rift_claw',
-        extraDust: move.id === 'meteor_slam' || move.id === 'iron_crush' || move.id === 'draco_meteor' || move.id === 'sandstorm_crush' || move.id === 'zen_meteor' || move.id === 'canyon_rend',
-        slash: hasElementalTrail || move.id === 'phantom_claw' || move.id === 'starlight_claw' || move.id === 'thunder_fang' || move.id === 'solar_blade' || move.id === 'razor_shell' || move.id === 'blaze_kick' || move.id === 'champion_strike' || move.id === 'rift_claw',
+        dust: isPhysical || move.id === 'magma_cannon' || move.id === 'eruption_flare' || move.id === 'draco_meteor' || move.id === 'sandstorm_crush' || move.id === 'dragon_rush' || move.id === 'canyon_rend' || move.id === 'rift_claw' || move.id === 'earth_power',
+        extraDust: move.id === 'meteor_slam' || move.id === 'iron_crush' || move.id === 'draco_meteor' || move.id === 'sandstorm_crush' || move.id === 'zen_meteor' || move.id === 'canyon_rend' || move.id === 'earthquake' || move.id === 'headlong_rush' || move.id === 'gigaton_hammer' || move.id === 'collision_course',
+        slash: hasElementalTrail || move.id === 'phantom_claw' || move.id === 'starlight_claw' || move.id === 'thunder_fang' || move.id === 'solar_blade' || move.id === 'razor_shell' || move.id === 'blaze_kick' || move.id === 'champion_strike' || move.id === 'rift_claw' || move.id === 'x_scissor' || move.id === 'kowtow_cleave' || move.id === 'bitter_blade' || move.id === 'poison_jab',
         slashColor: slashColorByMove[move.id],
         shapeOverride: move.id === 'star_melody'
           ? 'note'
@@ -6223,9 +7598,19 @@ export class BattleEngine {
                 ? 'spore'
                 : move.id === 'chrono_cannon'
                   ? 'gear'
-                  : move.id === 'relic_hex'
+                  : move.id === 'relic_hex' || move.id === 'malignant_chain'
                     ? 'sigil'
-                    : null,
+                    : move.id === 'water_shuriken'
+                      ? 'shuriken'
+                      : move.id === 'brave_bird' || move.id === 'air_slash'
+                        ? 'feather'
+                        : move.id === 'sludge_wave' || move.id === 'poison_jab'
+                          ? 'venom'
+                          : move.id === 'bug_buzz'
+                            ? 'wave_arc'
+                            : move.id === 'gigaton_hammer'
+                              ? 'hexagon'
+                              : null,
         extraNotes: move.id === 'star_melody',
         aurora: move.id === 'aurora_flare',
         petalColors: move.id === 'petal_blizzard',
@@ -7075,9 +8460,11 @@ export class BattleEngine {
 
       this.enemySpriteEl?.classList.toggle('is-shiny-sprite', Boolean(this.enemy.isShiny));
       this.enemySpriteEl?.classList.toggle('is-elite-sprite', Boolean(this.enemy.isElite));
-      this.enemySpriteEl?.classList.remove('is-idle');
+      this.enemySpriteEl?.classList.remove('is-idle', 'enemy-sendout');
+      if (this.enemySpriteEl) void this.enemySpriteEl.offsetWidth;
       this.enemySpriteEl?.classList.add('enemy-sendout');
       this.audio?.playPokeballThrow?.();
+      this.audio?.playPokemonCry?.(this.enemy);
       this.spawnImpactFX('enemy', this.enemy.type, '', '#ffffff', {
         ring: true,
         ringRadius: 84,
@@ -7096,6 +8483,8 @@ export class BattleEngine {
       await this.say(`${rivalName} sent out ${this.enemy.name}!`);
       if (!this.isSessionValid(sid)) return;
 
+      this.enemySpriteEl?.classList.remove('enemy-sendout');
+      this.enemySpriteEl?.classList.add('is-idle');
       await this.triggerEntryAbility('enemy', this.enemy, sid);
       if (!this.isSessionValid(sid)) return;
 
@@ -7140,6 +8529,10 @@ export class BattleEngine {
           reef: () => (Math.random() < 0.5 ? 'water_gem' : 'moon_gem'),
           ruins: () => (Math.random() < 0.5 ? 'chrono_gem' : 'dusk_gem'),
           rift: () => (Math.random() < 0.5 ? 'nebula_gem' : 'astral_gem'),
+          faeveldt: () => 'pixie_gem',
+          atoll: () => 'alola_gem',
+          highlands: () => 'crown_gem',
+          crater: () => 'tera_gem',
         };
         const fallbackGemNames = {
           leaf_gem: 'Verdant Gem',
@@ -7154,6 +8547,10 @@ export class BattleEngine {
           prism_gem: 'Prism Gem',
           chrono_gem: 'Chrono Amber',
           nebula_gem: 'Nebula Core',
+          pixie_gem: 'Pixie Ribbon Gem',
+          alola_gem: 'Island Kahuna Shell',
+          crown_gem: 'Sovereign Crest',
+          tera_gem: 'Terastal Shard',
         };
         const gemId = gemByBiome[dropBiome]?.() || null;
         const roll = Math.random();
@@ -7162,7 +8559,7 @@ export class BattleEngine {
 
         if (gemId && roll < 0.34) {
           bonus = { gems: { [gemId]: 1 } };
-          const gemMeta = getEvolutionItemsMap()?.[gemId];
+          const gemMeta = getEvolutionItemsMap()?.[gemId] || FALLBACK_ITEMS[gemId];
           const gemName = gemMeta?.name || fallbackGemNames[gemId] || 'Evolution Gem';
           itemLabel = `${gemMeta?.icon || '💎'} a ${gemName}`;
         } else if (roll < 0.58) {
@@ -7445,6 +8842,7 @@ export class BattleEngine {
     this.onHudRefresh?.();
 
     this.audio?.playEvolutionFanfare?.();
+    this.audio?.playPokemonCry?.(this.player);
     this.spawnStarBurst(center);
     this.spawnFloatingText(center.x, center.y - 44, 'EVOLVED!', '#fde047', 24, 0, 1.55);
 
@@ -7593,9 +8991,22 @@ export class BattleEngine {
       });
       if (!this.isSessionValid(sid) || this.turnToken !== token) return;
       this.playerSpriteEl?.classList.toggle('is-shiny-sprite', Boolean(this.player.isShiny));
+      this.playerSpriteEl?.classList.remove('is-idle', 'player-sendout');
+      if (this.playerSpriteEl) void this.playerSpriteEl.offsetWidth;
+      this.playerSpriteEl?.classList.add('player-sendout');
+      this.audio?.playPokeballThrow?.();
+      this.audio?.playPokemonCry?.(this.player);
+      this.spawnImpactFX('player', this.player.type, '', '#ffffff', {
+        ring: true,
+        ringRadius: 72,
+        count: 14,
+        lifeScale: pace.particleLifeScale,
+      });
       await this.say(`Go, ${this.player.displayName || this.player.name}!`);
       if (!this.isSessionValid(sid) || this.turnToken !== token) return;
 
+      this.playerSpriteEl?.classList.remove('player-sendout');
+      this.playerSpriteEl?.classList.add('is-idle');
       await this.triggerEntryAbility('player', this.player, sid);
       if (!this.isSessionValid(sid) || this.turnToken !== token) return;
 

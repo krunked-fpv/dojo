@@ -759,6 +759,142 @@ export const THEMES = {
     bassGain: 0.104,
     drumGain: 0.050,
   },
+  faeveldt: {
+    // Enchanted Pixie Faeveldt Glade celesta waltz-pulse in D Major / B Minor (64 steps)
+    stepSec: 0.168,
+    leadWave: 'pulse12',
+    arpWave: 'triangle',
+    melody: [
+      Fs5, -1, A5, D6, B5, -1, A5, Fs5, G5, -1, Fs5, E5, D5, -1, 0, 0,
+      B4, -1, D5, Fs5, A5, -1, G5, Fs5, E5, -1, Fs5, G5, A5, -1, 0, 0,
+      D6, -1, Cs5, B5, A5, -1, Fs5, D5, E5, -1, G5, B5, A5, -1, Fs5, 0,
+      G5, -1, Fs5, E5, D5, -1, Cs5, E5, D5, -1, -1, 0, 0, 0, 0, 0,
+    ],
+    arp: [
+      D4, 0, Fs4, A4, B3, 0, D4, Fs4,
+      G4, 0, B4, D5, A3, 0, Cs4, E4,
+      Fs4, 0, A4, D5, G4, 0, B4, D5,
+      E4, 0, G4, B4, A4, 0, E4, Cs4,
+    ],
+    bass: [
+      D3, 0, A2, 0, B2, 0, Fs3, 0, G2, 0, D3, 0, A2, 0, E3, 0,
+      B2, 0, Fs3, 0, G2, 0, D3, 0, A2, 0, E3, 0, A2, 0, Cs3, 0,
+      D3, 0, A2, 0, B2, 0, Fs3, 0, E2, 0, B2, 0, A2, 0, E3, 0,
+      G2, 0, D3, 0, A2, 0, E3, 0, D2, 0, A2, 0, D3, 0, 0, 0,
+    ],
+    drums: [
+      'K', 0, 0, 'h', 0, 0, 'h', 0,
+      'K', 0, 'h', 0, 'S', 0, 'h', 0,
+    ],
+    leadGain: 0.052,
+    arpGain: 0.032,
+    bassGain: 0.088,
+    drumGain: 0.030,
+  },
+  atoll: {
+    // Sunburst Alola Atoll tropical steel-drum bounce in C Major / G Mixolydian (64 steps)
+    stepSec: 0.152,
+    leadWave: 'pulse25',
+    arpWave: 'triangle',
+    melody: [
+      G5, -1, E5, G5, A5, -1, C6, 0, B5, -1, A5, G5, E5, -1, D5, 0,
+      F5, -1, A5, G5, E5, -1, C5, D5, E5, -1, G5, E5, D5, -1, 0, 0,
+      C5, -1, E5, G5, C6, -1, B5, A5, G5, -1, E5, C5, D5, -1, F5, 0,
+      A5, -1, G5, F5, E5, -1, D5, B4, C5, -1, -1, 0, 0, 0, 0, 0,
+    ],
+    arp: [
+      C4, 0, E4, G4, F4, 0, A4, C5,
+      G4, 0, B4, D5, C4, 0, E4, G4,
+      A3, 0, C4, E4, F4, 0, A4, C5,
+      G4, 0, B4, D5, C4, 0, E4, G4,
+    ],
+    bass: [
+      C3, 0, G2, C3, F3, 0, C3, 0, G2, 0, D3, 0, C3, 0, G2, 0,
+      F2, 0, C3, 0, C3, 0, G2, 0, G2, 0, D3, 0, G2, 0, B2, 0,
+      C3, 0, G2, 0, A2, 0, E3, 0, F2, 0, C3, 0, G2, 0, D3, 0,
+      F2, 0, C3, 0, G2, 0, D3, G2, C3, 0, G2, 0, C3, 0, 0, 0,
+    ],
+    drums: [
+      'K', 0, 'h', 'K', 'S', 0, 'h', 0,
+      'K', 0, 'h', 'K', 'S', 0, 'h', 'S',
+    ],
+    leadGain: 0.056,
+    arpGain: 0.032,
+    bassGain: 0.092,
+    drumGain: 0.044,
+  },
+  highlands: {
+    // Iron Crown Highlands noble highland march in F# Minor / A Major (64 steps)
+    stepSec: 0.146,
+    leadWave: 'pulse25',
+    arpWave: 'pulse12',
+    melody: [
+      Fs4, -1, Cs5, 0, A4, -1, B4, Cs5, D5, -1, Cs5, B4, A4, -1, Fs4, 0,
+      E5, -1, D5, Cs5, B4, -1, A4, Gs4, A4, -1, Cs5, E5, Fs5, -1, 0, 0,
+      A5, -1, Gs5, Fs5, E5, -1, Cs5, A4, D5, -1, Fs5, E5, D5, -1, Cs5, 0,
+      B4, -1, Cs5, D5, E5, -1, Cs5, Gs4, Fs4, -1, -1, 0, 0, 0, 0, 0,
+    ],
+    arp: [
+      Fs4, 0, A4, Cs5, D4, 0, Fs4, A4,
+      E4, 0, Gs4, B4, Cs4, 0, E4, Gs4,
+      Fs4, 0, A4, Cs5, B3, 0, D4, Fs4,
+      E4, 0, Gs4, B4, Fs4, 0, A4, Cs5,
+    ],
+    bass: [
+      Fs2, 0, Cs3, 0, Fs3, 0, Cs3, 0, D2, 0, A2, 0, E2, 0, B2, 0,
+      E2, 0, B2, 0, Cs3, 0, Gs3, 0, Fs2, 0, Cs3, 0, Fs3, 0, E3, 0,
+      D2, 0, A2, 0, A2, 0, E3, 0, B2, 0, Fs3, 0, Cs3, 0, Gs3, 0,
+      D2, 0, A2, 0, E2, 0, B2, 0, Fs2, 0, Cs3, 0, Fs3, 0, 0, 0,
+    ],
+    drums: [
+      'K', 0, 'h', 0, 'S', 0, 'h', 0,
+      'K', 'K', 'h', 0, 'S', 0, 'h', 'S',
+    ],
+    leadGain: 0.058,
+    arpGain: 0.032,
+    bassGain: 0.096,
+    drumGain: 0.046,
+  },
+  crater: {
+    // Terastal Crystal Crater radiant crystalline synth anthem in E Minor / G Major (128 steps)
+    stepSec: 0.140,
+    leadWave: 'pulse25',
+    arpWave: 'pulse12',
+    melody: [
+      E5, -1, B4, E5, G5, -1, Fs5, D5, E5, -1, B4, G4, A4, -1, B4, 0,
+      C5, -1, E5, G5, Fs5, -1, D5, B4, E5, -1, G5, B5, A5, -1, 0, 0,
+      B5, -1, A5, G5, Fs5, -1, G5, A5, B5, -1, G5, E5, D5, -1, B4, 0,
+      C5, -1, D5, E5, Fs5, -1, D5, B4, E5, -1, -1, 0, 0, 0, 0, 0,
+      G5, -1, B5, D6, C6, -1, B5, A5, G5, -1, Fs5, E5, D5, -1, B4, 0,
+      E5, -1, Fs5, G5, A5, -1, C6, 0, B5, -1, G5, E5, Fs5, -1, D5, 0,
+      C5, -1, E5, G5, B5, -1, A5, G5, Fs5, -1, A5, D6, B5, -1, G5, 0,
+      E5, -1, G5, Fs5, D5, -1, B4, Ds5, E5, -1, -1, 0, 0, 0, 0, 0,
+    ],
+    arp: [
+      E4, 0, G4, B4, D4, 0, Fs4, A4,
+      C4, 0, E4, G4, B3, 0, Ds4, Fs4,
+      G4, 0, B4, D5, D4, 0, Fs4, A4,
+      C4, 0, E4, G4, B3, 0, E4, G4,
+    ],
+    bass: [
+      E2, 0, B2, 0, E3, 0, B2, 0, G2, 0, D3, 0, Fs2, 0, D3, 0,
+      C2, 0, G2, 0, D2, 0, A2, 0, E2, 0, B2, 0, E3, 0, B2, 0,
+      G2, 0, D3, 0, D2, 0, A2, 0, E2, 0, B2, 0, B1, 0, Fs2, 0,
+      C2, 0, G2, 0, D2, 0, A2, 0, E2, 0, B2, 0, E3, 0, 0, 0,
+      G2, 0, D3, 0, C3, 0, G3, 0, E2, 0, B2, 0, B1, 0, Fs2, 0,
+      C2, 0, G2, 0, A2, 0, E3, 0, G2, 0, D3, 0, D2, 0, A2, 0,
+      C2, 0, G2, 0, G2, 0, D3, 0, D2, 0, A2, 0, G2, 0, D3, 0,
+      E2, 0, B2, 0, B1, 0, Fs2, 0, E2, 0, B2, 0, E3, 0, 0, 0,
+    ],
+    drums: [
+      'K', 0, 'h', 0, 'S', 0, 'h', 'K',
+      'K', 0, 'h', 'K', 'S', 0, 'h', 'S',
+    ],
+    leadGain: 0.060,
+    arpGain: 0.034,
+    bassGain: 0.100,
+    drumGain: 0.048,
+  },
 };
 
 export class AudioEngine {
@@ -1083,6 +1219,19 @@ export class AudioEngine {
     env.connect(dest);
     if (trackBgm) {
       this._trackBgmNode(osc, env);
+    } else {
+      osc.onended = () => {
+        try {
+          osc.disconnect();
+        } catch {
+          // Ignore
+        }
+        try {
+          env.disconnect();
+        } catch {
+          // Ignore
+        }
+      };
     }
     osc.start(start);
     osc.stop(start + dur + 0.02);
@@ -1140,6 +1289,24 @@ export class AudioEngine {
     env.connect(dest);
     if (trackBgm) {
       this._trackBgmNode(src, env);
+    } else {
+      src.onended = () => {
+        try {
+          src.disconnect();
+        } catch {
+          // Ignore
+        }
+        try {
+          filter.disconnect();
+        } catch {
+          // Ignore
+        }
+        try {
+          env.disconnect();
+        } catch {
+          // Ignore
+        }
+      };
     }
 
     src.start(start);
@@ -2232,6 +2399,26 @@ export class AudioEngine {
     if (this._playSprint7MoveSfx(moveId)) {
       return;
     }
+    if (this.playNamedMoveSfx(moveId)) {
+      return;
+    }
+
+    this.playAttackSfx(type, moveId);
+  }
+
+  playNamedMoveSfx(moveId = '') {
+    const id = String(moveId || '');
+    if (!id) return false;
+    if (this._playSprint8MoveSfx(id)) return true;
+    if (this._playSprint7MoveSfx(id)) return true;
+    if (this._playSprint6MoveSfx(id)) return true;
+    return false;
+  }
+
+  playAttackSfx(type = 'normal', moveId = '') {
+    if (moveId && this.playNamedMoveSfx(moveId)) {
+      return;
+    }
 
     switch (type) {
       case 'fire':
@@ -2440,6 +2627,155 @@ export class AudioEngine {
           startFreq: 880,
           endFreq: 220,
           q: 0.85,
+        });
+        break;
+
+      case 'fighting':
+        this.playPhysicalImpact(64);
+        this.triggerVoice({
+          freq: 220,
+          endFreq: 587.33,
+          wave: 'pulse25',
+          duration: 0.12,
+          gain: 0.095,
+          delay: 0.015,
+        });
+        break;
+
+      case 'flying':
+        this.playNoise({
+          duration: 0.22,
+          gain: 0.15,
+          filterType: 'bandpass',
+          startFreq: 460,
+          endFreq: 1180,
+          q: 1.6,
+        });
+        this.triggerVoice({
+          freq: 523.25,
+          endFreq: 880,
+          wave: 'triangle',
+          duration: 0.16,
+          gain: 0.09,
+        });
+        break;
+
+      case 'poison':
+        this.playNoise({
+          duration: 0.22,
+          gain: 0.13,
+          filterType: 'bandpass',
+          startFreq: 840,
+          endFreq: 320,
+          q: 1.8,
+        });
+        [349.23, 311.13, 277.18].forEach((f, i) => {
+          this.triggerVoice({
+            freq: f,
+            endFreq: f * 0.84,
+            wave: i % 2 === 0 ? 'pulse12' : 'sine',
+            duration: 0.11,
+            gain: 0.085,
+            delay: i * 0.048,
+          });
+        });
+        break;
+
+      case 'ground':
+        this.triggerVoice({
+          freq: 98,
+          endFreq: 24,
+          wave: 'triangle',
+          duration: 0.24,
+          gain: 0.21,
+        });
+        this.playNoise({
+          duration: 0.22,
+          gain: 0.2,
+          filterType: 'lowpass',
+          startFreq: 560,
+          endFreq: 85,
+          q: 0.75,
+        });
+        break;
+
+      case 'bug':
+        [659.25, 783.99, 659.25, 880].forEach((f, i) => {
+          this.triggerVoice({
+            freq: f,
+            endFreq: f * 1.08,
+            wave: 'pulse12',
+            duration: 0.075,
+            gain: 0.08,
+            delay: i * 0.04,
+          });
+        });
+        this.playNoise({
+          duration: 0.16,
+          gain: 0.1,
+          filterType: 'bandpass',
+          startFreq: 1150,
+          endFreq: 680,
+          q: 1.7,
+        });
+        break;
+
+      case 'steel':
+        this.triggerVoice({
+          freq: 987.77,
+          endFreq: 880,
+          wave: 'pulse12',
+          duration: 0.14,
+          gain: 0.085,
+        });
+        this.triggerVoice({
+          freq: 1479.98,
+          endFreq: 1318.51,
+          wave: 'sine',
+          duration: 0.18,
+          gain: 0.08,
+          delay: 0.015,
+        });
+        this.playPhysicalImpact(58);
+        break;
+
+      case 'dark':
+        this.triggerVoice({
+          freq: 293.66,
+          midFreq: 246.94,
+          endFreq: 164.81,
+          wave: 'pulse12',
+          duration: 0.24,
+          gain: 0.095,
+        });
+        this.triggerVoice({
+          freq: 220,
+          endFreq: 130.81,
+          wave: 'sine',
+          duration: 0.26,
+          gain: 0.11,
+          delay: 0.03,
+        });
+        this.playNoise({
+          duration: 0.2,
+          gain: 0.11,
+          filterType: 'bandpass',
+          startFreq: 720,
+          endFreq: 210,
+          q: 1.9,
+        });
+        break;
+
+      case 'fairy':
+        [659.25, 830.61, 987.77, 1318.51].forEach((f, i) => {
+          this.triggerVoice({
+            freq: f,
+            endFreq: f * 1.03,
+            wave: i % 2 === 0 ? 'sine' : 'pulse12',
+            duration: 0.14,
+            gain: 0.082,
+            delay: i * 0.042,
+          });
         });
         break;
 
@@ -2698,13 +3034,20 @@ export class AudioEngine {
   }
 
   playWindup(type = 'normal') {
-    const highSweep = type === 'psychic' || type === 'ice' || type === 'electric' || type === 'ghost';
-    const startFreq = highSweep ? 320 : 190;
-    const endFreq = highSweep ? 680 : 390;
+    const highSweep = type === 'psychic'
+      || type === 'ice'
+      || type === 'electric'
+      || type === 'ghost'
+      || type === 'fairy'
+      || type === 'flying'
+      || type === 'bug'
+      || type === 'steel';
+    const startFreq = highSweep ? 320 : (type === 'ground' || type === 'fighting' ? 160 : 190);
+    const endFreq = highSweep ? 680 : (type === 'dark' || type === 'poison' ? 280 : 390);
     this.triggerVoice({
       freq: startFreq,
       endFreq,
-      wave: type === 'ghost' ? 'sine' : 'triangle',
+      wave: type === 'ghost' || type === 'fairy' || type === 'dark' ? 'sine' : 'triangle',
       duration: 0.15,
       attack: 0.015,
       decay: 0.04,
@@ -3982,6 +4325,64 @@ export class AudioEngine {
           this.triggerVoice({ freq: f, wave: i % 2 === 0 ? 'pulse25' : 'sine', duration: 0.17, gain: 0.084, delay: 0.03 + i * 0.04 });
         });
         return;
+      case 'orichalcum_pulse':
+        this.triggerVoice({ freq: 146.83, endFreq: 58.0, wave: 'triangle', duration: 0.14, gain: 0.14 });
+        [329.63, 440.0, 554.37, 659.25].forEach((f, i) => {
+          this.triggerVoice({ freq: f, wave: 'pulse25', duration: 0.12, gain: 0.084, delay: 0.02 + i * 0.038 });
+        });
+        return;
+      case 'gale_wings':
+        this.playNoise({ duration: 0.2, gain: 0.12, filterType: 'bandpass', startFreq: 480, endFreq: 1180, q: 1.5 });
+        [392.0, 493.88, 587.33, 783.99].forEach((f, i) => {
+          this.triggerVoice({ freq: f, endFreq: f * 1.05, wave: i % 2 === 0 ? 'triangle' : 'sine', duration: 0.13, gain: 0.08, delay: i * 0.036 });
+        });
+        return;
+      case 'toxic_alchemy':
+        this.playNoise({ duration: 0.18, gain: 0.09, filterType: 'bandpass', startFreq: 780, endFreq: 320, q: 1.8 });
+        [311.13, 349.23, 415.3, 523.25].forEach((f, i) => {
+          this.triggerVoice({ freq: f, wave: i % 2 === 0 ? 'sine' : 'pulse12', duration: 0.14, gain: 0.08, delay: i * 0.04 });
+        });
+        return;
+      case 'stamina_earth':
+        this.triggerVoice({ freq: 130.81, endFreq: 42.0, wave: 'triangle', duration: 0.18, gain: 0.14 });
+        [293.66, 440.0, 587.33].forEach((f, i) => {
+          this.triggerVoice({ freq: f, wave: 'pulse25', duration: 0.14, gain: 0.08, delay: 0.03 + i * 0.042 });
+        });
+        return;
+      case 'swarm_resonance':
+        [659.25, 739.99, 880.0, 987.77].forEach((f, i) => {
+          this.triggerVoice({ freq: f, endFreq: f * 1.06, wave: 'pulse12', duration: 0.09, gain: 0.078, delay: i * 0.032 });
+        });
+        this.playNoise({ duration: 0.15, gain: 0.08, filterType: 'bandpass', startFreq: 1080, endFreq: 640, q: 1.6 });
+        return;
+      case 'corviknight_armor':
+        [493.88, 739.99, 987.77].forEach((f, i) => {
+          this.triggerVoice({ freq: f, wave: i % 2 === 0 ? 'pulse12' : 'sine', duration: 0.18, gain: 0.084, delay: i * 0.042 });
+        });
+        this.triggerVoice({ freq: 1479.98, wave: 'sine', duration: 0.22, gain: 0.06, delay: 0.08 });
+        return;
+      case 'supreme_overlord':
+        this.triggerVoice({ freq: 130.81, endFreq: 48.0, wave: 'triangle', duration: 0.16, gain: 0.13 });
+        [261.63, 311.13, 392.0, 523.25].forEach((f, i) => {
+          this.triggerVoice({ freq: f, wave: i % 2 === 0 ? 'pulse12' : 'sine', duration: 0.15, gain: 0.082, delay: 0.02 + i * 0.04 });
+        });
+        return;
+      case 'pixilate_aura':
+        [783.99, 987.77, 1174.66, 1318.51].forEach((f, i) => {
+          this.triggerVoice({ freq: f, endFreq: f * 1.02, wave: i % 2 === 0 ? 'sine' : 'pulse12', duration: 0.14, gain: 0.078, delay: i * 0.038 });
+        });
+        return;
+      case 'disguise_veil':
+        this.playNoise({ duration: 0.16, gain: 0.085, filterType: 'bandpass', startFreq: 960, endFreq: 440, q: 1.5 });
+        [659.25, 783.99, 932.33, 1174.66].forEach((f, i) => {
+          this.triggerVoice({ freq: f, wave: i % 2 === 0 ? 'sine' : 'triangle', duration: 0.15, gain: 0.08, delay: i * 0.04 });
+        });
+        return;
+      case 'tera_prism':
+        [523.25, 659.25, 783.99, 987.77, 1318.51].forEach((f, i) => {
+          this.triggerVoice({ freq: f, endFreq: f * 1.015, wave: i % 2 === 0 ? 'sine' : 'pulse12', duration: 0.18, gain: 0.082, delay: i * 0.036 });
+        });
+        return;
       default: {
         const fallbackByType = {
           grass: 'overgrow',
@@ -3993,6 +4394,14 @@ export class AudioEngine {
           ice: 'permafrost',
           ghost: 'shadow_cloak',
           dragon: 'dragon_heart',
+          fighting: 'orichalcum_pulse',
+          flying: 'gale_wings',
+          poison: 'toxic_alchemy',
+          ground: 'stamina_earth',
+          bug: 'swarm_resonance',
+          steel: 'corviknight_armor',
+          dark: 'supreme_overlord',
+          fairy: 'pixilate_aura',
         };
         if (fallbackByType[type]) {
           this.playAbilityCue(fallbackByType[type], 'normal');
@@ -4002,6 +4411,507 @@ export class AudioEngine {
         return;
       }
     }
+  }
+
+  _playSprint8MoveSfx(moveId) {
+    switch (moveId) {
+      case 'close_combat':
+        [0, 0.05, 0.1, 0.15].forEach((d, idx) => {
+          this.triggerVoice({
+            freq: 155 + idx * 24,
+            endFreq: 34,
+            wave: 'triangle',
+            duration: 0.085,
+            gain: 0.16,
+            delay: d,
+          });
+          this.triggerVoice({
+            freq: 440 + idx * 90,
+            endFreq: 220,
+            wave: 'pulse25',
+            duration: 0.065,
+            gain: 0.082,
+            delay: d + 0.01,
+          });
+        });
+        this.playNoise({ duration: 0.14, gain: 0.15, filterType: 'lowpass', startFreq: 680, endFreq: 120, delay: 0.14 });
+        return true;
+
+      case 'vacuum_wave':
+        this.playNoise({ duration: 0.2, gain: 0.13, filterType: 'bandpass', startFreq: 420, endFreq: 1120, q: 1.7 });
+        this.triggerVoice({ freq: 392.0, midFreq: 659.25, endFreq: 293.66, wave: 'pulse12', duration: 0.2, gain: 0.088 });
+        this.triggerVoice({ freq: 196.0, endFreq: 58.0, wave: 'triangle', duration: 0.16, gain: 0.14, delay: 0.08 });
+        return true;
+
+      case 'collision_course':
+        this.triggerVoice({ freq: 164.81, endFreq: 523.25, wave: 'pulse25', duration: 0.16, gain: 0.095 });
+        this.playPhysicalImpact(84);
+        this.triggerVoice({ freq: 110.0, endFreq: 26.0, wave: 'triangle', duration: 0.26, gain: 0.2, delay: 0.1 });
+        this.playNoise({ duration: 0.2, gain: 0.18, filterType: 'lowpass', startFreq: 860, endFreq: 110, delay: 0.1 });
+        return true;
+
+      case 'brave_bird':
+        this.triggerVoice({ freq: 1046.5, endFreq: 1318.51, wave: 'pulse12', duration: 0.09, gain: 0.082 });
+        this.playNoise({ duration: 0.24, gain: 0.16, filterType: 'bandpass', startFreq: 520, endFreq: 1240, q: 1.5, delay: 0.02 });
+        this.playPhysicalImpact(78);
+        return true;
+
+      case 'air_slash':
+        [0, 0.075].forEach((d, idx) => {
+          this.playNoise({
+            duration: 0.13,
+            gain: 0.14,
+            filterType: 'bandpass',
+            startFreq: idx === 0 ? 1140 : 1240,
+            endFreq: 440,
+            q: 1.8,
+            delay: d,
+          });
+          this.triggerVoice({
+            freq: idx === 0 ? 880.0 : 1046.5,
+            endFreq: idx === 0 ? 493.88 : 587.33,
+            wave: 'pulse12',
+            duration: 0.11,
+            gain: 0.085,
+            delay: d,
+          });
+        });
+        return true;
+
+      case 'tailwind_grace':
+        this.playNoise({ duration: 0.24, gain: 0.11, filterType: 'bandpass', startFreq: 460, endFreq: 1160, q: 1.4 });
+        [523.25, 659.25, 783.99, 1046.5, 1174.66].forEach((f, i) => {
+          this.triggerVoice({ freq: f, wave: i % 2 === 0 ? 'sine' : 'triangle', duration: 0.15, gain: 0.08, delay: i * 0.042 });
+        });
+        return true;
+
+      case 'sludge_wave':
+        this.playNoise({ duration: 0.28, gain: 0.15, filterType: 'lowpass', startFreq: 980, endFreq: 240 });
+        [
+          [349.23, 246.94, 0],
+          [415.3, 277.18, 0.06],
+          [311.13, 207.65, 0.12],
+        ].forEach(([f1, f2, d]) => {
+          this.triggerVoice({ freq: f1, endFreq: f2, wave: 'sine', duration: 0.12, gain: 0.105, delay: d });
+        });
+        return true;
+
+      case 'poison_jab':
+        this.triggerVoice({ freq: 830.61, endFreq: 349.23, wave: 'pulse12', duration: 0.11, gain: 0.088 });
+        this.triggerVoice({ freq: 622.25, endFreq: 277.18, wave: 'sine', duration: 0.12, gain: 0.085, delay: 0.045 });
+        this.playPhysicalImpact(68);
+        return true;
+
+      case 'malignant_chain':
+        [659.25, 493.88, 698.46, 466.16].forEach((f, i) => {
+          this.triggerVoice({
+            freq: f,
+            endFreq: f * 0.85,
+            wave: i % 2 === 0 ? 'pulse12' : 'sine',
+            duration: 0.12,
+            gain: 0.082,
+            delay: i * 0.048,
+          });
+        });
+        this.playNoise({ duration: 0.22, gain: 0.11, filterType: 'bandpass', startFreq: 920, endFreq: 280, q: 1.9, delay: 0.04 });
+        return true;
+
+      case 'earthquake':
+        [92, 118, 84].forEach((f, i) => {
+          this.triggerVoice({
+            freq: f,
+            endFreq: 22,
+            wave: 'triangle',
+            duration: 0.18,
+            gain: 0.21,
+            delay: i * 0.075,
+          });
+        });
+        [0, 0.08].forEach((d) => {
+          this.playNoise({ duration: 0.18, gain: 0.2, filterType: 'lowpass', startFreq: 620, endFreq: 85, q: 0.75, delay: d });
+        });
+        return true;
+
+      case 'earth_power':
+        this.triggerVoice({ freq: 110.0, endFreq: 38.0, wave: 'triangle', duration: 0.26, gain: 0.19 });
+        this.triggerVoice({ freq: 220.0, midFreq: 440.0, endFreq: 164.81, wave: 'pulse25', duration: 0.24, gain: 0.09, delay: 0.04 });
+        this.playNoise({ duration: 0.24, gain: 0.16, filterType: 'bandpass', startFreq: 480, endFreq: 1020, q: 1.2, delay: 0.05 });
+        return true;
+
+      case 'headlong_rush':
+        [0, 0.07].forEach((d, i) => {
+          this.triggerVoice({ freq: 135 + i * 20, endFreq: 28, wave: 'triangle', duration: 0.13, gain: 0.19, delay: d });
+        });
+        this.triggerVoice({ freq: 246.94, endFreq: 493.88, wave: 'pulse25', duration: 0.14, gain: 0.088 });
+        this.playNoise({ duration: 0.2, gain: 0.18, filterType: 'lowpass', startFreq: 720, endFreq: 110, delay: 0.08 });
+        return true;
+
+      case 'bug_buzz':
+        [0, 0.04, 0.08, 0.12].forEach((d, i) => {
+          this.triggerVoice({
+            freq: i % 2 === 0 ? 622.25 : 659.25,
+            endFreq: i % 2 === 0 ? 698.46 : 739.99,
+            wave: 'pulse12',
+            duration: 0.09,
+            gain: 0.08,
+            delay: d,
+          });
+        });
+        this.triggerVoice({ freq: 311.13, endFreq: 466.16, wave: 'sine', duration: 0.24, gain: 0.095 });
+        return true;
+
+      case 'x_scissor':
+        [0, 0.055].forEach((d, idx) => {
+          this.playNoise({
+            duration: 0.12,
+            gain: 0.14,
+            filterType: 'bandpass',
+            startFreq: 1200,
+            endFreq: 420,
+            q: 1.7,
+            delay: d,
+          });
+          this.triggerVoice({
+            freq: idx === 0 ? 783.99 : 987.77,
+            endFreq: idx === 0 ? 440.0 : 523.25,
+            wave: 'pulse12',
+            duration: 0.095,
+            gain: 0.085,
+            delay: d,
+          });
+        });
+        this.playPhysicalImpact(68);
+        return true;
+
+      case 'quiver_step':
+        [587.33, 739.99, 880.0, 1174.66, 1318.51].forEach((f, i) => {
+          this.triggerVoice({
+            freq: f,
+            endFreq: f * 1.04,
+            wave: i % 2 === 0 ? 'pulse12' : 'sine',
+            duration: 0.12,
+            gain: 0.078,
+            delay: i * 0.04,
+          });
+        });
+        return true;
+
+      case 'flash_cannon':
+        [880.0, 1174.66].forEach((f, i) => {
+          this.triggerVoice({ freq: f, wave: 'pulse12', duration: 0.07, gain: 0.078, delay: i * 0.035 });
+        });
+        this.triggerVoice({ freq: 1318.51, midFreq: 987.77, endFreq: 493.88, wave: 'sine', duration: 0.24, gain: 0.11, delay: 0.07 });
+        this.triggerVoice({ freq: 196.0, endFreq: 44.0, wave: 'triangle', duration: 0.2, gain: 0.16, delay: 0.09 });
+        return true;
+
+      case 'gigaton_hammer':
+        this.triggerVoice({ freq: 987.77, endFreq: 739.99, wave: 'pulse12', duration: 0.14, gain: 0.085 });
+        this.triggerVoice({ freq: 1479.98, endFreq: 1174.66, wave: 'sine', duration: 0.16, gain: 0.08, delay: 0.015 });
+        this.triggerVoice({ freq: 120, endFreq: 22, wave: 'triangle', duration: 0.28, gain: 0.22, delay: 0.05 });
+        this.playNoise({ duration: 0.24, gain: 0.22, filterType: 'lowpass', startFreq: 760, endFreq: 85, q: 0.75, delay: 0.05 });
+        return true;
+
+      case 'king_shield':
+        [392.0, 587.33, 783.99, 1174.66].forEach((f, i) => {
+          this.triggerVoice({
+            freq: f,
+            wave: i < 2 ? 'pulse25' : 'sine',
+            duration: 0.22,
+            attack: 0.008,
+            sustain: 0.52,
+            gain: 0.088,
+            delay: i * 0.045,
+          });
+        });
+        return true;
+
+      case 'dark_pulse':
+        this.triggerVoice({ freq: 261.63, midFreq: 311.13, endFreq: 146.83, wave: 'pulse12', duration: 0.28, gain: 0.092 });
+        [392.0, 311.13, 233.08].forEach((f, i) => {
+          this.triggerVoice({ freq: f, endFreq: f * 0.82, wave: 'sine', duration: 0.14, gain: 0.095, delay: 0.04 + i * 0.055 });
+        });
+        this.playNoise({ duration: 0.22, gain: 0.11, filterType: 'bandpass', startFreq: 760, endFreq: 200, q: 1.9, delay: 0.02 });
+        return true;
+
+      case 'kowtow_cleave':
+        this.triggerVoice({ freq: 1174.66, endFreq: 440.0, wave: 'pulse12', duration: 0.12, gain: 0.088 });
+        this.playNoise({ duration: 0.15, gain: 0.14, filterType: 'bandpass', startFreq: 1120, endFreq: 320, q: 1.8 });
+        this.playPhysicalImpact(80);
+        return true;
+
+      case 'lunar_shroud':
+        [329.63, 493.88, 659.25, 987.77].forEach((f, i) => {
+          this.triggerVoice({
+            freq: f,
+            wave: i % 2 === 0 ? 'sine' : 'pulse12',
+            duration: 0.24,
+            attack: 0.01,
+            sustain: 0.5,
+            gain: 0.085,
+            delay: i * 0.048,
+          });
+        });
+        this.playNoise({ duration: 0.2, gain: 0.08, filterType: 'bandpass', startFreq: 640, endFreq: 280, q: 1.7 });
+        return true;
+
+      case 'dazzling_gleam':
+        [783.99, 987.77, 1174.66, 1567.98].forEach((f, i) => {
+          this.triggerVoice({
+            freq: f,
+            endFreq: f * 1.04,
+            wave: i % 2 === 0 ? 'sine' : 'pulse12',
+            duration: 0.16,
+            gain: 0.082,
+            delay: i * 0.038,
+          });
+        });
+        this.playNoise({ duration: 0.16, gain: 0.09, filterType: 'bandpass', startFreq: 1220, endFreq: 680, q: 1.5, delay: 0.04 });
+        return true;
+
+      case 'play_rough':
+        [523.25, 659.25, 587.33, 783.99].forEach((f, i) => {
+          this.triggerVoice({
+            freq: f,
+            endFreq: f * 1.15,
+            wave: i % 2 === 0 ? 'pulse25' : 'triangle',
+            duration: 0.085,
+            gain: 0.085,
+            delay: i * 0.045,
+          });
+        });
+        this.playPhysicalImpact(72);
+        return true;
+
+      case 'geomancy_bloom':
+        [440.0, 554.37, 659.25, 880.0, 1108.73, 1318.51].forEach((f, i) => {
+          this.triggerVoice({
+            freq: f,
+            endFreq: f * 1.02,
+            wave: i % 2 === 0 ? 'sine' : 'pulse12',
+            duration: 0.18,
+            attack: 0.01,
+            sustain: 0.54,
+            gain: 0.082,
+            delay: i * 0.042,
+          });
+        });
+        return true;
+
+      case 'water_shuriken':
+        [0, 0.055, 0.11].forEach((d, i) => {
+          this.triggerVoice({
+            freq: 880.0 + i * 110,
+            endFreq: 493.88,
+            wave: 'pulse12',
+            duration: 0.09,
+            gain: 0.082,
+            delay: d,
+          });
+          this.playNoise({
+            duration: 0.09,
+            gain: 0.11,
+            filterType: 'lowpass',
+            startFreq: 1080,
+            endFreq: 340,
+            delay: d + 0.01,
+          });
+        });
+        return true;
+
+      case 'dragon_darts':
+        [0, 0.07].forEach((d, i) => {
+          this.triggerVoice({
+            freq: i === 0 ? 587.33 : 659.25,
+            endFreq: i === 0 ? 293.66 : 329.63,
+            wave: 'pulse25',
+            duration: 0.12,
+            gain: 0.092,
+            delay: d,
+          });
+          this.triggerVoice({
+            freq: 220.0 + i * 40,
+            endFreq: 44.0,
+            wave: 'triangle',
+            duration: 0.14,
+            gain: 0.15,
+            delay: d + 0.02,
+          });
+        });
+        return true;
+
+      case 'bitter_blade':
+        this.triggerVoice({ freq: 440.0, midFreq: 659.25, endFreq: 246.94, wave: 'pulse12', duration: 0.2, gain: 0.088 });
+        this.playNoise({ duration: 0.18, gain: 0.14, filterType: 'bandpass', startFreq: 980, endFreq: 340, q: 1.6 });
+        this.playPhysicalImpact(76);
+        return true;
+
+      case 'electro_drift':
+        this.triggerVoice({ freq: 392.0, midFreq: 987.77, endFreq: 1567.98, wave: 'pulse12', duration: 0.18, gain: 0.09 });
+        [1046.5, 1318.51, 880.0].forEach((f, i) => {
+          this.triggerVoice({
+            freq: f,
+            endFreq: f * 0.6,
+            wave: i % 2 === 0 ? 'pulse12' : 'pulse25',
+            duration: 0.1,
+            gain: 0.085,
+            delay: 0.07 + i * 0.036,
+          });
+        });
+        this.playNoise({ duration: 0.18, gain: 0.13, filterType: 'bandpass', startFreq: 1180, endFreq: 360, q: 1.5, delay: 0.06 });
+        return true;
+
+      default:
+        return false;
+    }
+  }
+
+  playPokemonCry(speciesOrId) {
+    let speciesId = 1;
+    let type = '';
+    let baseStats = null;
+
+    if (typeof speciesOrId === 'number' || typeof speciesOrId === 'string') {
+      const parsed = Number(speciesOrId);
+      if (Number.isFinite(parsed) && parsed > 0) {
+        speciesId = Math.max(1, Math.min(1025, Math.round(parsed)));
+      }
+    } else if (speciesOrId && typeof speciesOrId === 'object') {
+      const parsed = Number(speciesOrId.speciesId ?? speciesOrId.id ?? speciesOrId.species?.id);
+      if (Number.isFinite(parsed) && parsed > 0) {
+        speciesId = Math.max(1, Math.min(1025, Math.round(parsed)));
+      }
+      type = String(speciesOrId.type || speciesOrId.species?.type || '').toLowerCase();
+      baseStats = speciesOrId.baseStats || speciesOrId.species?.baseStats || null;
+    }
+
+    const hashSeed = (id, salt) => {
+      let h = (Math.imul(id ^ 0x9e3779b9, 0x85ebca6b) + Math.imul(salt + 1, 0xc2b2ae35)) >>> 0;
+      h ^= h >>> 16;
+      h = Math.imul(h, 0x7feb352d) >>> 0;
+      h ^= h >>> 15;
+      h = Math.imul(h, 0x846ca68b) >>> 0;
+      h ^= h >>> 16;
+      return h >>> 0;
+    };
+
+    const u0 = hashSeed(speciesId, 0) / 0x100000000;
+    const u1 = hashSeed(speciesId, 1) / 0x100000000;
+    const u2 = hashSeed(speciesId, 2) / 0x100000000;
+    const u3 = hashSeed(speciesId, 3) / 0x100000000;
+    const u4 = hashSeed(speciesId, 4) / 0x100000000;
+
+    const waves = ['pulse12', 'pulse25', 'triangle', 'sine'];
+    const typeWaveBias = {
+      electric: 0,
+      bug: 0,
+      steel: 0,
+      fighting: 1,
+      fire: 1,
+      dragon: 1,
+      dark: 1,
+      rock: 2,
+      ground: 2,
+      water: 2,
+      grass: 2,
+      normal: 2,
+      psychic: 3,
+      ghost: 3,
+      fairy: 3,
+      ice: 3,
+      flying: 3,
+      poison: 0,
+    };
+    const waveIdx = type && Object.prototype.hasOwnProperty.call(typeWaveBias, type)
+      ? (u0 < 0.6 ? typeWaveBias[type] : Math.floor(u0 * waves.length) % waves.length)
+      : Math.floor(u0 * waves.length) % waves.length;
+    const wave = waves[waveIdx];
+
+    let pitchBias = 0;
+    if (baseStats && typeof baseStats === 'object') {
+      const spd = Number(baseStats.spd) || 60;
+      const hp = Number(baseStats.hp) || 60;
+      pitchBias = Math.max(-75, Math.min(95, (spd - hp) * 1.1));
+    }
+    const rawBase = 175 + u1 * 485 + pitchBias;
+    const baseFreq = Number(Math.max(130, Math.min(820, rawBase)).toFixed(2));
+    const duration = Number((0.22 + u2 * 0.21).toFixed(3));
+
+    const contourMode = Math.floor(u3 * 5);
+    let midFreq = baseFreq * 1.18;
+    let endFreq = baseFreq * 0.86;
+    if (contourMode === 0) {
+      midFreq = baseFreq * (1.2 + u4 * 0.22);
+      endFreq = baseFreq * (1.02 + u2 * 0.16);
+    } else if (contourMode === 1) {
+      midFreq = baseFreq * (0.76 + u4 * 0.14);
+      endFreq = baseFreq * (1.28 + u2 * 0.2);
+    } else if (contourMode === 2) {
+      midFreq = baseFreq * (1.12 + u4 * 0.16);
+      endFreq = baseFreq * (0.64 + u2 * 0.12);
+    } else if (contourMode === 3) {
+      midFreq = baseFreq * (1.32 + u4 * 0.16);
+      endFreq = baseFreq * (0.82 + u2 * 0.14);
+    } else {
+      midFreq = baseFreq * (0.9 + u4 * 0.12);
+      endFreq = baseFreq * (1.36 + u2 * 0.18);
+    }
+
+    midFreq = Math.max(90, Math.min(1320, midFreq));
+    endFreq = Math.max(80, Math.min(1380, endFreq));
+
+    const primaryGain = 0.068;
+    const primaryOsc = this.triggerVoice({
+      freq: baseFreq,
+      midFreq,
+      endFreq,
+      wave,
+      attack: 0.012,
+      decay: duration * 0.28,
+      sustain: 0.48,
+      duration,
+      gain: primaryGain,
+    });
+
+    if (primaryOsc && u3 > 0.3) {
+      const harmRatio = u4 > 0.5 ? 1.5 : 0.5;
+      const harmWave = wave === 'pulse12' ? 'triangle' : 'sine';
+      this.triggerVoice({
+        freq: Math.max(70, Math.min(1400, baseFreq * harmRatio)),
+        midFreq: Math.max(70, Math.min(1400, midFreq * harmRatio)),
+        endFreq: Math.max(70, Math.min(1400, endFreq * harmRatio)),
+        wave: harmWave,
+        attack: 0.014,
+        decay: duration * 0.25,
+        sustain: 0.36,
+        duration: Math.max(0.12, duration * 0.78),
+        gain: 0.032,
+        delay: 0.035,
+      });
+    }
+
+    if (primaryOsc && u4 > 0.42) {
+      const vibShift = 1 + (0.018 + u2 * 0.016);
+      this.triggerVoice({
+        freq: Math.max(70, Math.min(1400, baseFreq * vibShift)),
+        midFreq: Math.max(70, Math.min(1400, midFreq / vibShift)),
+        endFreq: Math.max(70, Math.min(1400, endFreq * vibShift)),
+        wave: 'sine',
+        attack: 0.02,
+        decay: duration * 0.3,
+        sustain: 0.32,
+        duration: Math.max(0.1, duration * 0.72),
+        gain: 0.014,
+        delay: 0.025,
+      });
+    }
+
+    return {
+      speciesId,
+      baseFreq,
+      wave,
+      duration,
+      played: Boolean(primaryOsc),
+    };
   }
 }
 
