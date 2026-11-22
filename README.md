@@ -12,7 +12,14 @@ A zero-dependency, native ES6 module Pokémon adventure crafted for **Violet** a
 - **Secret Starlight Sky-Hop Arcade Mini-Game:** Unlock the hidden arcade cabinet in Starlight Village (by knocking 3 times, earning any Badge, or catching 5 Pokémon) to launch **Starlight Sky-Hop Arcade** (`js/minigame.js`) with your active Lead Pokémon, type-colored starlight trails, cycling biome sky gradients, non-repeating wave formations, direct touch/drag flight, Star Dash invulnerability, and Star Shard / item / Evolution Gem rewards!
 - **1,025-Dex UX & Cry Previews:** Search by name, `#id`, or seen ability; filter by caught status, biome, type, ability, or generation (`All Gens` and `Gen 1`–`Gen 9`); browse smoothly with `IntersectionObserver` lazy-loaded sprites; and preview Pokémon cries right from Pokédex cards, detail panels, and evolutions.
 - **Android/Tablet Web Audio & Living Battle Celebrations:** Synchronous multi-gesture Android/iPadOS Web Audio unlock with silent wake buffer, first-tap queued SFX playback, visibility pause/resume recovery, 4-mode encounter shutter transitions (`wild`, `rare`, `rival`, `shrine`), multi-color `#celebration-layer` confetti ribbons, and **1,025 deterministic procedural Web Audio Pokémon cries**.
-- **Resilient Offline PWA & 10-Archetype Fallbacks:** Backed by a `starlight-shell-v9` service worker precaching the app shell (including `js/minigame.js`), all 18 canonical elemental SVG mascots (`./assets/fallback/`), and Showdown/PokeAPI sprite cascades with **10-archetype** inline SVG silhouette and pixel-art follower fallbacks so offline play never stalls.
+- **Resilient Offline PWA & 10-Archetype Fallbacks:** Backed by a `starlight-shell-v10` service worker precaching the app shell (including `js/minigame.js`), all 18 canonical elemental SVG mascots (`./assets/fallback/`), and Showdown/PokeAPI sprite cascades with **10-archetype** inline SVG silhouette and pixel-art follower fallbacks so offline play never stalls.
+
+## CI/CD & Automated Verification
+
+Continuous integration and automated GitHub Pages deployment are configured in `.github/workflows/ci-cd.yml` using zero-build Node ESM gates:
+
+- `node scripts/ci-static-gate.mjs` — Validates JS/MJS syntax (`--check`), conflict-free source files, `manifest.json` metadata & PNG icon dimensions, `sw.js` `starlight-shell-v10` precache parity, and `1,025`-species / `100×84` world BFS invariants.
+- `node scripts/ci-browser-gate.mjs` — Launches Playwright Chromium against a local static server to run the `?test=true` suite, verify zero layout overflow/overlap across 6 mobile/tablet/desktop touch viewports, and confirm offline PWA boot after service worker registration.
 
 ## Local Preview & GitHub Pages
 

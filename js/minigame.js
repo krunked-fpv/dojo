@@ -234,6 +234,7 @@ export class StarlightMinigame {
     this.modalEl = typeof document !== 'undefined' ? document.getElementById('minigame-modal') : null;
     this.canvas = typeof document !== 'undefined' ? document.getElementById('minigame-canvas') : null;
     this.ctx = this.canvas?.getContext?.('2d') || null;
+    this.pauseBtn = typeof document !== 'undefined' ? document.getElementById('minigame-pause-btn') : null;
     this.closeBtn = typeof document !== 'undefined' ? document.getElementById('minigame-close-btn') : null;
     this.dashBtn = typeof document !== 'undefined' ? document.getElementById('minigame-dash-btn') : null;
     this.partnerPillEl = typeof document !== 'undefined' ? document.getElementById('minigame-partner-pill') : null;
@@ -248,6 +249,7 @@ export class StarlightMinigame {
     this.doneBtn = typeof document !== 'undefined' ? document.getElementById('minigame-done-btn') : null;
 
     this._open = false;
+    this.paused = false;
     this.rafId = null;
     this.lastFrameMs = 0;
 
@@ -298,11 +300,27 @@ export class StarlightMinigame {
 
     this._onKeyDown = (e) => this.handleKeyDown(e);
     this._onKeyUp = (e) => this.handleKeyUp(e);
+    this._onVisibilityChange = () => {
+      if (typeof document !== 'undefined' && document.hidden && this.isOpen() && !this.runEnded) {
+        this.pause();
+      }
+    };
+    this._onWindowBlur = () => {
+      if (this.isOpen() && !this.runEnded) {
+        this.pause();
+      }
+    };
 
     this.bindUI();
   }
 
   bindUI() {
+    this.pauseBtn?.addEventListener('click', () => {
+      this.audio?.unlock?.();
+      this.audio?.playMenuBlip?.(this.paused ? 720 : 520);
+      this.togglePause();
+    });
+
     this.closeBtn?.addEventListener('click', () => {
       this.audio?.playMenuBlip?.(480);
       this.close();
@@ -341,7 +359,7 @@ export class StarlightMinigame {
       };
 
       this.canvas.addEventListener('pointerdown', (e) => {
-        if (!this._open || this.runEnded) return;
+        if (!this._open || this.runEnded || this.paused) return;
         e.preventDefault();
         this.audio?.unlock?.();
         this.activePointerId = e.pointerId;
@@ -356,7 +374,7 @@ export class StarlightMinigame {
       });
 
       this.canvas.addEventListener('pointermove', (e) => {
-        if (!this._open || this.runEnded || !this.pointerActive) return;
+        if (!this._open || this.runEnded || this.paused || !this.pointerActive) return;
         if (this.activePointerId !== null && e.pointerId !== this.activePointerId) return;
         e.preventDefault();
         this.pointerTargetY = resolveCanvasY(e.clientY);
@@ -377,6 +395,10 @@ export class StarlightMinigame {
     if (typeof window !== 'undefined') {
       window.addEventListener('keydown', this._onKeyDown);
       window.addEventListener('keyup', this._onKeyUp);
+      window.addEventListener('blur', this._onWindowBlur);
+    }
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', this._onVisibilityChange);
     }
   }
 
@@ -385,7 +407,45 @@ export class StarlightMinigame {
     if (typeof window !== 'undefined') {
       window.removeEventListener('keydown', this._onKeyDown);
       window.removeEventListener('keyup', this._onKeyUp);
+      window.removeEventListener('blur', this._onWindowBlur);
     }
+    if (typeof document !== 'undefined') {
+      document.removeEventListener('visibilitychange', this._onVisibilityChange);
+    }
+  }
+
+  setPaused(nextPaused) {
+    const shouldPause = Boolean(nextPaused);
+    if (!this._open || this.runEnded) return false;
+    if (this.paused === shouldPause) return true;
+
+    this.paused = shouldPause;
+    if (shouldPause) {
+      this.keysHeld.clear();
+      this.pointerActive = false;
+      this.activePointerId = null;
+      this.pointerTargetY = null;
+      this._stopLoop();
+      this.syncHud();
+      this.render(typeof performance !== 'undefined' ? performance.now() : Date.now());
+    } else {
+      this.lastFrameMs = typeof performance !== 'undefined' ? performance.now() : Date.now();
+      this.syncHud();
+      this._startLoop();
+    }
+    return true;
+  }
+
+  pause() {
+    return this.setPaused(true);
+  }
+
+  resume() {
+    return this.setPaused(false);
+  }
+
+  togglePause() {
+    return this.setPaused(!this.paused);
   }
 
   isOpen() {
@@ -477,6 +537,7 @@ export class StarlightMinigame {
 
   startNewRun() {
     this._stopLoop();
+    this.paused = false;
     this.score = 0;
     this.wave = 1;
     this.hearts = MAX_HEARTS;
@@ -506,6 +567,7 @@ export class StarlightMinigame {
 
     this._beginWave(1);
     this.syncHud();
+    this.render(typeof performance !== 'undefined' ? performance.now() : Date.now());
     this._startLoop();
   }
 
@@ -513,6 +575,7 @@ export class StarlightMinigame {
     const wasOpen = this._open;
     this._stopLoop();
     this._open = false;
+    this.paused = false;
     this.pointerActive = false;
     this.activePointerId = null;
     this.pointerTargetY = null;
@@ -584,7 +647,7 @@ export class StarlightMinigame {
   }
 
   activateDash() {
-    if (!this._open || this.runEnded || this.dashCooldown > 0 || this.dashTimer > 0) {
+    if (!this._open || this.runEnded || this.paused || this.dashCooldown > 0 || this.dashTimer > 0) {
       return false;
     }
     this.dashTimer = 1.6;
@@ -598,30 +661,63 @@ export class StarlightMinigame {
 
   handleKeyDown(e) {
     if (!this.isOpen()) return;
-    if (e.code === 'Escape') {
+    const isEscape = e.code === 'Escape' || e.key === 'Escape';
+    if (isEscape) {
       e.preventDefault();
       this.close();
       return;
     }
-    if (this.runEnded) return;
-    if (e.code === 'ArrowUp' || e.code === 'KeyW') {
+
+    const isSpace = e.code === 'Space' || e.key === ' ';
+    const isEnter = e.code === 'Enter' || e.code === 'NumpadEnter' || e.key === 'Enter';
+    if (this.runEnded) {
+      if (!e.repeat && (isSpace || isEnter) && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        if (e.target === this.closeBtn || e.target === this.doneBtn) return;
+        e.preventDefault();
+        this.audio?.unlock?.();
+        this.audio?.playMenuBlip?.(740);
+        this.startNewRun();
+      }
+      return;
+    }
+
+    const isKeyP = e.code === 'KeyP' || e.key === 'p' || e.key === 'P';
+    if (isKeyP && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      if (!e.repeat) {
+        e.preventDefault();
+        this.audio?.unlock?.();
+        this.audio?.playMenuBlip?.(this.paused ? 720 : 520);
+        this.togglePause();
+      }
+      return;
+    }
+
+    if (this.paused) return;
+
+    const isUp = e.code === 'ArrowUp' || e.code === 'KeyW' || e.key === 'ArrowUp' || e.key === 'w' || e.key === 'W';
+    const isDown = e.code === 'ArrowDown' || e.code === 'KeyS' || e.key === 'ArrowDown' || e.key === 's' || e.key === 'S';
+    if (isUp) {
       e.preventDefault();
       this.keysHeld.add('up');
       this.pointerTargetY = null;
-    } else if (e.code === 'ArrowDown' || e.code === 'KeyS') {
+    } else if (isDown) {
       e.preventDefault();
       this.keysHeld.add('down');
       this.pointerTargetY = null;
-    } else if (e.code === 'Space') {
+    } else if (isSpace) {
       e.preventDefault();
-      this.activateDash();
+      if (!e.repeat) {
+        this.activateDash();
+      }
     }
   }
 
   handleKeyUp(e) {
-    if (e.code === 'ArrowUp' || e.code === 'KeyW') {
+    const isUp = e.code === 'ArrowUp' || e.code === 'KeyW' || e.key === 'ArrowUp' || e.key === 'w' || e.key === 'W';
+    const isDown = e.code === 'ArrowDown' || e.code === 'KeyS' || e.key === 'ArrowDown' || e.key === 's' || e.key === 'S';
+    if (isUp) {
       this.keysHeld.delete('up');
-    } else if (e.code === 'ArrowDown' || e.code === 'KeyS') {
+    } else if (isDown) {
       this.keysHeld.delete('down');
     }
   }
@@ -649,7 +745,7 @@ export class StarlightMinigame {
   }
 
   update(dt) {
-    if (!this._open || this.runEnded) return;
+    if (!this._open || this.runEnded || this.paused) return;
 
     const clampedDt = Math.min(0.05, Math.max(0.001, dt));
     if (this.dashTimer > 0) this.dashTimer = Math.max(0, this.dashTimer - clampedDt);
@@ -841,7 +937,11 @@ export class StarlightMinigame {
   endRun() {
     if (this.runEnded) return null;
     this.runEnded = true;
+    this.paused = false;
     this._stopLoop();
+    if (typeof document !== 'undefined' && (document.activeElement === this.pauseBtn || document.activeElement === this.dashBtn)) {
+      document.activeElement.blur();
+    }
 
     const rewards = this.computeRewards(this.score, this.wave);
     let recordRes = null;
@@ -908,11 +1008,19 @@ export class StarlightMinigame {
     if (this.hudComboEl) this.hudComboEl.textContent = `🔥 x${this.combo}`;
     if (this.hudBestEl) this.hudBestEl.textContent = `🏆 Best ${best}`;
 
+    if (this.pauseBtn) {
+      this.pauseBtn.disabled = this.runEnded;
+      this.pauseBtn.textContent = this.paused ? '▶️' : '⏸️';
+      this.pauseBtn.setAttribute('aria-label', this.paused ? 'Resume Arcade' : 'Pause Arcade');
+      this.pauseBtn.setAttribute('aria-pressed', this.paused ? 'true' : 'false');
+      this.pauseBtn.classList.toggle('is-paused', this.paused);
+    }
+
     if (this.dashBtn) {
       const dashing = this.dashTimer > 0;
       const cooling = this.dashCooldown > 0 && !dashing;
       this.dashBtn.classList.toggle('is-dashing', dashing);
-      this.dashBtn.disabled = this.runEnded || dashing || cooling;
+      this.dashBtn.disabled = this.runEnded || this.paused || dashing || cooling;
       this.dashBtn.textContent = dashing
         ? '⚡ Star Dashing!'
         : cooling
@@ -1037,18 +1145,17 @@ export class StarlightMinigame {
     ctx.stroke();
 
     const img = this.playerSpriteImg;
+    let drewSprite = false;
     if (img && img.complete && img.naturalWidth > 0) {
-      ctx.drawImage(img, -28, -28, 56, 56);
-    } else {
-      ctx.fillStyle = auraColor;
-      ctx.beginPath();
-      ctx.arc(0, 0, 18, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = '#ffffff';
-      ctx.font = '18px sans-serif';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(this.leadTypeInfo?.icon || '⭐', 0, 1);
+      try {
+        ctx.drawImage(img, -28, -28, 56, 56);
+        drewSprite = true;
+      } catch {
+        drewSprite = false;
+      }
+    }
+    if (!drewSprite) {
+      this._drawPartnerOrb(ctx);
     }
     ctx.restore();
 
@@ -1067,6 +1174,7 @@ export class StarlightMinigame {
     ctx.stroke();
     ctx.fillStyle = '#f8fafc';
     ctx.font = 'bold 12px sans-serif';
+    ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
     ctx.fillText(`🌌 ${sky.name}`, 24, 26);
 
@@ -1081,6 +1189,82 @@ export class StarlightMinigame {
     }
     ctx.restore();
 
+    if (this.paused && !this.runEnded) {
+      this._drawPauseOverlay(ctx);
+    }
+
+    ctx.restore();
+  }
+
+  _drawPartnerOrb(ctx) {
+    const typeColor = this.leadTypeInfo?.color || '#38bdf8';
+
+    // Golden protective ring around the fallback Partner Orb
+    ctx.beginPath();
+    ctx.arc(0, 0, 22, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(15, 23, 42, 0.42)';
+    ctx.fill();
+    ctx.lineWidth = 2.5;
+    ctx.strokeStyle = '#fde047';
+    ctx.stroke();
+
+    // Type-colored Starlight Partner Orb
+    ctx.beginPath();
+    ctx.arc(0, 0, 18, 0, Math.PI * 2);
+    if (typeof ctx.createRadialGradient === 'function') {
+      const orbGrad = ctx.createRadialGradient(-5, -5, 3, 0, 0, 18);
+      orbGrad.addColorStop(0, '#ffffff');
+      orbGrad.addColorStop(0.38, typeColor);
+      orbGrad.addColorStop(1, typeColor);
+      ctx.fillStyle = orbGrad;
+    } else {
+      ctx.fillStyle = typeColor;
+    }
+    ctx.fill();
+    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.78)';
+    ctx.stroke();
+
+    // Crisp centered type icon
+    ctx.fillStyle = '#ffffff';
+    ctx.font = 'bold 18px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.shadowColor = 'rgba(15, 23, 42, 0.85)';
+    ctx.shadowBlur = 4;
+    ctx.fillText(this.leadTypeInfo?.icon || '⭐', 0, 1);
+  }
+
+  _drawPauseOverlay(ctx) {
+    ctx.save();
+    ctx.fillStyle = 'rgba(7, 11, 20, 0.58)';
+    ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
+
+    const cardW = 290;
+    const cardH = 92;
+    const cardX = (CANVAS_W - cardW) / 2;
+    const cardY = (CANVAS_H - cardH) / 2;
+
+    ctx.fillStyle = 'rgba(15, 23, 42, 0.94)';
+    ctx.strokeStyle = '#fde047';
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    if (typeof ctx.roundRect === 'function') {
+      ctx.roundRect(cardX, cardY, cardW, cardH, 16);
+    } else {
+      ctx.rect(cardX, cardY, cardW, cardH);
+    }
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = '#fef08a';
+    ctx.font = 'bold 20px sans-serif';
+    ctx.fillText('⏸️ PAUSED', CANVAS_W / 2, cardY + 34);
+    ctx.fillStyle = '#cbd5e1';
+    ctx.font = 'bold 13px sans-serif';
+    ctx.fillText('Tap ▶️ or press P to resume flight', CANVAS_W / 2, cardY + 64);
     ctx.restore();
   }
 
@@ -1100,10 +1284,11 @@ export class StarlightMinigame {
 
   _startLoop() {
     this._stopLoop();
+    if (this.paused || !this._open || this.runEnded) return;
     if (typeof requestAnimationFrame !== 'function') return;
     this.lastFrameMs = typeof performance !== 'undefined' ? performance.now() : Date.now();
     const tick = (now) => {
-      if (!this._open || this.runEnded) {
+      if (!this._open || this.runEnded || this.paused) {
         this.rafId = null;
         return;
       }
@@ -1111,7 +1296,7 @@ export class StarlightMinigame {
       this.lastFrameMs = now;
       this.update(dt);
       this.render(now);
-      if (this._open && !this.runEnded) {
+      if (this._open && !this.runEnded && !this.paused) {
         this.rafId = requestAnimationFrame(tick);
       } else {
         this.rafId = null;
@@ -1130,6 +1315,7 @@ export class StarlightMinigame {
   getDiagnostics() {
     return {
       open: this.isOpen(),
+      paused: Boolean(this.paused),
       rafActive: this.rafId !== null,
       waveDeckRemaining: this.waveDeck.length,
       lastWaveId: this.lastWaveId,
