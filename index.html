@@ -57,7 +57,7 @@
           </button>
         </div>
 
-        <p class="boot-hint">Desktop: WASD / Arrow Keys + Space • Tablet: Touch D-Pad + A/B</p>
+        <p class="boot-hint">Tap or Drag anywhere on the island to move &amp; interact • Keyboard: WASD / Arrows + Space</p>
         <div id="pwa-install-banner" class="pwa-install-banner" hidden>
           <button id="pwa-install-btn" type="button" class="pwa-install-btn">📲 Install App</button>
           <button id="pwa-install-dismiss" type="button" class="pwa-install-dismiss" aria-label="Dismiss install prompt">✕</button>
@@ -99,8 +99,8 @@
           <button id="hud-btn-dex" type="button" class="hud-pill" title="Open Pokédex &amp; Team (P)">📖 Dex 1/1025</button>
           <button id="hud-btn-badges" type="button" class="hud-pill" title="View Elemental Badges">🏅 0/28</button>
           <span id="hud-install-group" class="hud-install-group" hidden><button id="hud-btn-install" type="button" class="hud-pill hud-install-pill" title="Install Starlight Island App">📲 Install</button><button id="hud-btn-install-dismiss" type="button" class="hud-install-dismiss" aria-label="Dismiss install">✕</button></span>
+          <button id="hud-btn-arcade" type="button" class="hud-icon-btn hud-arcade-btn" title="Play Starlight Sky-Hop Arcade" hidden>🕹️</button>
           <button id="hud-btn-mute" type="button" class="hud-icon-btn" title="Toggle Sound">🔊</button>
-          <button id="hud-btn-pad" type="button" class="hud-icon-btn" title="Toggle On-Screen Gamepad">🎮</button>
           <button id="hud-btn-settings" type="button" class="hud-icon-btn" title="Settings &amp; Trainer Switch">⚙️</button>
         </div>
       </header>
@@ -126,7 +126,12 @@
           <span class="dialogue-next">Tap or press Space ▸</span>
         </div>
 
-        <div id="encounter-flash" class="encounter-flash" hidden></div>
+        <div id="encounter-flash" class="encounter-flash" data-mode="wild" hidden>
+          <div class="encounter-beam encounter-beam-top" aria-hidden="true"></div>
+          <div class="encounter-beam encounter-beam-bottom" aria-hidden="true"></div>
+          <div class="encounter-burst" aria-hidden="true"></div>
+          <div id="encounter-callout" class="encounter-callout">⚡ WILD ENCOUNTER!</div>
+        </div>
 
         <!-- Battle Arena Overlay -->
         <section id="battle-screen" class="battle-screen" hidden>
@@ -220,30 +225,10 @@
           </div>
         </section>
       </div>
-
-      <!-- Virtual Tablet / Mobile Controls Dock -->
-      <section class="touch-controls" aria-label="Virtual Gamepad">
-        <div id="dpad" class="dpad" role="group" aria-label="Directional Pad">
-          <div class="dpad-cross">
-            <div class="dpad-arm dpad-up" data-dir="up"><span class="dpad-glyph" aria-hidden="true"></span></div>
-            <div class="dpad-arm dpad-left" data-dir="left"><span class="dpad-glyph" aria-hidden="true"></span></div>
-            <div class="dpad-center"><span class="dpad-pivot" aria-hidden="true"></span></div>
-            <div class="dpad-arm dpad-right" data-dir="right"><span class="dpad-glyph" aria-hidden="true"></span></div>
-            <div class="dpad-arm dpad-down" data-dir="down"><span class="dpad-glyph" aria-hidden="true"></span></div>
-          </div>
-        </div>
-
-        <div class="controls-center-hint">
-          <button id="quick-dex-btn" type="button" class="controls-quick-dex">📖 Pokédex &amp; Team</button>
-          <span>Slide thumb on D-Pad to steer</span>
-        </div>
-
-        <div class="action-cluster">
-          <button id="btn-b" type="button" class="action-pad-btn action-pad-b">B<small>BACK</small></button>
-          <button id="btn-a" type="button" class="action-pad-btn action-pad-a">A<small>ACT</small></button>
-        </div>
-      </section>
     </main>
+
+    <!-- Celebration Confetti & Ribbon Layer -->
+    <div id="celebration-layer" class="celebration-layer" aria-hidden="true" hidden></div>
 
     <!-- Badge Unlocked Toast -->
     <div id="badge-toast" class="badge-toast" hidden>
@@ -252,6 +237,43 @@
         <div class="badge-toast-eyebrow">NEW BADGE UNLOCKED!</div>
         <strong id="badge-toast-name">Meadow Badge</strong>
         <p id="badge-toast-desc">Forest Shrine Cleared!</p>
+      </div>
+    </div>
+
+    <!-- Secret Mini-Game Modal: Starlight Sky-Hop Arcade -->
+    <div id="minigame-modal" class="modal-backdrop minigame-backdrop" hidden>
+      <div class="modal-card minigame-card" role="dialog" aria-modal="true" aria-label="Starlight Sky-Hop Arcade">
+        <div class="modal-header minigame-header">
+          <div class="minigame-title-wrap">
+            <h2 class="modal-title">🕹️ Starlight Sky-Hop Arcade</h2>
+            <span id="minigame-partner-pill" class="minigame-partner-pill">⚡ Partner Flight</span>
+          </div>
+          <button id="minigame-close-btn" type="button" class="close-btn" aria-label="Close Arcade">✕</button>
+        </div>
+
+        <div class="minigame-hud">
+          <span id="minigame-hud-score" class="minigame-stat">⭐ 0</span>
+          <span id="minigame-hud-wave" class="minigame-stat">🌊 Wave 1</span>
+          <span id="minigame-hud-hearts" class="minigame-stat" aria-label="Heart Shields">❤️❤️❤️</span>
+          <span id="minigame-hud-combo" class="minigame-stat">🔥 x1</span>
+          <span id="minigame-hud-best" class="minigame-stat">🏆 Best 0</span>
+        </div>
+
+        <div class="minigame-stage">
+          <canvas id="minigame-canvas" width="760" height="420" class="minigame-canvas"></canvas>
+          <div id="minigame-results" class="minigame-results" hidden>
+            <div id="minigame-results-card" class="minigame-results-card"></div>
+            <div class="minigame-results-actions">
+              <button id="minigame-replay-btn" type="button" class="setting-toggle-btn is-primary">🕹️ Play Again</button>
+              <button id="minigame-done-btn" type="button" class="setting-toggle-btn">✨ Back to Island</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="minigame-controls">
+          <span class="minigame-controls-hint">Tap or Drag the sky to glide • Keyboard: ↑↓ / W S + Space</span>
+          <button id="minigame-dash-btn" type="button" class="minigame-dash-btn">⚡ Star Dash</button>
+        </div>
       </div>
     </div>
 
@@ -294,14 +316,6 @@
               <p>Subtle classic handheld phosphor glow</p>
             </div>
             <button id="setting-crt-btn" type="button" class="setting-toggle-btn">📺 CRT On</button>
-          </div>
-
-          <div class="setting-row">
-            <div>
-              <strong>On-Screen Touch Gamepad</strong>
-              <p>Auto shows on tablets/phones, or force On/Off</p>
-            </div>
-            <button id="setting-pad-btn" type="button" class="setting-toggle-btn">🎮 Auto</button>
           </div>
 
           <div class="setting-row">

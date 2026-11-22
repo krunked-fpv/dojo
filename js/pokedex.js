@@ -454,12 +454,14 @@ function formatCompassArrow(guidance, profile) {
 }
 
 export class PokedexUI {
-  constructor({ storage, audio, onTeamChanged, onBadgesUnlocked, onAppearanceChanged, onClose }) {
+  constructor({ storage, audio, onTeamChanged, onBadgesUnlocked, onAppearanceChanged, onCelebrate, onOpenArcade, onClose }) {
     this.storage = storage;
     this.audio = audio;
     this.onTeamChanged = onTeamChanged;
     this.onBadgesUnlocked = onBadgesUnlocked;
     this.onAppearanceChanged = onAppearanceChanged;
+    this.onCelebrate = onCelebrate;
+    this.onOpenArcade = onOpenArcade;
     this.onClose = onClose;
 
     this.modalEl = document.getElementById('pokedex-modal');
@@ -1315,6 +1317,12 @@ export class PokedexUI {
     };
 
     this.onTeamChanged?.();
+    this.onCelebrate?.({
+      icon: '🌟',
+      title: `EVOLVED INTO ${evo.newName || option.targetName}!`,
+      subtitle: `${evo.oldName || oldName} evolved in Starlight glory!`,
+      tone: 'gold',
+    });
     if (res?.newBadges?.length) {
       this.onBadgesUnlocked?.(res.newBadges);
     }
@@ -1361,6 +1369,12 @@ export class PokedexUI {
     };
 
     this.onTeamChanged?.();
+    this.onCelebrate?.({
+      icon: '⚡',
+      title: `STAR RANK ★${newTier}!`,
+      subtitle: `${mon.displayName || mon.name} powered up!`,
+      tone: 'starlight',
+    });
     if (res.newBadges?.length) {
       this.onBadgesUnlocked?.(res.newBadges);
     }
@@ -1407,6 +1421,12 @@ export class PokedexUI {
     };
 
     this.onTeamChanged?.();
+    this.onCelebrate?.({
+      icon: tier.icon || '💖',
+      title: 'BUDDY CHEER!',
+      subtitle: `${mon.displayName || mon.name} Bond ${finalBond}/100 (${tier.label})!`,
+      tone: 'heal',
+    });
     if (res.newBadges?.length) {
       this.onBadgesUnlocked?.(res.newBadges);
     }
@@ -1541,6 +1561,20 @@ export class PokedexUI {
         this.render();
       });
       banner.appendChild(copy);
+      const sparkBurst = document.createElement('div');
+      sparkBurst.className = 'evo-sparkle-burst';
+      sparkBurst.setAttribute('aria-hidden', 'true');
+      const sparkIcons = ['✨', '🌟', '💫', '⭐', '💖', '✨'];
+      sparkIcons.forEach((glyph, sIdx) => {
+        const dot = document.createElement('span');
+        dot.className = 'evo-sparkle-dot';
+        dot.textContent = glyph;
+        dot.style.left = `${10 + sIdx * 15}%`;
+        dot.style.top = `${18 + (sIdx % 3) * 24}%`;
+        dot.style.setProperty('--spark-delay', `${sIdx * 75}ms`);
+        sparkBurst.appendChild(dot);
+      });
+      banner.appendChild(sparkBurst);
       banner.appendChild(dismissBtn);
       wrap.appendChild(banner);
     }
@@ -1979,6 +2013,43 @@ export class PokedexUI {
       </div>
     `;
     wrap.appendChild(compassCard);
+
+    const arcadeUnlocked = Boolean(this.storage?.isArcadeUnlocked?.(profile) ?? profile?.arcade?.unlocked);
+    const arcadeData = profile?.arcade || {};
+    const arcadeCard = document.createElement('div');
+    arcadeCard.className = `guide-arcade-card ${arcadeUnlocked ? 'is-unlocked' : 'is-locked'}`;
+    const arcadeCopy = document.createElement('div');
+    arcadeCopy.className = 'guide-arcade-copy';
+    if (arcadeUnlocked) {
+      arcadeCopy.innerHTML = `
+        <strong>🕹️ Secret Starlight Arcade — Sky-Hop Unlocked!</strong>
+        <p>Glide through starlit biome skies with your Lead Pokémon to collect Star Shards, Items &amp; Gems!</p>
+        <div class="guide-arcade-stats">
+          <span>🏆 Best: ${Number(arcadeData.highScore) || 0}</span>
+          <span>🌊 Best Wave: ${Number(arcadeData.bestWave) || 0}</span>
+          <span>🎮 Flights: ${Number(arcadeData.plays) || 0}</span>
+        </div>
+      `;
+      const playArcadeBtn = document.createElement('button');
+      playArcadeBtn.id = 'guide-arcade-play-btn';
+      playArcadeBtn.type = 'button';
+      playArcadeBtn.className = 'mini-btn is-accent guide-arcade-btn';
+      playArcadeBtn.textContent = '🕹️ Play Sky-Hop!';
+      playArcadeBtn.addEventListener('click', () => {
+        this.audio?.playMenuBlip?.(760);
+        this.onOpenArcade?.();
+      });
+      arcadeCard.appendChild(arcadeCopy);
+      arcadeCard.appendChild(playArcadeBtn);
+    } else {
+      const knocks = Number(arcadeData.secretKnocks) || 0;
+      arcadeCopy.innerHTML = `
+        <strong>🕹️ Secret Starlight Arcade (Hidden Mystery)</strong>
+        <p>Rumor tells of a glowing arcade cabinet hidden in Starlight Village! Knock 3 times on the Village cabinet (${knocks}/3), earn any Badge, or catch 5 Pokémon to unlock Sky-Hop.</p>
+      `;
+      arcadeCard.appendChild(arcadeCopy);
+    }
+    wrap.appendChild(arcadeCard);
 
     const biomesHeading = document.createElement('h3');
     biomesHeading.className = 'section-heading';

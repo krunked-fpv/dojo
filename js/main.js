@@ -23,6 +23,7 @@ import { THEMES, audio } from './audio.js';
 import { InputController } from './input.js';
 import { OverworldEngine, drawTrainerPortrait } from './overworld.js';
 import { BattleEngine } from './battle.js';
+import { StarlightMinigame } from './minigame.js';
 import {
   PokedexUI,
   getBiomeScaledInfo,
@@ -98,16 +99,17 @@ class GameApp {
     this.starterStyleBarEl = document.getElementById('starter-style-bar');
     this.starterCardsEl = document.getElementById('starter-cards');
 
+    this.hudBarEl = document.querySelector('.hud-bar');
+    this.overworldCanvasEl = document.getElementById('overworld-canvas');
     this.hudPortraitEl = document.getElementById('hud-portrait');
     this.hudTrainerNameEl = document.getElementById('hud-trainer-name');
     this.hudLeadLabelEl = document.getElementById('hud-lead-label');
     this.hudLeadHpEl = document.getElementById('hud-lead-hp');
     this.hudDexBtn = document.getElementById('hud-btn-dex');
     this.hudBadgesBtn = document.getElementById('hud-btn-badges');
+    this.hudArcadeBtn = document.getElementById('hud-btn-arcade');
     this.hudMuteBtn = document.getElementById('hud-btn-mute');
-    this.hudPadBtn = document.getElementById('hud-btn-pad');
     this.hudSettingsBtn = document.getElementById('hud-btn-settings');
-    this.quickDexBtn = document.getElementById('quick-dex-btn');
 
     this.biomeBannerEl = document.getElementById('biome-banner');
     this.compassHudEl = document.getElementById('compass-hud');
@@ -118,6 +120,8 @@ class GameApp {
     this.worldDialogueEl = document.getElementById('world-dialogue');
     this.worldDialogueTextEl = document.getElementById('world-dialogue-text');
     this.encounterFlashEl = document.getElementById('encounter-flash');
+    this.encounterCalloutEl = document.getElementById('encounter-callout');
+    this.celebrationLayerEl = document.getElementById('celebration-layer');
 
     this.badgeToastEl = document.getElementById('badge-toast');
     this.badgeToastIconEl = document.getElementById('badge-toast-icon');
@@ -128,7 +132,6 @@ class GameApp {
     this.settingsCloseBtn = document.getElementById('settings-close-btn');
     this.settingMuteBtn = document.getElementById('setting-mute-btn');
     this.settingCrtBtn = document.getElementById('setting-crt-btn');
-    this.settingPadBtn = document.getElementById('setting-pad-btn');
     this.settingPaceBtn = document.getElementById('setting-pace-btn');
     this.settingSwitchBtn = document.getElementById('setting-switch-trainer-btn');
     this.settingInstallRowEl = document.getElementById('setting-install-row');
@@ -150,7 +153,6 @@ class GameApp {
     this.resetStatusEl = document.getElementById('reset-status-msg');
 
     this.dialogueOpen = false;
-    this.manualBattlePad = false;
     this._wasInBattle = false;
     this._wasModalOpen = false;
     this._lastCompassHidden = null;
@@ -159,6 +161,11 @@ class GameApp {
     this._starterFallbackAura = null;
     this.biomeBannerTimer = null;
     this.badgeToastTimer = null;
+    this.badgeQueue = [];
+    this.badgeShowing = false;
+    this.celebrationTimer = null;
+    this._pendingShrineData = null;
+    this._preBattleShrineTrialCount = null;
     this.resetRedirectTimer = null;
     this.encounterTransitioning = false;
     this.encounterTimer = null;
@@ -178,6 +185,11 @@ class GameApp {
       audio,
       onTeamChanged: () => this.refreshHud(),
       onBadgesUnlocked: (badges) => this.showBadgeToast(badges),
+      onCelebrate: (opts) => this.triggerCelebration(opts),
+      onOpenArcade: () => {
+        this.pokedex.close();
+        this.openMinigame();
+      },
       onAppearanceChanged: (overrideAppearance = null) => {
         const p = storage.getActiveProfile();
         if (p) {
@@ -198,6 +210,18 @@ class GameApp {
       },
     });
 
+    this.minigame = new StarlightMinigame({
+      storage,
+      audio,
+      onCelebrate: (opts) => this.triggerCelebration(opts),
+      onRewardsEarned: () => this.refreshHud(),
+      onClose: () => {
+        this.refreshHud();
+        this.syncControlVisibility();
+        this.syncOverworldPause();
+      },
+    });
+
     this.battle = new BattleEngine({
       storage,
       audio,
@@ -206,13 +230,14 @@ class GameApp {
       onHudRefresh: () => this.refreshHud(),
     });
 
-    this.overworld = new OverworldEngine(document.getElementById('overworld-canvas'), {
+    this.overworld = new OverworldEngine(this.overworldCanvasEl, {
       getProfile: () => storage.getActiveProfile(),
       onStepSaved: (x, y, dir, incSteps) => {
         storage.updatePosition(x, y, dir, incSteps);
         this.updateCompassHud();
       },
       onWildEncounter: (biomeId, encounterMeta = {}) => this.startWildEncounter(biomeId, encounterMeta),
+      onDiscoveryNode: (node) => this.handleDiscoveryNode(node),
       onInteract: (target) => this.handleWorldInteract(target),
       onHealSpot: () => this.handleHealSpot(false),
       onBiomeChange: (biome, announce) => this.handleBiomeChange(biome, announce),
@@ -261,17 +286,9 @@ class GameApp {
     audio.setMuted(settings.muted);
     this.cabinetEl?.classList.toggle('crt-enabled', settings.crtEnabled);
 
-    document.body.classList.remove('force-controls', 'hide-controls');
-    if (settings.showTouchPad === 'show') document.body.classList.add('force-controls');
-    if (settings.showTouchPad === 'hide') document.body.classList.add('hide-controls');
-
     if (this.hudMuteBtn) this.hudMuteBtn.textContent = settings.muted ? '🔇' : '🔊';
     if (this.settingMuteBtn) this.settingMuteBtn.textContent = settings.muted ? '🔇 Muted' : '🔊 Sound On';
     if (this.settingCrtBtn) this.settingCrtBtn.textContent = settings.crtEnabled ? '📺 CRT On' : '📺 CRT Off';
-    if (this.settingPadBtn) {
-      const labels = { auto: '🎮 Auto', show: '🎮 Always On', hide: '🎮 Hidden' };
-      this.settingPadBtn.textContent = labels[settings.showTouchPad] || '🎮 Auto';
-    }
     if (this.settingPaceBtn) {
       const paceLabels = { cinema: '🎬 Cinema', classic: '⚡ Classic', fast: '🚀 Fast' };
       const pace = settings.battlePace || 'cinema';
@@ -282,10 +299,7 @@ class GameApp {
 
   syncControlVisibility() {
     const inBattle = Boolean(this.battle?.active || this.encounterTransitioning);
-    const modalOpen = Boolean(this.pokedex?.isOpen() || this.isSettingsOpen());
-    if (!inBattle) {
-      this.manualBattlePad = false;
-    }
+    const modalOpen = Boolean(this.pokedex?.isOpen() || this.isSettingsOpen() || this.minigame?.isOpen());
 
     const becameInBattle = inBattle && !this._wasInBattle;
     const becameModalOpen = modalOpen && !this._wasModalOpen;
@@ -295,27 +309,11 @@ class GameApp {
     if (typeof document !== 'undefined' && document.body) {
       document.body.classList.toggle('in-battle', inBattle);
       document.body.classList.toggle('modal-open', modalOpen);
-      document.body.classList.toggle('manual-battle-pad', inBattle && this.manualBattlePad);
     }
 
     if (becameInBattle || becameModalOpen) {
       this.input.clearAll();
-    }
-
-    if (this.hudPadBtn) {
-      const settings = storage.getSettings();
-      const active = inBattle ? this.manualBattlePad : settings.showTouchPad === 'show';
-      this.hudPadBtn.classList.toggle('is-active', active);
-      const nextTitle = inBattle
-        ? (this.manualBattlePad ? 'Hide On-Screen Gamepad in Battle' : 'Show On-Screen Gamepad in Battle')
-        : ({
-            auto: 'Gamepad Mode: Auto (Tap to cycle)',
-            show: 'Gamepad Mode: Always On (Tap to cycle)',
-            hide: 'Gamepad Mode: Hidden (Tap to cycle)',
-          }[settings.showTouchPad] || 'Toggle On-Screen Gamepad');
-      if (this.hudPadBtn.title !== nextTitle) {
-        this.hudPadBtn.title = nextTitle;
-      }
+      this.overworld?.clearTouchNavigation?.();
     }
   }
 
@@ -445,9 +443,10 @@ class GameApp {
       this.openPokedex('badges');
     });
 
-    document.getElementById('quick-dex-btn')?.addEventListener('click', () => {
-      audio.playMenuBlip(680);
-      this.openPokedex('team');
+    this.hudArcadeBtn?.addEventListener('click', () => {
+      audio.unlock?.();
+      audio.playMenuBlip(760);
+      this.openMinigame();
     });
 
     this.compassHudEl?.addEventListener('click', () => {
@@ -458,31 +457,13 @@ class GameApp {
     this.hudMuteBtn?.addEventListener('click', () => this.toggleMute());
     this.settingMuteBtn?.addEventListener('click', () => this.toggleMute());
 
-    this.hudPadBtn?.addEventListener('click', () => {
-      audio.playMenuBlip(640);
-      const inBattle = Boolean(this.battle?.active || this.encounterTransitioning);
-      if (inBattle) {
-        this.manualBattlePad = !this.manualBattlePad;
-        this.syncControlVisibility();
-      } else {
-        const current = storage.getSettings().showTouchPad;
-        const order = ['auto', 'show', 'hide'];
-        const next = order[(order.indexOf(current) + 1) % order.length];
-        storage.updateSettings({ showTouchPad: next });
-        this.applySettings();
-      }
-      this.blurFocusedControl();
-    });
-
-    this.settingPadBtn?.addEventListener('click', () => {
-      audio.playMenuBlip(640);
-      const current = storage.getSettings().showTouchPad;
-      const order = ['auto', 'show', 'hide'];
-      const next = order[(order.indexOf(current) + 1) % order.length];
-      storage.updateSettings({ showTouchPad: next });
-      this.applySettings();
-      this.blurFocusedControl();
-    });
+    const wakeAudio = () => {
+      audio.unlock?.();
+    };
+    this.overworldCanvasEl?.addEventListener('pointerdown', wakeAudio, { passive: true });
+    this.overworldCanvasEl?.addEventListener('touchstart', wakeAudio, { passive: true });
+    this.hudBarEl?.addEventListener('pointerdown', wakeAudio, { passive: true });
+    this.hudBarEl?.addEventListener('touchstart', wakeAudio, { passive: true });
 
     this.settingPaceBtn?.addEventListener('click', () => {
       audio.playMenuBlip(640);
@@ -520,6 +501,7 @@ class GameApp {
       audio.playMenuBlip(640);
       this.closeSettings();
       this.pokedex.close();
+      this.minigame?.close?.();
       if (this.battle.active) this.battle.stop({ outcome: 'escaped', faintedAll: false });
       this.showBootScreen();
     });
@@ -624,6 +606,7 @@ class GameApp {
 
   bindInputEvents() {
     this.input.on('action', () => {
+      if (this.minigame?.isOpen()) return;
       if (this.dialogueOpen) {
         this.closeDialogue();
         return;
@@ -638,6 +621,10 @@ class GameApp {
     });
 
     this.input.on('cancel', () => {
+      if (this.minigame?.isOpen()) {
+        this.minigame.close();
+        return;
+      }
       if (this.dialogueOpen) {
         this.closeDialogue();
         return;
@@ -657,7 +644,7 @@ class GameApp {
     });
 
     this.input.on('pokedex', () => {
-      if (this.gameShellEl.hidden || this.battle.active || this.encounterTransitioning || this.isSettingsOpen()) return;
+      if (this.gameShellEl.hidden || this.battle.active || this.encounterTransitioning || this.isSettingsOpen() || this.minigame?.isOpen()) return;
       if (this.pokedex.isOpen()) {
         this.pokedex.close();
         this.syncOverworldPause();
@@ -694,21 +681,110 @@ class GameApp {
       clearTimeout(this.encounterTimer);
       this.encounterTimer = null;
     }
+    if (typeof this.encounterResolver === 'function') {
+      const resolve = this.encounterResolver;
+      this.encounterResolver = null;
+      resolve();
+    }
     if (this.encounterFlashEl) {
       this.encounterFlashEl.hidden = true;
+      this.encounterFlashEl.dataset.mode = 'wild';
     }
+  }
+
+  clearCelebration() {
+    if (this.celebrationTimer !== null) {
+      clearTimeout(this.celebrationTimer);
+      this.celebrationTimer = null;
+    }
+    if (this.celebrationLayerEl) {
+      this.celebrationLayerEl.hidden = true;
+      this.celebrationLayerEl.innerHTML = '';
+    }
+  }
+
+  triggerCelebration({ icon = '✨', title = 'CELEBRATION!', subtitle = '', tone = 'gold', durationMs = 2400 } = {}) {
+    const layer = this.celebrationLayerEl;
+    if (!layer) return;
+
+    if (this.celebrationTimer !== null) {
+      clearTimeout(this.celebrationTimer);
+      this.celebrationTimer = null;
+    }
+
+    layer.dataset.tone = tone || 'gold';
+    layer.innerHTML = '';
+
+    const palettes = {
+      gold: ['#fde047', '#f59e0b', '#38bdf8', '#f472b6', '#ffffff'],
+      quest: ['#4ade80', '#fde047', '#38bdf8', '#a78bfa', '#ffffff'],
+      heal: ['#f472b6', '#fbcfe8', '#fde047', '#38bdf8', '#ffffff'],
+      starlight: ['#38bdf8', '#c084fc', '#fde047', '#67e8f9', '#ffffff'],
+      arcade: ['#38bdf8', '#f472b6', '#fde047', '#a78bfa', '#4ade80'],
+      badge: ['#fde047', '#fbbf24', '#c084fc', '#38bdf8', '#ffffff'],
+      shrine: ['#a78bfa', '#2dd4bf', '#fde047', '#38bdf8', '#ffffff'],
+    };
+    const colors = palettes[tone] || palettes.gold;
+
+    for (let i = 0; i < 26; i++) {
+      const conf = document.createElement('span');
+      conf.className = `celebration-confetti${i % 3 === 0 ? ' is-star' : ''}`;
+      const angle = (Math.PI * 2 * i) / 26 + ((i % 2) * 0.14);
+      const dist = 70 + (i % 5) * 34;
+      conf.style.setProperty('--dx', `${Math.round(Math.cos(angle) * dist)}px`);
+      conf.style.setProperty('--dy', `${Math.round(Math.sin(angle) * dist - 28)}px`);
+      conf.style.setProperty('--rot', `${160 + (i * 37) % 240}deg`);
+      conf.style.setProperty('--confetti-delay', `${(i % 6) * 28}ms`);
+      conf.style.setProperty('--confetti-color', colors[i % colors.length]);
+      layer.appendChild(conf);
+    }
+
+    const ribbon = document.createElement('div');
+    ribbon.className = 'celebration-ribbon';
+    const iconSpan = document.createElement('span');
+    iconSpan.className = 'celebration-ribbon-icon';
+    iconSpan.textContent = icon || '✨';
+    const copy = document.createElement('div');
+    copy.className = 'celebration-ribbon-copy';
+    const titleEl = document.createElement('strong');
+    titleEl.textContent = title || 'CELEBRATION!';
+    copy.appendChild(titleEl);
+    if (subtitle) {
+      const subEl = document.createElement('span');
+      subEl.textContent = subtitle;
+      copy.appendChild(subEl);
+    }
+    ribbon.appendChild(iconSpan);
+    ribbon.appendChild(copy);
+    layer.appendChild(ribbon);
+
+    layer.hidden = false;
+    this.celebrationTimer = setTimeout(() => {
+      this.celebrationTimer = null;
+      if (this.celebrationLayerEl) {
+        this.celebrationLayerEl.hidden = true;
+        this.celebrationLayerEl.innerHTML = '';
+      }
+    }, Math.max(800, Number(durationMs) || 2400));
   }
 
   showBootScreen() {
     this.cancelEncounterTransition();
+    this.clearCelebration();
+    this.badgeQueue = [];
+    this.badgeShowing = false;
+    clearTimeout(this.badgeToastTimer);
+    if (this.badgeToastEl) this.badgeToastEl.hidden = true;
+    this._pendingShrineData = null;
+    this._preBattleShrineTrialCount = null;
     if (this.battle?.active) {
       this.battle.stop({ outcome: 'escaped', faintedAll: false });
     }
     this.pokedex?.close?.();
+    this.minigame?.close?.();
     if (this.isSettingsOpen()) {
       this.settingsModalEl.hidden = true;
     }
-    this.manualBattlePad = false;
     this._starterFallbackStyle = null;
     this._starterFallbackAcc = null;
     this._starterFallbackAura = null;
@@ -1025,18 +1101,16 @@ class GameApp {
     this.hudBadgesBtn.textContent = `🏅 ${profile.badges.length}/${BADGES.length}`;
 
     const evoReady = hasAnyReadyEvolutionSafe(profile, storage);
-    const quickDexBtn = this.quickDexBtn || document.getElementById('quick-dex-btn');
     this.hudDexBtn?.classList.toggle('has-evo-ready', evoReady);
-    quickDexBtn?.classList.toggle('has-evo-ready', evoReady);
     if (this.hudDexBtn) {
       this.hudDexBtn.title = evoReady
         ? 'Open Pokédex & Team (P) — ✨ Evolution Ready!'
         : 'Open Pokédex & Team (P)';
     }
-    if (quickDexBtn) {
-      quickDexBtn.title = evoReady
-        ? 'Open Pokédex & Team — ✨ Evolution Ready!'
-        : 'Open Pokédex & Team';
+
+    const arcadeUnlocked = Boolean(storage.isArcadeUnlocked?.(profile) ?? profile?.arcade?.unlocked);
+    if (this.hudArcadeBtn) {
+      this.hudArcadeBtn.hidden = !arcadeUnlocked;
     }
 
     this.overworld?.syncFollower?.();
@@ -1074,6 +1148,7 @@ class GameApp {
       this.encounterTransitioning ||
       this.dialogueOpen ||
       this.pokedex?.isOpen() ||
+      this.minigame?.isOpen() ||
       this.isSettingsOpen()
     );
   }
@@ -1149,6 +1224,7 @@ class GameApp {
       this.encounterTransitioning ||
       this.battle.active ||
       this.pokedex.isOpen() ||
+      this.minigame?.isOpen() ||
       this.isSettingsOpen()
     );
     this.overworld.setPaused(paused);
@@ -1236,7 +1312,18 @@ class GameApp {
     return parts.join(', ');
   }
 
-  handleNpcInteract(npc) {
+  _resolveTargetCoords(target, profile) {
+    const parts = String(target?.key || '').split(',').map((v) => Number(v));
+    if (parts.length === 2 && Number.isFinite(parts[0]) && Number.isFinite(parts[1])) {
+      return { tx: parts[0], ty: parts[1] };
+    }
+    return {
+      tx: Number(profile?.pos?.x) || 8,
+      ty: Number(profile?.pos?.y) || 15,
+    };
+  }
+
+  handleNpcInteract(npc, target = null) {
     if (!npc) return;
     storage.markNpcTalked?.(npc.id);
     const profile = storage.getActiveProfile();
@@ -1251,13 +1338,25 @@ class GameApp {
       }
       if (quest.check?.(profile)) {
         const res = storage.completeQuest?.(quest.id, quest.rewards || {});
-        audio.playLevelUp();
+        if (typeof audio.playQuestCompleteFanfare === 'function') {
+          audio.playQuestCompleteFanfare();
+        } else {
+          audio.playLevelUp?.();
+        }
+        const { tx, ty } = this._resolveTargetCoords(target, profile);
+        this.overworld?.triggerCelebrationBurst?.(tx, ty, 'quest');
         this.overworld.refreshInteractHint();
         this.refreshHud();
+        const rewardText = this.formatRewardSummary(quest.rewards);
+        this.triggerCelebration({
+          icon: '📜',
+          title: `QUEST COMPLETE: ${quest.title}!`,
+          subtitle: rewardText || 'Reward Earned!',
+          tone: 'quest',
+        });
         if (res?.newBadges?.length) {
           this.showBadgeToast(res.newBadges);
         }
-        const rewardText = this.formatRewardSummary(quest.rewards);
         const msg = quest.completeDialogue
           ? `✨ Quest Complete (${quest.title})! ${npc.name}: "${quest.completeDialogue}"${rewardText ? ` [${rewardText}]` : ''}`
           : `✨ Quest Complete: ${quest.title}!${rewardText ? ` Earned ${rewardText}!` : ''}`;
@@ -1274,8 +1373,44 @@ class GameApp {
     this.refreshHud();
   }
 
+  handleDiscoveryNode(node = {}) {
+    if (this.battle?.active || this.encounterTransitioning) return;
+    const profile = storage.getActiveProfile();
+    if (!profile) return;
+
+    if (typeof storage.addStarShards === 'function') {
+      storage.addStarShards(2);
+    } else {
+      storage.addRewards({ starShards: 2 });
+    }
+
+    if (typeof audio.playArcadeStar === 'function') {
+      audio.playArcadeStar(3);
+    } else if (typeof audio.playChestFanfare === 'function') {
+      audio.playChestFanfare();
+    } else {
+      audio.playLevelUp?.();
+    }
+
+    const tx = Number.isFinite(Number(node?.x)) ? Number(node.x) : profile.pos.x;
+    const ty = Number.isFinite(Number(node?.y)) ? Number(node.y) : profile.pos.y;
+    this.overworld?.triggerCelebrationBurst?.(tx, ty, 'starlight');
+    this.triggerCelebration({
+      icon: '☄️',
+      title: 'STARFALL DISCOVERY!',
+      subtitle: '+2 ✨ Star Shards gathered!',
+      tone: 'starlight',
+    });
+    this.refreshHud();
+    this.openDialogue('☄️ A radiant Starfall Crystal shimmered in the wild! You collected +2 ✨ Star Shards!');
+  }
+
   handleWorldInteract(target) {
+    if (!target) return;
     audio.playMenuBlip(700);
+    const profile = storage.getActiveProfile();
+    const { tx, ty } = this._resolveTargetCoords(target, profile);
+
     if (target.type === 'sign') {
       this.openDialogue(target.data);
     } else if (target.type === 'heal') {
@@ -1283,26 +1418,66 @@ class GameApp {
     } else if (target.type === 'chest') {
       const chest = target.data;
       if (storage.markChestOpened(chest.id)) {
-        audio.playLevelUp();
+        if (typeof audio.playChestFanfare === 'function') {
+          audio.playChestFanfare();
+        } else {
+          audio.playLevelUp?.();
+        }
         storage.addRewards(chest.rewards);
         this.overworld.refreshInteractHint();
         this.refreshHud();
+        this.overworld?.triggerCelebrationBurst?.(tx, ty, 'gold');
+        this.triggerCelebration({
+          icon: '💎',
+          title: 'TREASURE FOUND!',
+          subtitle: this.formatRewardSummary(chest.rewards) || chest.label || 'Starlight Treasure!',
+          tone: 'gold',
+        });
         this.openDialogue(chest.message);
       } else {
         this.openDialogue('This treasure chest has already been opened!');
       }
     } else if (target.type === 'shrine') {
       const shrine = target.data;
-      const profile = storage.getActiveProfile();
       if (profile?.shrinesCleared.includes(shrine.id)) {
-        this.openDialogue(shrine.clearedText);
+        this.startShrineEncounter(shrine, { isTrial: true });
       } else {
-        this.startShrineEncounter(shrine);
+        this.startShrineEncounter(shrine, { isTrial: false });
       }
     } else if (target.type === 'rival') {
       this.startRivalEncounter(target.data);
     } else if (target.type === 'npc') {
-      this.handleNpcInteract(target.data);
+      this.handleNpcInteract(target.data, target);
+    } else if (target.type === 'arcade') {
+      const unlocked = Boolean(
+        storage.isArcadeUnlocked?.(profile) ??
+        (profile?.arcade?.unlocked || (profile?.badges?.length || 0) >= 1 || countCaughtSpecies(profile) >= 5),
+      );
+      if (unlocked) {
+        this.openMinigame();
+        return;
+      }
+      const knockRes = storage.recordSecretKnock?.() || { knocks: 1, unlocked: false, justUnlocked: false };
+      if (knockRes.unlocked || knockRes.justUnlocked) {
+        this.overworld?.triggerCelebrationBurst?.(tx, ty, 'arcade');
+        this.triggerCelebration({
+          icon: '🕹️',
+          title: 'SECRET ARCADE UNLOCKED!',
+          subtitle: 'Starlight Sky-Hop Arcade is now open!',
+          tone: 'arcade',
+        });
+        if (typeof audio.playArcadeUnlockFanfare === 'function') {
+          audio.playArcadeUnlockFanfare();
+        } else {
+          audio.playBadgeFanfare?.();
+        }
+        this.refreshHud();
+        this.openMinigame();
+      } else if (knockRes.knocks === 1) {
+        this.openDialogue('🕹️ *Tap-tap!* A warm starlight hum echoes inside this mysterious cabinet... (Knock 1/3 — Knock twice more, earn 1 Badge, or catch 5 Pokémon!)');
+      } else {
+        this.openDialogue(`🕹️ *Spark-chime!* Constellations flicker behind the dark glass screen! Almost awake... (Knock ${knockRes.knocks}/3!)`);
+      }
     } else if (target.type === 'landmark') {
       const lm = target.data;
       if (typeof lm === 'string') {
@@ -1329,6 +1504,14 @@ class GameApp {
     storage.healTeam(true);
     this.refreshHud();
     audio.playHealChime();
+    this.overworld?.triggerCelebrationBurst?.(profile.pos.x, profile.pos.y, 'heal');
+    this.triggerCelebration({
+      icon: '💖',
+      title: 'TEAM RESTORED!',
+      subtitle: 'Full HP, PP & Berry Potions refilled!',
+      tone: 'heal',
+      durationMs: 1800,
+    });
     this.openDialogue('✨ Starlight Fountain restored your whole team to full HP & PP and refilled Berry Potions!');
   }
 
@@ -1339,30 +1522,60 @@ class GameApp {
     return sum / profile.team.length;
   }
 
-  async triggerEncounterTransition(bgmTheme = 'battle') {
+  async triggerEncounterTransition(bgmTheme = 'battle', meta = {}) {
     const token = ++this.encounterToken;
     this.encounterTransitioning = true;
-    this.manualBattlePad = false;
     this._starterFallbackStyle = null;
     this._starterFallbackAcc = null;
     this._starterFallbackAura = null;
     this.input.clearAll();
+    this.overworld?.clearTouchNavigation?.();
     this.syncControlVisibility();
     this.syncOverworldPause();
     audio.stopBGM();
     audio.playEncounterAlert();
 
+    const mode = ['wild', 'rare', 'rival', 'shrine'].includes(meta?.mode)
+      ? meta.mode
+      : (bgmTheme === 'shrine' || meta?.isShrine)
+        ? 'shrine'
+        : (bgmTheme === 'rival' || meta?.isTrainer)
+          ? 'rival'
+          : (meta?.isRarePatch || meta?.isShiny || meta?.isElite)
+            ? 'rare'
+            : 'wild';
+    const modeLabels = {
+      wild: '⚡ WILD ENCOUNTER!',
+      rare: '✨ SHIMMER ENCOUNTER!',
+      rival: '⚔️ RIVAL DUEL!',
+      shrine: '⛩️ SHRINE GUARDIAN!',
+    };
+
     try {
       if (this.encounterFlashEl) {
+        this.encounterFlashEl.dataset.mode = mode;
+        if (this.encounterCalloutEl) {
+          this.encounterCalloutEl.textContent = modeLabels[mode] || modeLabels.wild;
+        }
         this.encounterFlashEl.hidden = false;
+        void this.encounterFlashEl.offsetWidth;
         await new Promise((res) => {
           if (this.encounterTimer !== null) {
             clearTimeout(this.encounterTimer);
           }
+          if (typeof this.encounterResolver === 'function') {
+            const prevResolve = this.encounterResolver;
+            this.encounterResolver = null;
+            prevResolve();
+          }
+          this.encounterResolver = res;
           this.encounterTimer = setTimeout(() => {
             this.encounterTimer = null;
+            if (this.encounterResolver === res) {
+              this.encounterResolver = null;
+            }
             res();
-          }, 380);
+          }, 400);
         });
         this.encounterFlashEl.hidden = true;
       }
@@ -1389,9 +1602,14 @@ class GameApp {
     const wild = rollWildPokemon(biomeId, supportsProfileRoll ? (profile || avgLevel) : avgLevel, encounterMeta);
     if (!wild) return;
 
-    const ready = await this.triggerEncounterTransition('battle');
+    const mode = (wild.isShiny || wild.isElite || encounterMeta?.isRarePatch) ? 'rare' : 'wild';
+    const ready = await this.triggerEncounterTransition('battle', {
+      mode,
+      isRarePatch: Boolean(encounterMeta?.isRarePatch),
+      isShiny: Boolean(wild.isShiny),
+      isElite: Boolean(wild.isElite),
+    });
     if (!ready || this.battle.active) return;
-    this.manualBattlePad = false;
     this.battle.start({
       enemy: wild,
       biomeId,
@@ -1403,25 +1621,62 @@ class GameApp {
     this.updateCompassHud();
   }
 
-  async startShrineEncounter(shrine) {
-    if (this.battle.active || this.encounterTransitioning) return;
+  async startShrineEncounter(shrine, { isTrial = false } = {}) {
+    if (!shrine || this.battle.active || this.encounterTransitioning) return;
     if (!storage.ensureHealthyParty()) return;
     const profile = storage.getActiveProfile();
-    const guardSpec = typeof PokemonMod.getScaledShrineGuard === 'function'
-      ? (PokemonMod.getScaledShrineGuard(shrine, profile) || {})
-      : {};
-    const guardianId = guardSpec.guardianId ?? shrine.guardianId;
-    const guardianLevel = Math.max(1, Math.min(50, Number(guardSpec.level ?? shrine.level) || shrine.level || 10));
-    const upgradeTier = Math.max(0, Number(guardSpec.upgradeTier) || 0);
-    const guardian = createPokemon(guardianId, guardianLevel, shrine.biome, { upgradeTier });
-    const ready = await this.triggerEncounterTransition('shrine');
-    if (!ready || this.battle.active) return;
-    this.manualBattlePad = false;
+    const isAstralTrial = Boolean(isTrial || profile?.shrinesCleared?.includes(shrine.id));
+
+    let guardianId = shrine.guardianId;
+    let guardianLevel = shrine.level || 10;
+    let upgradeTier = 0;
+    let isElite = false;
+    let shrineData = shrine;
+
+    if (isAstralTrial) {
+      const trialSpec = typeof PokemonMod.getScaledShrineTrial === 'function'
+        ? (PokemonMod.getScaledShrineTrial(shrine, profile) || {})
+        : {};
+      guardianId = trialSpec.guardianId ?? shrine.guardianId;
+      guardianLevel = Math.max(1, Math.min(50, Number(trialSpec.level ?? (shrine.level + 3)) || 12));
+      upgradeTier = Math.max(1, Number(trialSpec.upgradeTier) || 2);
+      isElite = trialSpec.isElite ?? true;
+      const trialNumber = Math.max(1, Number(trialSpec.trialNumber) || ((profile?.shrineTrialCounts?.[shrine.id] || 0) + 1));
+      const guardianName = SPECIES[guardianId]?.name || 'Guardian';
+      shrineData = {
+        ...shrine,
+        isAstralTrial: true,
+        trialNumber,
+        intro: `⛩️ Astral Shrine Trial #${trialNumber}! Trial Boss ${guardianName} tests your Starlight Mastery!`,
+      };
+      this._preBattleShrineTrialCount = Number(profile?.shrineTrialCounts?.[shrine.id]) || 0;
+    } else {
+      const guardSpec = typeof PokemonMod.getScaledShrineGuard === 'function'
+        ? (PokemonMod.getScaledShrineGuard(shrine, profile) || {})
+        : {};
+      guardianId = guardSpec.guardianId ?? shrine.guardianId;
+      guardianLevel = Math.max(1, Math.min(50, Number(guardSpec.level ?? shrine.level) || shrine.level || 10));
+      upgradeTier = Math.max(0, Number(guardSpec.upgradeTier) || 0);
+      this._preBattleShrineTrialCount = null;
+    }
+
+    const guardian = createPokemon(guardianId, guardianLevel, shrine.biome, { upgradeTier, isElite });
+    this._pendingShrineData = shrineData;
+    const ready = await this.triggerEncounterTransition('shrine', {
+      mode: 'shrine',
+      isShrine: true,
+      isAstralTrial,
+    });
+    if (!ready || this.battle.active) {
+      this._pendingShrineData = null;
+      this._preBattleShrineTrialCount = null;
+      return;
+    }
     this.battle.start({
       enemy: guardian,
       biomeId: 'shrine',
       isShrine: true,
-      shrineData: shrine,
+      shrineData,
     });
     this.syncControlVisibility();
     this.syncOverworldPause();
@@ -1456,9 +1711,11 @@ class GameApp {
       .filter(Boolean);
     if (enemyParty.length === 0) return;
 
-    const ready = await this.triggerEncounterTransition(THEMES.rival ? 'rival' : 'battle');
+    const ready = await this.triggerEncounterTransition(THEMES.rival ? 'rival' : 'battle', {
+      mode: 'rival',
+      isTrainer: true,
+    });
     if (!ready || this.battle.active) return;
-    this.manualBattlePad = false;
     this.battle.start({
       enemy: enemyParty[0],
       enemyParty,
@@ -1474,7 +1731,10 @@ class GameApp {
   }
 
   handleBattleEnd(result) {
-    this.manualBattlePad = false;
+    const shrineData = result?.shrineData || this._pendingShrineData || null;
+    const preTrialCount = this._preBattleShrineTrialCount;
+    this._pendingShrineData = null;
+    this._preBattleShrineTrialCount = null;
     let pendingDialogue = null;
 
     if (result?.faintedAll) {
@@ -1502,6 +1762,30 @@ class GameApp {
         pendingDialogue = rewardText
           ? `${winText} [Earned ${rewardText}!]`
           : winText;
+      } else if (result?.outcome === 'won' && result?.isShrine && shrineData?.isAstralTrial) {
+        const afterCount = Number(storage.getActiveProfile()?.shrineTrialCounts?.[shrineData.id]) || 0;
+        const alreadyRecorded = Boolean(
+          result?.shrineTrialRecorded ||
+          result?.trialRecorded ||
+          (preTrialCount !== null && afterCount > preTrialCount),
+        );
+        if (!alreadyRecorded) {
+          if (typeof storage.recordShrineTrialWin === 'function') {
+            const trialRes = storage.recordShrineTrialWin(shrineData.id, { starShards: 3, starBalls: 1 });
+            if (trialRes?.newBadges?.length) {
+              this.showBadgeToast(trialRes.newBadges);
+            }
+          } else {
+            storage.addRewards({ starShards: 3, starBalls: 1 });
+          }
+        }
+        this.triggerCelebration({
+          icon: '⛩️',
+          title: `ASTRAL TRIAL #${shrineData.trialNumber || 1} CLEARED!`,
+          subtitle: '+3 ✨ Star Shards • +1 🌟 Star Ball',
+          tone: 'shrine',
+        });
+        pendingDialogue = `⛩️ Astral Shrine Trial #${shrineData.trialNumber || 1} Victory! Earned +3 ✨ Star Shards & +1 🌟 Star Ball!`;
       }
     }
 
@@ -1521,19 +1805,57 @@ class GameApp {
 
   showBadgeToast(badges) {
     if (!badges || badges.length === 0 || !this.badgeToastEl) return;
-    const first = badges[0];
-    this.badgeToastIconEl.textContent = first.icon;
-    this.badgeToastNameEl.textContent = first.name;
-    this.badgeToastDescEl.textContent = badges.length > 1
-      ? `+ ${badges.length - 1} more badge unlocked!`
-      : first.description;
+    for (const badge of badges) {
+      if (!badge) continue;
+      if (!this.badgeQueue.some((queued) => queued.id === badge.id)) {
+        this.badgeQueue.push(badge);
+      }
+    }
+    if (!this.badgeShowing) {
+      this._showNextBadgeToast();
+    }
+  }
+
+  _showNextBadgeToast() {
+    if (!this.badgeToastEl || this.badgeQueue.length === 0) {
+      this.badgeShowing = false;
+      if (this.badgeToastEl) this.badgeToastEl.hidden = true;
+      return;
+    }
+
+    this.badgeShowing = true;
+    const badge = this.badgeQueue.shift();
+    const remaining = this.badgeQueue.length;
+    this.badgeToastIconEl.textContent = badge.icon;
+    this.badgeToastNameEl.textContent = badge.name;
+    this.badgeToastDescEl.textContent = remaining > 0
+      ? `${badge.description} (${remaining} more queued)`
+      : badge.description;
     this.badgeToastEl.hidden = false;
     audio.playBadgeFanfare();
+    this.triggerCelebration({
+      icon: badge.icon || '🏅',
+      title: `BADGE UNLOCKED: ${badge.name}!`,
+      subtitle: badge.description,
+      tone: 'badge',
+      durationMs: 2400,
+    });
 
     clearTimeout(this.badgeToastTimer);
     this.badgeToastTimer = setTimeout(() => {
-      this.badgeToastEl.hidden = true;
-    }, 4400);
+      this._showNextBadgeToast();
+    }, 3200);
+  }
+
+  openMinigame() {
+    if (this.battle?.active || this.encounterTransitioning) return;
+    if (this.dialogueOpen) this.closeDialogue();
+    if (this.pokedex?.isOpen()) this.pokedex.close();
+    if (this.isSettingsOpen()) this.closeSettings();
+    this.overworld?.clearTouchNavigation?.();
+    this.minigame?.open();
+    this.syncControlVisibility();
+    this.syncOverworldPause();
   }
 
   openPokedex(tab = 'dex') {
@@ -1571,6 +1893,7 @@ class GameApp {
       encounterTransitioning: this.encounterTransitioning,
       battle: this.battle?.getDiagnostics?.() || null,
       audio: this.audio?.getDiagnostics?.() || null,
+      minigame: this.minigame?.getDiagnostics?.() || null,
     };
   }
 
