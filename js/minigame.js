@@ -899,14 +899,25 @@ export class StarlightMinigame {
   }
 
   computeRewards(score = this.score, wave = this.wave) {
-    const safeScore = Math.max(0, Math.floor(Number(score) || 0));
-    const starShards = Math.min(8, Math.max(1, 1 + Math.floor(safeScore / 120)));
+    const rawScore = Number(score);
+    const safeScore = Number.isFinite(rawScore) ? Math.max(0, Math.floor(rawScore)) : 0;
+    const rawWave = Number(wave);
+    const safeWave = Number.isFinite(rawWave) ? Math.max(1, Math.floor(rawWave)) : 1;
+
+    if (safeScore < 60) {
+      return { starShards: 0, potions: 0 };
+    }
+
+    const starShards = Math.min(8, Math.floor(safeScore / 60));
     const potions = safeScore >= 240 ? 2 : 1;
     const greatBalls = safeScore >= 150 ? (safeScore >= 400 ? 2 : 1) : 0;
-    const starBalls = safeScore >= 320 || wave >= 5 ? 1 : 0;
+    const starBalls = (safeScore >= 320 || (safeScore >= 180 && safeWave >= 5)) ? 1 : 0;
+    const cheerCharges = safeScore >= 120 ? 1 : 0;
+
     const rewards = { starShards, potions };
     if (greatBalls > 0) rewards.greatBalls = greatBalls;
     if (starBalls > 0) rewards.starBalls = starBalls;
+    if (cheerCharges > 0) rewards.cheerCharges = cheerCharges;
     if (safeScore >= 500) {
       const gemKeys = Object.keys(EVOLUTION_ITEMS || {});
       if (gemKeys.length > 0) {
@@ -923,6 +934,7 @@ export class StarlightMinigame {
     if (rewards.potions) chips.push(`🍓 +${rewards.potions} Berry Potion${rewards.potions > 1 ? 's' : ''}`);
     if (rewards.greatBalls) chips.push(`🔵 +${rewards.greatBalls} Great Ball${rewards.greatBalls > 1 ? 's' : ''}`);
     if (rewards.starBalls) chips.push(`🌟 +${rewards.starBalls} Star Ball${rewards.starBalls > 1 ? 's' : ''}`);
+    if (rewards.cheerCharges) chips.push(`💖 +${rewards.cheerCharges} Cheer Heart${rewards.cheerCharges > 1 ? 's' : ''}`);
     if (rewards.gems && typeof rewards.gems === 'object') {
       for (const [gemId, count] of Object.entries(rewards.gems)) {
         if (count > 0) {
@@ -961,13 +973,17 @@ export class StarlightMinigame {
 
     this.syncHud();
     const rewardChips = this._formatRewardBadges(rewards);
+    const hasRewards = rewardChips.length > 0;
+    const displayChips = hasRewards
+      ? rewardChips
+      : ['✨ Score 60+ pts to win Star Shards & prizes!'];
     const highScore = recordRes?.highScore ?? Math.max(this.score, this.storage?.getActiveProfile?.()?.arcade?.highScore || 0);
-    const isNewBest = Boolean(recordRes?.isNewBest);
+    const isNewBest = Boolean(recordRes?.isNewBest) && this.score > 0;
 
     if (this.resultsCardEl) {
       this.resultsCardEl.innerHTML = `
         ${isNewBest ? '<span class="minigame-new-best">🏆 NEW HIGH SCORE!</span>' : ''}
-        <h3>✨ Sky-Hop Flight Complete!</h3>
+        <h3>${hasRewards ? '✨ Sky-Hop Flight Complete!' : '🌟 Nice Try, Sky Flyer!'}</h3>
         <div class="minigame-results-stats">
           <span>⭐ Score: <strong>${this.score}</strong></span>
           <span>🌊 Wave: <strong>${this.wave}</strong></span>
@@ -975,7 +991,7 @@ export class StarlightMinigame {
           <span>🏆 Best: <strong>${highScore}</strong></span>
         </div>
         <div class="minigame-results-rewards">
-          ${rewardChips.map((c) => `<span class="quest-reward-chip">${c}</span>`).join('')}
+          ${displayChips.map((c) => `<span class="quest-reward-chip${hasRewards ? '' : ' is-retry-tip'}">${c}</span>`).join('')}
         </div>
       `;
     }
@@ -983,14 +999,20 @@ export class StarlightMinigame {
       this.resultsEl.hidden = false;
     }
 
-    this.audio?.playArcadeUnlockFanfare?.();
+    if (hasRewards) {
+      this.audio?.playArcadeUnlockFanfare?.();
+    } else {
+      this.audio?.playMenuBlip?.(380);
+    }
     this.onRewardsEarned?.(rewards, recordRes);
-    this.onCelebrate?.({
-      icon: '🕹️',
-      title: isNewBest ? 'NEW SKY-HOP RECORD!' : 'SKY-HOP REWARDS EARNED!',
-      subtitle: rewardChips.join(' • '),
-      tone: 'arcade',
-    });
+    if (hasRewards) {
+      this.onCelebrate?.({
+        icon: '🕹️',
+        title: isNewBest ? 'NEW SKY-HOP RECORD!' : 'SKY-HOP REWARDS EARNED!',
+        subtitle: rewardChips.join(' • '),
+        tone: 'arcade',
+      });
+    }
 
     return { score: this.score, wave: this.wave, stars: this.starsCollected, rewards, recordRes };
   }
