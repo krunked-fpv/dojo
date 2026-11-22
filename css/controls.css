@@ -3,6 +3,8 @@
 .touch-controls {
   display: none;
   flex-shrink: 0;
+  min-width: 0;
+  max-width: 100%;
   align-items: center;
   justify-content: space-between;
   gap: 14px;

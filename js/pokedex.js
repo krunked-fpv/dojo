@@ -21,7 +21,22 @@ import {
 import { attachPokemonSprite } from './pokemon.js';
 import { drawTrainerPortrait } from './overworld.js';
 
-const BIOME_ORDER = ['village', 'forest', 'cave', 'water', 'volcano', 'peak', 'grove', 'desert', 'marsh', 'sanctum'];
+const BIOME_ORDER = [
+  'village',
+  'forest',
+  'cave',
+  'water',
+  'volcano',
+  'peak',
+  'grove',
+  'desert',
+  'marsh',
+  'sanctum',
+  'canyon',
+  'reef',
+  'ruins',
+  'rift',
+];
 
 const FALLBACK_STYLES = {
   default: { id: 'default', name: 'Signature Outfit', icon: '✨', outfitPrimary: '#a855f7', outfitSecondary: '#f472b6', accent: '#c084fc', accentDark: '#7e22ce', accentSoft: 'rgba(192, 132, 252, 0.22)' },
@@ -66,6 +81,16 @@ const FALLBACK_BIOME_OFFSETS = {
   desert: 1,
   marsh: 2,
   sanctum: 3,
+  canyon: 2,
+  reef: 3,
+  ruins: 3,
+  rift: 4,
+};
+
+const FALLBACK_GEM_INFO = {
+  prism_gem: { icon: '💠', name: 'Prism Gem' },
+  chrono_gem: { icon: '⏳', name: 'Chrono Amber' },
+  nebula_gem: { icon: '☄️', name: 'Nebula Core' },
 };
 
 export function getAbilitySafe(monOrSpecies) {
@@ -352,7 +377,7 @@ function formatEvolutionCondition(rule) {
   if (!rule) return '';
   const parts = [];
   if (rule.item) {
-    const gem = EVOLUTION_ITEMS?.[rule.item];
+    const gem = EVOLUTION_ITEMS?.[rule.item] || FALLBACK_GEM_INFO[rule.item];
     parts.push(`${gem?.icon || '💎'} ${gem?.name || rule.item}`);
   }
   if (rule.minLevel) {
@@ -370,7 +395,7 @@ function formatRewardsList(rewards = {}) {
   if (rewards.gems && typeof rewards.gems === 'object') {
     for (const [gemId, count] of Object.entries(rewards.gems)) {
       if (count > 0) {
-        const gem = EVOLUTION_ITEMS?.[gemId] || (gemId === 'prism_gem' ? { icon: '💠', name: 'Prism Gem' } : null);
+        const gem = EVOLUTION_ITEMS?.[gemId] || FALLBACK_GEM_INFO[gemId] || null;
         chips.push(`${gem?.icon || '💎'} ${count} ${gem?.name || gemId}`);
       }
     }
@@ -425,16 +450,25 @@ export class PokedexUI {
     this.activeTab = 'dex';
     this.dexFilter = 'all';
     this.dexTypeFilter = 'all';
+    this.dexAbilityFilter = 'all';
     this.dexSearchQuery = '';
     this.selectedSpeciesId = null;
     this.swapBoxIndex = null;
     this.evoBanner = null;
     this.editingNicknameUid = null;
+    this._dexSpriteObserver = null;
     this._fallbackStyle = null;
     this._fallbackAcc = null;
     this._fallbackAura = null;
 
     this.bindUI();
+  }
+
+  disconnectDexObserver() {
+    if (this._dexSpriteObserver) {
+      this._dexSpriteObserver.disconnect();
+      this._dexSpriteObserver = null;
+    }
   }
 
   bindUI() {
@@ -459,6 +493,7 @@ export class PokedexUI {
         if (tab === 'dex') {
           this.dexFilter = 'all';
           this.dexTypeFilter = 'all';
+          this.dexAbilityFilter = 'all';
           this.dexSearchQuery = '';
         }
         this.render();
@@ -481,6 +516,7 @@ export class PokedexUI {
     if (tab === 'dex') {
       this.dexFilter = 'all';
       this.dexTypeFilter = 'all';
+      this.dexAbilityFilter = 'all';
       this.dexSearchQuery = '';
     }
     if (this.modalEl) {
@@ -491,6 +527,7 @@ export class PokedexUI {
 
   close() {
     const wasOpen = this.isOpen();
+    this.disconnectDexObserver();
     this.evoBanner = null;
     this.editingNicknameUid = null;
     this._fallbackStyle = null;
@@ -517,14 +554,17 @@ export class PokedexUI {
 
     if (this.activeTab === 'dex') {
       this.renderDex(profile);
-    } else if (this.activeTab === 'team') {
-      this.renderTeam(profile);
-    } else if (this.activeTab === 'guide') {
-      this.renderGuide(profile);
-    } else if (this.activeTab === 'trainer') {
-      this.renderTrainer(profile);
     } else {
-      this.renderBadges(profile);
+      this.disconnectDexObserver();
+      if (this.activeTab === 'team') {
+        this.renderTeam(profile);
+      } else if (this.activeTab === 'guide') {
+        this.renderGuide(profile);
+      } else if (this.activeTab === 'trainer') {
+        this.renderTrainer(profile);
+      } else {
+        this.renderBadges(profile);
+      }
     }
   }
 
@@ -589,11 +629,17 @@ export class PokedexUI {
     return box;
   }
 
-  matchesDexSearch(sp, rawQuery) {
+  matchesDexSearch(sp, rawQuery, isSeen = false) {
     const query = String(rawQuery || '').trim().toLowerCase();
     if (!query) return true;
     const nameLower = String(sp?.name || '').toLowerCase();
     if (nameLower.includes(query)) return true;
+
+    if (isSeen) {
+      const ability = getAbilitySafe(sp);
+      const abilityName = String(ability?.name || '').toLowerCase();
+      if (abilityName && abilityName.includes(query)) return true;
+    }
 
     const rawId = String(sp?.id ?? '');
     const paddedId = rawId.padStart(3, '0');
@@ -688,6 +734,7 @@ export class PokedexUI {
     const { caughtMap, seenSet } = getReconciledDexState(profile, this.storage);
     const caughtCount = allSpecies.filter((sp) => (caughtMap.get(sp.id) || 0) > 0).length;
     const seenCount = allSpecies.filter((sp) => seenSet.has(sp.id)).length;
+    const abilitiesMap = Config.ABILITIES || {};
 
     const filterDefs = [
       { id: 'all', label: `All (${allSpecies.length})` },
@@ -702,6 +749,10 @@ export class PokedexUI {
       { id: 'desert', label: '🏜️ Dunes' },
       { id: 'marsh', label: '🍄 Bayou' },
       { id: 'sanctum', label: '🌌 Citadel' },
+      { id: 'canyon', label: '⚡ Canyon' },
+      { id: 'reef', label: '🪸 Trench' },
+      { id: 'ruins', label: '🏛️ Ruins' },
+      { id: 'rift', label: '☄️ Rift' },
       { id: 'starter', label: '🌟 Starters' },
     ];
     if (!filterDefs.some((f) => f.id === this.dexFilter)) {
@@ -709,6 +760,9 @@ export class PokedexUI {
     }
     if (this.dexTypeFilter !== 'all' && !TYPES[this.dexTypeFilter]) {
       this.dexTypeFilter = 'all';
+    }
+    if (this.dexAbilityFilter !== 'all' && !abilitiesMap[this.dexAbilityFilter]) {
+      this.dexAbilityFilter = 'all';
     }
 
     const wrap = document.createElement('div');
@@ -739,10 +793,10 @@ export class PokedexUI {
     searchInput.id = 'dex-search-input';
     searchInput.type = 'text';
     searchInput.className = 'dex-search-input';
-    searchInput.placeholder = 'Search name or #id (e.g. Pikachu, #025)...';
+    searchInput.placeholder = 'Search name, #id, or ability...';
     searchInput.autocomplete = 'off';
     searchInput.spellcheck = false;
-    searchInput.setAttribute('aria-label', 'Search Pokédex by name or number');
+    searchInput.setAttribute('aria-label', 'Search Pokédex by name, number, or ability');
     searchInput.value = this.dexSearchQuery || '';
 
     const clearSearchBtn = document.createElement('button');
@@ -775,11 +829,33 @@ export class PokedexUI {
     }
     typeSelect.value = this.dexTypeFilter;
 
+    const abilitySelect = document.createElement('select');
+    abilitySelect.id = 'dex-ability-select';
+    abilitySelect.className = 'dex-ability-select';
+    abilitySelect.setAttribute('aria-label', 'Filter Pokédex by ability');
+
+    const allAbilitiesOpt = document.createElement('option');
+    allAbilitiesOpt.value = 'all';
+    allAbilitiesOpt.textContent = 'All Abilities';
+    abilitySelect.appendChild(allAbilitiesOpt);
+
+    const abilityOptions = Object.values(abilitiesMap)
+      .filter((ab) => ab && ab.id && ab.name)
+      .sort((a, b) => String(a.name).localeCompare(String(b.name)));
+    for (const ab of abilityOptions) {
+      const opt = document.createElement('option');
+      opt.value = ab.id;
+      opt.textContent = `${ab.icon || '✨'} ${ab.name}`;
+      abilitySelect.appendChild(opt);
+    }
+    abilitySelect.value = this.dexAbilityFilter;
+
     const resultCountEl = document.createElement('span');
     resultCountEl.className = 'dex-result-count';
 
     searchRow.appendChild(searchBox);
     searchRow.appendChild(typeSelect);
+    searchRow.appendChild(abilitySelect);
     searchRow.appendChild(resultCountEl);
     wrap.appendChild(searchRow);
 
@@ -807,6 +883,7 @@ export class PokedexUI {
 
     const getFiltered = () => allSpecies.filter((sp) => {
       const isCaught = (caughtMap.get(sp.id) || 0) > 0;
+      const isSeen = isCaught || seenSet.has(sp.id);
       if (this.dexFilter === 'caught' && !isCaught) return false;
       if (this.dexFilter === 'uncaught' && isCaught) return false;
       if (!['all', 'caught', 'uncaught'].includes(this.dexFilter) && sp.biome !== this.dexFilter) {
@@ -815,7 +892,10 @@ export class PokedexUI {
       if (this.dexTypeFilter !== 'all' && sp.type !== this.dexTypeFilter) {
         return false;
       }
-      return this.matchesDexSearch(sp, this.dexSearchQuery);
+      if (this.dexAbilityFilter !== 'all' && sp.ability !== this.dexAbilityFilter) {
+        return false;
+      }
+      return this.matchesDexSearch(sp, this.dexSearchQuery, isSeen);
     });
 
     const syncControlStates = () => {
@@ -824,6 +904,9 @@ export class PokedexUI {
       }
       if (typeSelect.value !== this.dexTypeFilter) {
         typeSelect.value = this.dexTypeFilter;
+      }
+      if (abilitySelect.value !== this.dexAbilityFilter) {
+        abilitySelect.value = this.dexAbilityFilter;
       }
       if (searchInput.value !== this.dexSearchQuery) {
         searchInput.value = this.dexSearchQuery;
@@ -837,6 +920,7 @@ export class PokedexUI {
       if (!currentFiltered.some((sp) => sp.id === speciesId)) {
         this.dexFilter = 'all';
         this.dexTypeFilter = 'all';
+        this.dexAbilityFilter = 'all';
         this.dexSearchQuery = '';
         syncControlStates();
         refreshDexResults();
@@ -856,6 +940,8 @@ export class PokedexUI {
     };
 
     const refreshDexResults = () => {
+      this.disconnectDexObserver();
+
       const filteredSpecies = getFiltered();
       if (filteredSpecies.length > 0 && !filteredSpecies.some((sp) => sp.id === this.selectedSpeciesId)) {
         this.selectedSpeciesId = filteredSpecies[0].id;
@@ -879,6 +965,7 @@ export class PokedexUI {
           this.audio.playMenuBlip(680);
           this.dexFilter = 'all';
           this.dexTypeFilter = 'all';
+          this.dexAbilityFilter = 'all';
           this.dexSearchQuery = '';
           syncControlStates();
           refreshDexResults();
@@ -888,6 +975,9 @@ export class PokedexUI {
         grid.appendChild(emptyNote);
       } else {
         const frag = document.createDocumentFragment();
+        const pendingRemoteSprites = [];
+        let seenCardCount = 0;
+
         for (const sp of filteredSpecies) {
           const isCaught = (caughtMap.get(sp.id) || 0) > 0;
           const isSeen = isCaught || seenSet.has(sp.id);
@@ -911,8 +1001,24 @@ export class PokedexUI {
             const img = document.createElement('img');
             img.loading = 'lazy';
             img.decoding = 'async';
+            img.alt = sp.name;
             img.className = `dex-sprite ${isCaught ? 'is-caught-sprite' : 'is-seen-sprite'}`;
-            attachPokemonSprite(img, sp.id, { back: false, timeoutMs: 2200 });
+
+            const safeType = TYPES[sp.type] ? sp.type : 'normal';
+            img.onerror = () => {
+              img.onerror = null;
+              if (typeof PokemonMod.generateSilhouetteDataUri === 'function') {
+                img.src = PokemonMod.generateSilhouetteDataUri(sp, false);
+              }
+            };
+            img.src = `./assets/fallback/${safeType}.svg`;
+
+            if (seenCardCount < 24) {
+              attachPokemonSprite(img, sp.id, { back: false, timeoutMs: 2200 });
+            } else {
+              pendingRemoteSprites.push({ img, speciesId: sp.id });
+            }
+            seenCardCount += 1;
             card.appendChild(img);
           } else {
             const mystery = document.createElement('div');
@@ -954,6 +1060,37 @@ export class PokedexUI {
           frag.appendChild(card);
         }
         grid.appendChild(frag);
+
+        if (pendingRemoteSprites.length > 0) {
+          const spriteTargetMap = new Map();
+          for (const entry of pendingRemoteSprites) {
+            spriteTargetMap.set(entry.img, entry.speciesId);
+          }
+          if (typeof IntersectionObserver === 'function') {
+            this._dexSpriteObserver = new IntersectionObserver(
+              (entries, observer) => {
+                for (const entry of entries) {
+                  if (!entry.isIntersecting) continue;
+                  const img = entry.target;
+                  const spId = spriteTargetMap.get(img);
+                  observer.unobserve(img);
+                  spriteTargetMap.delete(img);
+                  if (spId !== undefined && img.isConnected) {
+                    attachPokemonSprite(img, spId, { back: false, timeoutMs: 2200 });
+                  }
+                }
+              },
+              { root: grid, rootMargin: '240px' },
+            );
+            for (const entry of pendingRemoteSprites) {
+              this._dexSpriteObserver.observe(entry.img);
+            }
+          } else {
+            for (const entry of pendingRemoteSprites) {
+              attachPokemonSprite(entry.img, entry.speciesId, { back: false, timeoutMs: 2200 });
+            }
+          }
+        }
       }
 
       renderDetailOnly();
@@ -974,6 +1111,12 @@ export class PokedexUI {
       refreshDexResults();
     });
 
+    abilitySelect.addEventListener('change', () => {
+      this.audio.playMenuBlip(680);
+      this.dexAbilityFilter = abilitySelect.value || 'all';
+      refreshDexResults();
+    });
+
     searchInput.addEventListener('input', () => {
       this.dexSearchQuery = searchInput.value;
       clearSearchBtn.hidden = !this.dexSearchQuery;
@@ -988,10 +1131,9 @@ export class PokedexUI {
       searchInput.focus();
     });
 
-    refreshDexResults();
-
     this.bodyEl.innerHTML = '';
     this.bodyEl.appendChild(wrap);
+    refreshDexResults();
   }
 
   getMonEvolutionOptions(mon, bagGems = {}) {
@@ -1721,7 +1863,7 @@ export class PokedexUI {
         <span class="guide-compass-badge">${guidance?.icon || '🧭'} STARLIGHT COMPASS OBJECTIVE</span>
         <span class="guide-compass-dir">${dirText}${Number.isFinite(guidance?.distance) && guidance.distance > 0 ? ` • ${guidance.distance} tiles` : ''}</span>
       </div>
-      <h3 class="guide-compass-title">${guidance?.title || `Explore Starlight Island & Discover All ${Object.keys(BIOMES || {}).length || 10} Biomes!`}</h3>
+      <h3 class="guide-compass-title">${guidance?.title || `Explore Starlight Island & Discover All ${Object.keys(BIOMES || {}).length || 14} Biomes!`}</h3>
       <div class="guide-compass-stats">
         ${targetBiome ? `<span>📍 Destination: <strong>${targetBiome.icon} ${targetBiome.name}</strong></span>` : ''}
         <span>⚡ Trainer Power: <strong>Lv.${powerLevel}</strong></span>
