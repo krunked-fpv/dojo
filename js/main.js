@@ -994,7 +994,7 @@ class GameApp {
       const lead = profile.team[0];
       const trainerName = TRAINERS[profile.trainerId]?.name || 'Trainer';
       this.openDialogue(
-        `${trainerName} & ${lead?.displayName || lead?.name || 'Partner'} set out on Starlight Island! Follow the Starlight Compass across Whispering Forest, Crystal Cavern, Sapphire Lagoon, Ember Caldera, Starfall Peak, Celestial Grove, Sunstone Dunes, Glowspore Bayou, and Astral Sky Citadel!`
+        `${trainerName} & ${lead?.displayName || lead?.name || 'Partner'} set out on Starlight Island! Follow the Starlight Compass across Whispering Forest, Crystal Cavern, Sapphire Lagoon, Ember Caldera, Starfall Peak, Celestial Grove, Sunstone Dunes, Glowspore Bayou, Astral Sky Citadel, Thundersteppe Canyon, Abyssal Pearl Trench, Chrono Relic Ruins, and Mythic Starlight Rift!`
       );
     }
   }
@@ -1217,9 +1217,14 @@ class GameApp {
     if (rewards.starBalls) parts.push(`+${rewards.starBalls} Star Ball${rewards.starBalls > 1 ? 's' : ''}`);
     if (rewards.starShards) parts.push(`+${rewards.starShards} ✨ Star Shard${rewards.starShards > 1 ? 's' : ''}`);
     if (rewards.gems && typeof rewards.gems === 'object') {
+      const fallbackGems = {
+        prism_gem: { icon: '💠', name: 'Prism Gem' },
+        chrono_gem: { icon: '⏳', name: 'Chrono Amber' },
+        nebula_gem: { icon: '☄️', name: 'Nebula Core' },
+      };
       for (const [gemId, count] of Object.entries(rewards.gems)) {
         if (count > 0) {
-          const item = EVOLUTION_ITEMS?.[gemId];
+          const item = EVOLUTION_ITEMS?.[gemId] || fallbackGems[gemId];
           parts.push(`+${count} ${item?.icon || '💎'} ${item?.name || gemId}`);
         }
       }

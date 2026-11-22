@@ -140,7 +140,7 @@ export class InputController {
     const isEditableElement = (el) => {
       if (!el) return false;
       const tag = (el.tagName || '').toUpperCase();
-      return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || Boolean(el.isContentEditable);
+      return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || tag === 'OPTION' || Boolean(el.isContentEditable);
     };
 
     window.addEventListener('keydown', (e) => {

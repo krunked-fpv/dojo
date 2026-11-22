@@ -669,6 +669,8 @@ button {
   align-items: center;
   justify-content: space-between;
   gap: 10px;
+  min-width: 0;
+  max-width: 100%;
   padding: calc(8px + env(safe-area-inset-top, 0px)) 12px 8px;
   background: linear-gradient(180deg, #1a2238 0%, #111629 100%);
   border-bottom: 2px solid var(--trainer-accent-soft);
@@ -753,6 +755,7 @@ button {
   display: flex;
   align-items: center;
   gap: 6px;
+  min-width: 0;
   flex-wrap: wrap;
   justify-content: flex-end;
 }
@@ -778,6 +781,7 @@ button {
   color: #f8fafc;
   font-weight: 800;
   font-size: 0.78rem;
+  white-space: nowrap;
   cursor: pointer;
   box-shadow: 0 2px 0 #090d1a;
 }
@@ -1147,6 +1151,7 @@ button {
 
 .modal-card {
   width: 100%;
+  min-width: 0;
   max-height: 92%;
   background: var(--bg-panel);
   border: 2px solid rgba(255, 255, 255, 0.22);
@@ -1216,8 +1221,18 @@ button {
 
 .modal-body {
   padding: 14px;
+  min-width: 0;
   overflow-y: auto;
   flex: 1 1 auto;
+}
+
+.dex-layout,
+.team-layout,
+.badges-layout,
+.guide-layout,
+.trainer-studio-layout {
+  min-width: 0;
+  max-width: 100%;
 }
 
 /* --- Pokédex, Team & Badges Styles --- */
@@ -1251,6 +1266,8 @@ button {
   flex-direction: column;
   align-items: center;
   gap: 4px;
+  min-width: 0;
+  max-width: 100%;
   padding: 10px 6px 8px;
   border-radius: 12px;
   border: 2px solid rgba(255, 255, 255, 0.14);
@@ -1321,16 +1338,28 @@ button {
 .dex-name {
   font-size: 0.78rem;
   font-weight: 800;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: center;
 }
 
 .dex-detail {
   display: flex;
   align-items: center;
   gap: 14px;
+  min-width: 0;
   padding: 12px;
   border-radius: 14px;
   background: #0f172a;
   border: 2px solid rgba(255, 255, 255, 0.16);
+}
+
+.dex-detail-info {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .dex-detail-sprite {
@@ -1377,6 +1406,7 @@ button {
 
 .team-card {
   padding: 10px;
+  min-width: 0;
   border-radius: 14px;
   background: #1a233a;
   border: 2px solid rgba(255, 255, 255, 0.14);
@@ -1506,6 +1536,7 @@ button {
   flex-direction: column;
   align-items: stretch;
   gap: 6px;
+  min-width: 0;
   padding: 9px;
   border-radius: 12px;
   background: #0f172a;
@@ -1593,6 +1624,7 @@ button {
   display: flex;
   align-items: center;
   gap: 12px;
+  min-width: 0;
   padding: 12px;
   border-radius: 14px;
   background: #1a233a;
@@ -1613,6 +1645,12 @@ button {
   justify-content: center;
   font-size: 1.5rem;
   flex-shrink: 0;
+}
+
+.badge-info {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .badge-info p {
@@ -1906,6 +1944,7 @@ button {
 }
 
 .guide-compass-card {
+  min-width: 0;
   padding: 12px 14px;
   border-radius: 14px;
   background: linear-gradient(140deg, rgba(30, 41, 59, 0.95), rgba(15, 23, 42, 0.96));
@@ -1959,6 +1998,7 @@ button {
 }
 
 .biome-progress-card {
+  min-width: 0;
   padding: 10px 12px;
   border-radius: 13px;
   background: #1a233a;
@@ -1980,6 +2020,8 @@ button {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
+  min-width: 0;
   gap: 6px;
   font-size: 0.88rem;
 }
@@ -2033,6 +2075,7 @@ button {
 }
 
 .quest-card {
+  min-width: 0;
   padding: 10px 12px;
   border-radius: 12px;
   background: #1a233a;
@@ -2107,12 +2150,14 @@ button {
   color: #fef08a;
 }
 
-/* --- Pokédex Search, Type Filter, Ability Badges, Nicknames & Trainer Style Studio --- */
+/* --- Pokédex Search, Type & Ability Filters, Ability Badges, Nicknames & Trainer Style Studio --- */
 .dex-search-row {
   display: flex;
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
+  min-width: 0;
+  max-width: 100%;
   margin-bottom: 8px;
 }
 
@@ -2120,8 +2165,9 @@ button {
   position: relative;
   display: flex;
   align-items: center;
-  flex: 1 1 210px;
-  min-width: 170px;
+  flex: 1 1 180px;
+  min-width: 140px;
+  max-width: 100%;
 }
 
 .dex-search-icon {
@@ -2180,7 +2226,8 @@ button {
   color: #ffffff;
 }
 
-.dex-type-select {
+.dex-type-select,
+.dex-ability-select {
   padding: 6px 10px;
   border-radius: 10px;
   border: 1.5px solid rgba(255, 255, 255, 0.2);
@@ -2191,10 +2238,27 @@ button {
   font-weight: 800;
   cursor: pointer;
   outline: none;
+  min-width: 0;
+  max-width: 100%;
 }
 
-.dex-type-select:focus {
+.dex-ability-select {
+  flex: 0 1 auto;
+  max-width: min(195px, 100%);
+  text-overflow: ellipsis;
+}
+
+.dex-type-select:focus,
+.dex-ability-select:focus {
   border-color: var(--trainer-accent);
+}
+
+@media (max-width: 600px) {
+  .dex-type-select,
+  .dex-ability-select {
+    flex: 1 1 130px;
+    max-width: 100%;
+  }
 }
 
 .dex-result-count {
@@ -2212,6 +2276,8 @@ button {
   display: flex;
   flex-wrap: wrap;
   gap: 5px;
+  min-width: 0;
+  max-width: 100%;
   margin-bottom: 8px;
 }
 
@@ -2223,6 +2289,8 @@ button {
   color: #cbd5e1;
   font-size: 0.72rem;
   font-weight: 800;
+  white-space: nowrap;
+  max-width: 100%;
   cursor: pointer;
   transition: border-color 120ms ease, background 120ms ease, color 120ms ease;
 }
