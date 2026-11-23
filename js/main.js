@@ -17,7 +17,13 @@ import {
   getCompassGuidance,
   resolveTrainerLook,
 } from './config.js';
-import { attachPokemonSprite, createPokemon, rollWildPokemon } from './pokemon.js';
+import {
+  BALANCE,
+  assessEncounterReadiness,
+  attachPokemonSprite,
+  createPokemon,
+  rollWildPokemon,
+} from './pokemon.js';
 import { storage } from './storage.js';
 import { THEMES, audio } from './audio.js';
 import { InputController } from './input.js';
@@ -138,6 +144,18 @@ class GameApp {
     this.badgeToastNameEl = document.getElementById('badge-toast-name');
     this.badgeToastDescEl = document.getElementById('badge-toast-desc');
 
+    this.briefingModalEl = document.getElementById('encounter-briefing-modal');
+    this.briefingTitleEl = document.getElementById('briefing-title');
+    this.briefingCloseBtn = document.getElementById('briefing-close-btn');
+    this.briefingReadinessPillEl = document.getElementById('briefing-readiness-pill');
+    this.briefingOpponentMetaEl = document.getElementById('briefing-opponent-meta');
+    this.briefingTeamMetaEl = document.getElementById('briefing-team-meta');
+    this.briefingTipEl = document.getElementById('briefing-tip');
+    this.briefingActionsEl = document.getElementById('briefing-actions');
+    this.briefingBattleBtn = document.getElementById('briefing-battle-btn');
+    this.briefingPivotBtn = document.getElementById('briefing-pivot-btn');
+    this.briefingCancelBtn = document.getElementById('briefing-cancel-btn');
+
     this.settingsModalEl = document.getElementById('settings-modal');
     this.settingsCloseBtn = document.getElementById('settings-close-btn');
     this.settingMuteBtn = document.getElementById('setting-mute-btn');
@@ -164,6 +182,8 @@ class GameApp {
 
     this.dialogueOpen = false;
     this._dialogueOpenedAtMs = 0;
+    this.encounterBriefingOpen = false;
+    this._pendingBriefing = null;
     this._wasInBattle = false;
     this._wasModalOpen = false;
     this._lastCompassHidden = null;
@@ -344,7 +364,12 @@ class GameApp {
 
   syncControlVisibility(options = {}) {
     const inBattle = Boolean(this.battle?.active || this.encounterTransitioning);
-    const modalOpen = Boolean(this.pokedex?.isOpen() || this.isSettingsOpen() || this.minigame?.isOpen());
+    const modalOpen = Boolean(
+      this.pokedex?.isOpen()
+      || this.isSettingsOpen()
+      || this.minigame?.isOpen()
+      || this.encounterBriefingOpen,
+    );
 
     const becameInBattle = inBattle && !this._wasInBattle;
     const becameModalOpen = modalOpen && !this._wasModalOpen;
@@ -572,9 +597,32 @@ class GameApp {
       if (e.target === this.settingsModalEl) this.closeSettings();
     });
 
+    this.briefingCloseBtn?.addEventListener('click', () => {
+      this.closeEncounterBriefing();
+    });
+
+    this.briefingCancelBtn?.addEventListener('click', () => {
+      this.closeEncounterBriefing();
+    });
+
+    this.briefingBattleBtn?.addEventListener('click', () => {
+      this.confirmEncounterBriefing();
+    });
+
+    this.briefingPivotBtn?.addEventListener('click', () => {
+      this.triggerBriefingPivot();
+    });
+
+    this.briefingModalEl?.addEventListener('click', (e) => {
+      if (e.target === this.briefingModalEl) {
+        this.closeEncounterBriefing();
+      }
+    });
+
     this.settingSwitchBtn?.addEventListener('click', () => {
       audio.playMenuBlip(640);
       this.closeSettings();
+      this.closeEncounterBriefing({ silent: true });
       this.pokedex.close();
       this.minigame?.close?.();
       if (this.battle.active) this.battle.stop({ outcome: 'escaped', faintedAll: false });
@@ -593,6 +641,7 @@ class GameApp {
     let lastCanvasPointerUpMs = 0;
     const canCanvasDismissDialogue = () => Boolean(
       this.dialogueOpen &&
+      !this.encounterBriefingOpen &&
       !this.battle.active &&
       !this.encounterTransitioning &&
       !this.warpTransitioning &&
@@ -633,6 +682,7 @@ class GameApp {
     this.bindHoldReset(this.resetTrainerBtn, this.resetTrainerFill, () => {
       const id = storage.getActiveTrainerId();
       this.cancelWarpTransition();
+      this.closeEncounterBriefing({ silent: true });
       this.minigame?.close?.();
       storage.resetTrainerProgress(id);
       if (this.hudArcadeBtn) {
@@ -651,6 +701,7 @@ class GameApp {
 
     this.bindHoldReset(this.resetAllBtn, this.resetAllFill, () => {
       this.cancelWarpTransition();
+      this.closeEncounterBriefing({ silent: true });
       this.minigame?.close?.();
       storage.resetAllProgress();
       if (this.hudArcadeBtn) {
@@ -738,6 +789,10 @@ class GameApp {
   bindInputEvents() {
     this.input.on('action', () => {
       if (this.minigame?.isOpen()) return;
+      if (this.encounterBriefingOpen) {
+        this.confirmEncounterBriefing();
+        return;
+      }
       if (this.dialogueOpen) {
         this.closeDialogue();
         return;
@@ -754,6 +809,10 @@ class GameApp {
     this.input.on('cancel', () => {
       if (this.minigame?.isOpen()) {
         this.minigame.close();
+        return;
+      }
+      if (this.encounterBriefingOpen) {
+        this.closeEncounterBriefing();
         return;
       }
       if (this.dialogueOpen) {
@@ -775,7 +834,7 @@ class GameApp {
     });
 
     this.input.on('pokedex', () => {
-      if (this.gameShellEl.hidden || this.battle.active || this.encounterTransitioning || this.warpTransitioning || this.isSettingsOpen() || this.minigame?.isOpen()) return;
+      if (this.gameShellEl.hidden || this.battle.active || this.encounterTransitioning || this.warpTransitioning || this.encounterBriefingOpen || this.isSettingsOpen() || this.minigame?.isOpen()) return;
       if (this.pokedex.isOpen()) {
         this.pokedex.close();
         this.syncOverworldPause();
@@ -942,6 +1001,7 @@ class GameApp {
     if (this.battle?.active) {
       this.battle.stop({ outcome: 'escaped', faintedAll: false });
     }
+    this.closeEncounterBriefing({ silent: true });
     this.pokedex?.close?.();
     this.minigame?.close?.();
     if (this.isSettingsOpen()) {
@@ -983,6 +1043,7 @@ class GameApp {
       this.resetRedirectTimer = null;
     }
     this.cancelWarpTransition();
+    this.closeEncounterBriefing({ silent: true });
     this._starterFallbackStyle = null;
     this._starterFallbackAcc = null;
     this._starterFallbackAura = null;
@@ -1316,6 +1377,12 @@ class GameApp {
     this.overworld?.syncFollower?.();
     this.updateCompassHud();
     this.syncWarpDock();
+    if (!this.gameShellEl?.hidden && !this.battle?.active) {
+      const curTarget = this.overworld?.getInteractiveTarget?.();
+      if (curTarget && (curTarget.type === 'shrine' || curTarget.type === 'rival')) {
+        this.handleInteractHint(curTarget);
+      }
+    }
   }
 
   isWarpDockHidden() {
@@ -1327,6 +1394,7 @@ class GameApp {
       this.battle?.active ||
       this.encounterTransitioning ||
       (this.battle?.screenEl && !this.battle.screenEl.hidden) ||
+      this.encounterBriefingOpen ||
       this.pokedex?.isOpen() ||
       this.isSettingsOpen() ||
       this.minigame?.isOpen()
@@ -1520,6 +1588,7 @@ class GameApp {
       } else {
         this.overworld?.syncFromProfile?.();
       }
+      this.overworld?.grantEncounterGrace?.(BALANCE.overworld.postWarpGraceSteps);
 
       audio.playBGM(descriptor.bgmTheme);
       this.handleBiomeChange(descriptor.biome, true);
@@ -1697,6 +1766,7 @@ class GameApp {
       this.encounterTransitioning ||
       this.warpTransitioning ||
       this.dialogueOpen ||
+      this.encounterBriefingOpen ||
       this.pokedex?.isOpen() ||
       this.minigame?.isOpen() ||
       this.isSettingsOpen()
@@ -1769,10 +1839,16 @@ class GameApp {
       this.dialogueOpen = false;
       syncOptions = { ...options, skipWarpDock: false };
     }
+    if (this.briefingModalEl && this.briefingModalEl.hidden && this.encounterBriefingOpen) {
+      this.encounterBriefingOpen = false;
+      this._pendingBriefing = null;
+      syncOptions = { ...options, skipWarpDock: false };
+    }
     this.syncControlVisibility(syncOptions);
     this.updateCompassVisibility();
     const paused = (
       this.dialogueOpen ||
+      this.encounterBriefingOpen ||
       this.encounterTransitioning ||
       this.warpTransitioning ||
       this.battle.active ||
@@ -1820,9 +1896,31 @@ class GameApp {
     const profile = storage.getActiveProfile();
     const scaled = getBiomeScaledInfo(biome, profile);
     this.biomeBannerEl.dataset.threat = scaled.threatTone || 'balanced';
-    this.biomeBannerEl.textContent = scaled.isSafe
-      ? `${biome.icon} ${biome.name}`
-      : `${biome.icon} ${biome.name} • Lv.${scaled.minLv}–${scaled.maxLv} (${scaled.threatLabel})`;
+    let biomeReadiness = null;
+    if (!scaled.isSafe && profile) {
+      const enemyTypes = [...new Set(
+        (biome.encounters || [])
+          .map((enc) => SPECIES[enc?.id ?? enc?.speciesId ?? enc]?.type)
+          .filter(Boolean),
+      )];
+      biomeReadiness = assessEncounterReadiness(profile, {
+        kind: 'biome',
+        minLv: scaled.minLv,
+        maxLv: scaled.maxLv,
+        enemyTypes,
+        label: biome.name,
+      });
+    }
+    if (scaled.isSafe) {
+      delete this.biomeBannerEl.dataset.readiness;
+      this.biomeBannerEl.textContent = `${biome.icon} ${biome.name}`;
+    } else if (biomeReadiness && (biomeReadiness.tier === 'danger' || biomeReadiness.tier === 'challenging')) {
+      this.biomeBannerEl.dataset.readiness = biomeReadiness.tier;
+      this.biomeBannerEl.textContent = `${biome.icon} ${biome.name} • Lv.${scaled.minLv}–${scaled.maxLv} • ${biomeReadiness.badgeText}`;
+    } else {
+      this.biomeBannerEl.dataset.readiness = biomeReadiness?.tier || 'balanced';
+      this.biomeBannerEl.textContent = `${biome.icon} ${biome.name} • Lv.${scaled.minLv}–${scaled.maxLv} (${scaled.threatLabel})`;
+    }
     this.biomeBannerEl.hidden = false;
     clearTimeout(this.biomeBannerTimer);
     this.biomeBannerTimer = setTimeout(() => {
@@ -1830,12 +1928,443 @@ class GameApp {
     }, announce ? 2400 : 2200);
   }
 
+  buildEncounterBriefingData(target) {
+    if (!target || typeof target !== 'object') return null;
+    const profile = storage.getActiveProfile();
+    if (!profile) return null;
+
+    const targetType = target.type === 'shrine' || target.type === 'rival' ? target.type : null;
+    if (!targetType) return null;
+
+    const team = Array.isArray(profile.team) ? profile.team : [];
+
+    const resolvePivot = (readiness) => {
+      if (readiness.needsHeal) {
+        return { action: 'safe', label: '🏡 Safe Zone' };
+      }
+      if (readiness.tier === 'danger' || readiness.tier === 'challenging') {
+        return { action: 'farm', label: '✨ Farm Zone' };
+      }
+      return null;
+    };
+
+    if (targetType === 'shrine') {
+      const rawShrine = target.data ?? target.shrine ?? null;
+      const shrine = typeof rawShrine === 'string'
+        ? Object.values(SHRINES || {}).find((s) => s?.id === rawShrine) || null
+        : rawShrine;
+      if (!shrine) return null;
+
+      const isAstralTrial = Boolean(target.isTrial || profile.shrinesCleared?.includes(shrine.id));
+      let guardianId = shrine.guardianId;
+      let guardianLevel = shrine.level || 10;
+      let upgradeTier = 0;
+      let isElite = false;
+      let trialNumber = null;
+
+      if (isAstralTrial) {
+        const trialSpec = typeof PokemonMod.getScaledShrineTrial === 'function'
+          ? (PokemonMod.getScaledShrineTrial(shrine, profile) || {})
+          : {};
+        guardianId = trialSpec.guardianId ?? shrine.guardianId;
+        guardianLevel = Math.max(1, Math.min(50, Number(trialSpec.level ?? (shrine.level + 3)) || 12));
+        upgradeTier = Math.max(1, Number(trialSpec.upgradeTier) || 2);
+        isElite = trialSpec.isElite ?? true;
+        trialNumber = Math.max(1, Number(trialSpec.trialNumber) || ((profile.shrineTrialCounts?.[shrine.id] || 0) + 1));
+      } else {
+        const guardSpec = typeof PokemonMod.getScaledShrineGuard === 'function'
+          ? (PokemonMod.getScaledShrineGuard(shrine, profile) || {})
+          : {};
+        guardianId = guardSpec.guardianId ?? shrine.guardianId;
+        guardianLevel = Math.max(1, Math.min(50, Number(guardSpec.level ?? shrine.level) || shrine.level || 10));
+        upgradeTier = Math.max(0, Number(guardSpec.upgradeTier) || 0);
+      }
+
+      const guardianSpecies = SPECIES[guardianId] || null;
+      const enemyTypes = guardianSpecies?.type ? [guardianSpecies.type] : [];
+      const badgeObj = !isAstralTrial && shrine.badgeId
+        ? BADGES.find((b) => b.id === shrine.badgeId) || null
+        : null;
+      const readiness = assessEncounterReadiness(profile, {
+        kind: isAstralTrial ? 'trial' : 'shrine',
+        targetLevel: guardianLevel,
+        enemyTypes,
+        enemyCount: 1,
+        label: shrine.name,
+      });
+
+      const opponentName = guardianSpecies?.name || 'Shrine Guardian';
+      return {
+        type: 'shrine',
+        target: { ...target, type: 'shrine', data: shrine },
+        icon: '⛩️',
+        title: isAstralTrial ? `⛩️ ${shrine.name} — Trial #${trialNumber}` : `⛩️ ${shrine.name}`,
+        shortName: shrine.name || opponentName,
+        opponentName,
+        levelText: `Lv.${guardianLevel}`,
+        minLv: guardianLevel,
+        maxLv: guardianLevel,
+        targetLevel: guardianLevel,
+        upgradeTier,
+        isAstralTrial,
+        trialNumber,
+        isRematch: false,
+        rematchNumber: null,
+        isElite,
+        badgeName: badgeObj?.name || null,
+        badgeIcon: badgeObj?.icon || '🏅',
+        enemyTypes,
+        enemyCount: 1,
+        partyPreview: [
+          {
+            speciesId: guardianId,
+            name: opponentName,
+            level: guardianLevel,
+            upgradeTier,
+            type: guardianSpecies?.type || 'normal',
+          },
+        ],
+        readiness,
+        teamSummary: {
+          teamLevel: readiness.teamLevel,
+          healthyCount: readiness.healthyCount,
+          totalCount: team.length,
+          faintedCount: readiness.faintedCount,
+          avgHpPct: Math.round(readiness.avgHpRatio * 100),
+          needsHeal: readiness.needsHeal,
+        },
+        pivot: resolvePivot(readiness),
+        tip: readiness.tip,
+      };
+    }
+
+    const rawRival = target.data ?? target.rival ?? null;
+    const rival = typeof rawRival === 'string'
+      ? Object.values(RIVAL_TRAINERS || {}).find((r) => r?.id === rawRival) || null
+      : rawRival;
+    if (!rival) return null;
+
+    const isRematch = Boolean(profile.rivalsDefeated?.includes(rival.id));
+    const rematchCount = isRematch ? Math.max(0, Number(profile.rivalRematchCounts?.[rival.id]) || 0) : 0;
+    const levelBoost = isRematch ? 2 : 0;
+    const scaledParty = typeof PokemonMod.getScaledRivalParty === 'function'
+      ? PokemonMod.getScaledRivalParty(rival, profile)
+      : null;
+    const usingScaled = Array.isArray(scaledParty) && scaledParty.length > 0;
+    const rawParty = usingScaled
+      ? scaledParty
+      : (Array.isArray(rival.party) && rival.party.length > 0 ? rival.party : [{ speciesId: 25, level: 6 }]);
+
+    const partyPreview = rawParty
+      .map((entry) => {
+        const spId = Number(entry?.speciesId ?? entry?.id);
+        const sp = SPECIES[spId];
+        if (!sp) return null;
+        const baseLv = Number(entry?.level) || 6;
+        const lv = Math.min(50, Math.max(1, Math.round(usingScaled ? baseLv : baseLv + levelBoost)));
+        const upgradeTier = Math.max(0, Number(entry?.upgradeTier) || 0);
+        return {
+          speciesId: spId,
+          name: sp.name,
+          level: lv,
+          upgradeTier,
+          type: sp.type || 'normal',
+        };
+      })
+      .filter(Boolean);
+    if (partyPreview.length === 0) return null;
+
+    const levels = partyPreview.map((p) => p.level);
+    const minLv = Math.min(...levels);
+    const maxLv = Math.max(...levels);
+    const maxTier = Math.max(0, ...partyPreview.map((p) => p.upgradeTier));
+    const enemyTypes = [...new Set(partyPreview.map((p) => p.type).filter(Boolean))];
+    const levelText = minLv === maxLv ? `Lv.${maxLv}` : `Lv.${minLv}–${maxLv}`;
+    const readiness = assessEncounterReadiness(profile, {
+      kind: 'rival',
+      targetLevel: maxLv,
+      minLv,
+      maxLv,
+      enemyTypes,
+      enemyCount: partyPreview.length,
+      label: rival.name,
+    });
+
+    return {
+      type: 'rival',
+      target: { ...target, type: 'rival', data: rival },
+      icon: '⚔️',
+      title: isRematch ? `⚔️ ${rival.name} — Rematch` : `⚔️ ${rival.name}`,
+      shortName: rival.name,
+      opponentName: rival.name,
+      levelText,
+      minLv,
+      maxLv,
+      targetLevel: maxLv,
+      upgradeTier: maxTier,
+      isAstralTrial: false,
+      trialNumber: null,
+      isRematch,
+      rematchNumber: isRematch ? rematchCount + 1 : null,
+      isElite: false,
+      badgeName: null,
+      badgeIcon: null,
+      enemyTypes,
+      enemyCount: partyPreview.length,
+      partyPreview,
+      readiness,
+      teamSummary: {
+        teamLevel: readiness.teamLevel,
+        healthyCount: readiness.healthyCount,
+        totalCount: team.length,
+        faintedCount: readiness.faintedCount,
+        avgHpPct: Math.round(readiness.avgHpRatio * 100),
+        needsHeal: readiness.needsHeal,
+      },
+      pivot: resolvePivot(readiness),
+      tip: readiness.tip,
+    };
+  }
+
+  openEncounterBriefing(target) {
+    if (
+      !this.briefingModalEl ||
+      !this.bootScreenEl?.hidden ||
+      !this.starterScreenEl?.hidden ||
+      this.gameShellEl?.hidden ||
+      this.battle?.active ||
+      this.encounterTransitioning ||
+      this.warpTransitioning
+    ) {
+      return null;
+    }
+
+    const data = this.buildEncounterBriefingData(target);
+    if (!data) return null;
+
+    if (this.dialogueOpen) {
+      this.closeDialogue();
+    }
+    if (this.pokedex?.isOpen()) {
+      this.pokedex.close();
+    }
+    if (this.isSettingsOpen()) {
+      this.closeSettings();
+    }
+    this.clearCelebration();
+
+    this.briefingModalEl.dataset.tier = data.readiness.tier;
+    if (this.briefingTitleEl) {
+      this.briefingTitleEl.textContent = data.title;
+    }
+    if (this.briefingReadinessPillEl) {
+      this.briefingReadinessPillEl.dataset.tier = data.readiness.tier;
+      this.briefingReadinessPillEl.textContent = data.readiness.badgeText;
+    }
+
+    if (this.briefingOpponentMetaEl) {
+      this.briefingOpponentMetaEl.innerHTML = '';
+
+      const kicker = document.createElement('span');
+      kicker.className = 'briefing-section-kicker';
+      kicker.textContent = data.type === 'shrine'
+        ? (data.isAstralTrial ? 'Astral Trial Boss' : 'Shrine Guardian')
+        : 'Rival Challenger';
+      this.briefingOpponentMetaEl.appendChild(kicker);
+
+      const head = document.createElement('div');
+      head.className = 'briefing-opponent-head';
+      const nameEl = document.createElement('span');
+      nameEl.className = 'briefing-opponent-name';
+      nameEl.textContent = `${data.icon} ${data.opponentName}`;
+      const lvEl = document.createElement('span');
+      lvEl.className = 'briefing-lv-badge';
+      lvEl.textContent = data.levelText;
+      head.appendChild(nameEl);
+      head.appendChild(lvEl);
+      this.briefingOpponentMetaEl.appendChild(head);
+
+      const pillsRow = document.createElement('div');
+      pillsRow.className = 'briefing-pills-row';
+      for (const typeId of data.enemyTypes) {
+        const typeInfo = TYPES[typeId] || TYPES.normal;
+        const typePill = document.createElement('span');
+        typePill.className = 'type-pill';
+        typePill.style.backgroundColor = typeInfo.bg;
+        typePill.style.borderColor = typeInfo.color;
+        typePill.textContent = `${typeInfo.icon} ${typeInfo.label}`;
+        pillsRow.appendChild(typePill);
+      }
+      if (data.upgradeTier > 0) {
+        const rankPill = document.createElement('span');
+        rankPill.className = 'briefing-meta-badge is-rank';
+        rankPill.textContent = `★${data.upgradeTier}`;
+        pillsRow.appendChild(rankPill);
+      }
+      if (data.isAstralTrial) {
+        const trialPill = document.createElement('span');
+        trialPill.className = 'briefing-meta-badge is-trial';
+        trialPill.textContent = `🌟 Trial #${data.trialNumber || 1}`;
+        pillsRow.appendChild(trialPill);
+      } else if (data.badgeName) {
+        const badgePill = document.createElement('span');
+        badgePill.className = 'briefing-meta-badge is-badge';
+        badgePill.textContent = `${data.badgeIcon || '🏅'} ${data.badgeName}`;
+        pillsRow.appendChild(badgePill);
+      }
+      if (data.isRematch) {
+        const rematchPill = document.createElement('span');
+        rematchPill.className = 'briefing-meta-badge is-rematch';
+        rematchPill.textContent = `🔁 Rematch${data.rematchNumber > 1 ? ` #${data.rematchNumber}` : ''}`;
+        pillsRow.appendChild(rematchPill);
+      }
+      if (data.type === 'rival') {
+        const countPill = document.createElement('span');
+        countPill.className = 'briefing-meta-badge';
+        countPill.textContent = `${data.enemyCount} Pokémon`;
+        pillsRow.appendChild(countPill);
+      }
+      this.briefingOpponentMetaEl.appendChild(pillsRow);
+
+      if (data.type === 'rival' && data.partyPreview.length > 0) {
+        const rosterLine = document.createElement('div');
+        rosterLine.className = 'briefing-roster-line';
+        rosterLine.textContent = data.partyPreview
+          .map((mon) => `${mon.name} Lv.${mon.level}${mon.upgradeTier > 0 ? ` ★${mon.upgradeTier}` : ''}`)
+          .join(' • ');
+        this.briefingOpponentMetaEl.appendChild(rosterLine);
+      }
+    }
+
+    if (this.briefingTeamMetaEl) {
+      this.briefingTeamMetaEl.innerHTML = '';
+
+      const kicker = document.createElement('span');
+      kicker.className = 'briefing-section-kicker';
+      kicker.textContent = 'Your Squad';
+      this.briefingTeamMetaEl.appendChild(kicker);
+
+      const statsRow = document.createElement('div');
+      statsRow.className = 'briefing-team-stats';
+      const lvSpan = document.createElement('span');
+      lvSpan.innerHTML = `⚡ Readiness <strong>Lv.${data.teamSummary.teamLevel}</strong>`;
+      const hpSpan = document.createElement('span');
+      hpSpan.innerHTML = `💚 <strong>${data.teamSummary.healthyCount}/${data.teamSummary.totalCount}</strong> Ready (${data.teamSummary.avgHpPct}% HP)`;
+      statsRow.appendChild(lvSpan);
+      statsRow.appendChild(hpSpan);
+      this.briefingTeamMetaEl.appendChild(statsRow);
+
+      if (data.teamSummary.needsHeal) {
+        const alertEl = document.createElement('div');
+        alertEl.className = 'briefing-heal-alert';
+        if (data.teamSummary.healthyCount === 0) {
+          alertEl.textContent = '🚨 Squad fainted — heal at Starlight Village!';
+        } else if (data.teamSummary.faintedCount > 0) {
+          alertEl.textContent = `⚠️ ${data.teamSummary.faintedCount} fainted • Heal recommended!`;
+        } else {
+          alertEl.textContent = `⚠️ Low HP (${data.teamSummary.avgHpPct}%) — heal recommended!`;
+        }
+        this.briefingTeamMetaEl.appendChild(alertEl);
+      }
+    }
+
+    if (this.briefingTipEl) {
+      this.briefingTipEl.textContent = data.tip;
+    }
+
+    if (this.briefingPivotBtn) {
+      if (data.pivot) {
+        this.briefingPivotBtn.hidden = false;
+        this.briefingPivotBtn.textContent = data.pivot.label;
+        this.briefingPivotBtn.dataset.pivotAction = data.pivot.action;
+      } else {
+        this.briefingPivotBtn.hidden = true;
+        delete this.briefingPivotBtn.dataset.pivotAction;
+      }
+    }
+
+    this._pendingBriefing = data;
+    this.encounterBriefingOpen = true;
+    this.briefingModalEl.hidden = false;
+    this.input.clearAll();
+    this.overworld?.clearTouchNavigation?.();
+    this.syncControlVisibility();
+    this.syncOverworldPause();
+
+    const cardEl = this.briefingModalEl.querySelector('.encounter-briefing-card');
+    cardEl?.focus?.({ preventScroll: true });
+    return data;
+  }
+
+  closeEncounterBriefing({ silent = false } = {}) {
+    const wasOpen = Boolean(this.encounterBriefingOpen || (this.briefingModalEl && !this.briefingModalEl.hidden));
+    this.encounterBriefingOpen = false;
+    this._pendingBriefing = null;
+    if (this.briefingModalEl) {
+      this.briefingModalEl.hidden = true;
+    }
+    if (wasOpen && !silent) {
+      audio.playMenuBlip?.(480);
+    }
+    if (wasOpen) {
+      this.blurFocusedControl();
+      this.syncControlVisibility();
+      this.syncOverworldPause();
+    }
+    return wasOpen;
+  }
+
+  confirmEncounterBriefing() {
+    const pending = this._pendingBriefing;
+    if (!pending) {
+      this.closeEncounterBriefing({ silent: true });
+      return false;
+    }
+    audio.playMenuBlip?.(760);
+    this.closeEncounterBriefing({ silent: true });
+    if (pending.type === 'shrine') {
+      this.startShrineEncounter(pending.target?.data || pending.target?.shrine, {
+        isTrial: Boolean(pending.isAstralTrial),
+      });
+      return true;
+    }
+    if (pending.type === 'rival') {
+      this.startRivalEncounter(pending.target?.data || pending.target?.rival);
+      return true;
+    }
+    return false;
+  }
+
+  triggerBriefingPivot() {
+    const action = this._pendingBriefing?.pivot?.action || this.briefingPivotBtn?.dataset?.pivotAction || null;
+    audio.playMenuBlip?.(680);
+    this.closeEncounterBriefing({ silent: true });
+    if (action === 'safe') {
+      return this.triggerSafeZoneWarp();
+    }
+    if (action === 'farm') {
+      return this.triggerLevelZoneWarp();
+    }
+    return null;
+  }
+
   handleInteractHint(target) {
     if (!this.interactPillEl) return;
     if (!target) {
       this.interactPillEl.hidden = true;
+      delete this.interactPillEl.dataset.readiness;
       return;
     }
+    if (target.type === 'shrine' || target.type === 'rival') {
+      const briefing = this.buildEncounterBriefingData(target);
+      if (briefing?.readiness) {
+        this.interactPillEl.textContent = `${briefing.icon} ${briefing.shortName} • Lv.${briefing.targetLevel} ${briefing.readiness.icon}`;
+        this.interactPillEl.dataset.readiness = briefing.readiness.tier;
+        this.interactPillEl.hidden = false;
+        return;
+      }
+    }
+    delete this.interactPillEl.dataset.readiness;
     this.interactPillEl.textContent = target.label;
     this.interactPillEl.hidden = false;
   }
@@ -1940,6 +2469,7 @@ class GameApp {
       this.battle?.active ||
       this.encounterTransitioning ||
       this.warpTransitioning ||
+      this.encounterBriefingOpen ||
       this.pokedex?.isOpen() ||
       this.minigame?.isOpen() ||
       this.isSettingsOpen()
@@ -2061,6 +2591,7 @@ class GameApp {
       this.battle?.active ||
       this.encounterTransitioning ||
       this.warpTransitioning ||
+      this.encounterBriefingOpen ||
       this.pokedex?.isOpen() ||
       this.minigame?.isOpen() ||
       this.isSettingsOpen()
@@ -2103,14 +2634,9 @@ class GameApp {
         this.openDialogue('This treasure chest has already been opened!');
       }
     } else if (target.type === 'shrine') {
-      const shrine = target.data;
-      if (profile?.shrinesCleared.includes(shrine.id)) {
-        this.startShrineEncounter(shrine, { isTrial: true });
-      } else {
-        this.startShrineEncounter(shrine, { isTrial: false });
-      }
+      this.openEncounterBriefing(target);
     } else if (target.type === 'rival') {
-      this.startRivalEncounter(target.data);
+      this.openEncounterBriefing(target);
     } else if (target.type === 'npc') {
       this.handleNpcInteract(target.data, target);
     } else if (target.type === 'arcade') {
@@ -2164,6 +2690,7 @@ class GameApp {
       this.battle?.active ||
       this.encounterTransitioning ||
       this.warpTransitioning ||
+      this.encounterBriefingOpen ||
       this.pokedex?.isOpen() ||
       this.minigame?.isOpen() ||
       this.isSettingsOpen()
@@ -2283,6 +2810,7 @@ class GameApp {
       this.battle.active ||
       this.encounterTransitioning ||
       this.warpTransitioning ||
+      this.encounterBriefingOpen ||
       this.pokedex?.isOpen() ||
       this.minigame?.isOpen() ||
       this.isSettingsOpen()
@@ -2332,6 +2860,9 @@ class GameApp {
       this.isSettingsOpen()
     ) {
       return;
+    }
+    if (this.encounterBriefingOpen) {
+      this.closeEncounterBriefing({ silent: true });
     }
     if (!storage.ensureHealthyParty()) return;
     const profile = storage.getActiveProfile();
@@ -2408,6 +2939,9 @@ class GameApp {
     ) {
       return;
     }
+    if (this.encounterBriefingOpen) {
+      this.closeEncounterBriefing({ silent: true });
+    }
     if (!storage.ensureHealthyParty()) return;
 
     const profile = storage.getActiveProfile();
@@ -2461,10 +2995,14 @@ class GameApp {
       storage.updatePosition(GAME_META.spawn.x, GAME_META.spawn.y, 'down', false);
       storage.healTeam(true);
       this.overworld.syncFromProfile();
+      this.overworld?.grantEncounterGrace?.(BALANCE.overworld.postWarpGraceSteps);
       audio.playHealChime();
       pendingDialogue = 'Professor Willow gently healed your team back at Starlight Village! You are ready to explore again.';
     } else {
       this.overworld.syncFromProfile();
+      if (result?.outcome === 'escaped') {
+        this.overworld?.grantEncounterGrace?.(BALANCE.overworld.postEscapeGraceSteps);
+      }
       if (result?.outcome === 'won' && result?.isTrainer && result?.trainerData) {
         const rival = result.trainerData;
         const profileBefore = storage.getActiveProfile();
@@ -2582,6 +3120,7 @@ class GameApp {
       return false;
     }
     if (this.dialogueOpen) this.closeDialogue();
+    if (this.encounterBriefingOpen) this.closeEncounterBriefing({ silent: true });
     if (this.pokedex?.isOpen()) this.pokedex.close();
     if (this.isSettingsOpen()) this.closeSettings();
     this.clearCelebration();
@@ -2606,6 +3145,9 @@ class GameApp {
     }
     if (this.dialogueOpen) {
       this.closeDialogue();
+    }
+    if (this.encounterBriefingOpen) {
+      this.closeEncounterBriefing({ silent: true });
     }
     if (this.isSettingsOpen()) {
       this.closeSettings();
@@ -2635,6 +3177,9 @@ class GameApp {
     if (this.dialogueOpen) {
       this.closeDialogue();
     }
+    if (this.encounterBriefingOpen) {
+      this.closeEncounterBriefing({ silent: true });
+    }
     if (this.pokedex?.isOpen()) {
       this.pokedex.close();
     }
@@ -2660,6 +3205,7 @@ class GameApp {
       loopStartCount: this.loopStartCount,
       measuredFps: Number(this.measuredFps.toFixed(2)),
       encounterTransitioning: this.encounterTransitioning,
+      encounterBriefingOpen: this.encounterBriefingOpen,
       warpTransitioning: this.warpTransitioning,
       battle: this.battle?.getDiagnostics?.() || null,
       audio: this.audio?.getDiagnostics?.() || null,

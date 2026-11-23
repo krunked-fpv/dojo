@@ -1234,6 +1234,7 @@ button {
   left: 50%;
   transform: translateX(-50%);
   z-index: 10;
+  max-width: calc(100% - 24px);
   padding: 8px 16px;
   border-radius: 999px;
   border: 2px solid #fde047;
@@ -1241,9 +1242,36 @@ button {
   color: #fef08a;
   font-weight: 900;
   font-size: 0.85rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
   cursor: pointer;
   box-shadow: 0 6px 16px rgba(0, 0, 0, 0.5);
   animation: bounce-pill 1.4s ease-in-out infinite;
+}
+
+.interact-pill[data-readiness='favored'] {
+  border-color: #34d399;
+  color: #a7f3d0;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.5), 0 0 14px rgba(16, 185, 129, 0.34);
+}
+
+.interact-pill[data-readiness='balanced'] {
+  border-color: #38bdf8;
+  color: #bae6fd;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.5), 0 0 14px rgba(56, 189, 248, 0.34);
+}
+
+.interact-pill[data-readiness='challenging'] {
+  border-color: #fbbf24;
+  color: #fef08a;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.5), 0 0 14px rgba(245, 158, 11, 0.38);
+}
+
+.interact-pill[data-readiness='danger'] {
+  border-color: #fb7185;
+  color: #fecdd3;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.5), 0 0 16px rgba(244, 63, 94, 0.45);
 }
 
 @keyframes bounce-pill {
@@ -3365,6 +3393,56 @@ button {
   background: rgba(244, 63, 94, 0.22);
   border-color: rgba(251, 113, 133, 0.75);
   color: #fda4af;
+}
+
+.biome-readiness-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 0.66rem;
+  font-weight: 900;
+  padding: 2px 7px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.24);
+  white-space: nowrap;
+}
+
+.biome-readiness-pill.is-favored,
+.biome-readiness-pill[data-tier='favored'] {
+  background: rgba(16, 185, 129, 0.2);
+  border-color: rgba(52, 211, 153, 0.68);
+  color: #a7f3d0;
+}
+
+.biome-readiness-pill.is-balanced,
+.biome-readiness-pill[data-tier='balanced'] {
+  background: rgba(14, 165, 233, 0.2);
+  border-color: rgba(56, 189, 248, 0.68);
+  color: #bae6fd;
+}
+
+.biome-readiness-pill.is-challenging,
+.biome-readiness-pill[data-tier='challenging'] {
+  background: rgba(245, 158, 11, 0.22);
+  border-color: rgba(251, 191, 36, 0.72);
+  color: #fef08a;
+}
+
+.biome-readiness-pill.is-danger,
+.biome-readiness-pill[data-tier='danger'] {
+  background: rgba(244, 63, 94, 0.24);
+  border-color: rgba(251, 113, 133, 0.8);
+  color: #fecdd3;
+}
+
+.biome-banner[data-readiness='challenging'] {
+  border-color: #fbbf24;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.5), 0 0 15px rgba(245, 158, 11, 0.36);
+}
+
+.biome-banner[data-readiness='danger'] {
+  border-color: #fb7185;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.5), 0 0 18px rgba(244, 63, 94, 0.46);
 }
 
 .aura-chip-grid {
