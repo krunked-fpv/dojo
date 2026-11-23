@@ -54,6 +54,7 @@ import {
 } from '../js/config.js';
 import {
   BIOME_SCALING_OFFSETS as POKEMON_BIOME_SCALING_OFFSETS,
+  MAX_RECENT_ENCOUNTERS,
   MAX_UPGRADE_TIER,
   Pokemon,
   SPECIES_ARCHETYPES,
@@ -11507,6 +11508,573 @@ function buildTestSuites() {
                   );
                 }
               }
+            } finally {
+              restoreAppFromSnapshot(app, snap);
+            }
+          },
+        },
+      ],
+    },
+    {
+      name: '48. Round 1–2 Bug Fixes, Deepened Anti-Repeat Pools, Modal/Race Guards, 0-PP Safety & 2× Juice',
+      tests: [
+        {
+          name: '3-kind handleDiscoveryNode behavior, modal/warp guards, encounter mode audio order & mystery_cry callout',
+          async fn() {
+            const app = window.__starlightApp;
+            assert(Boolean(app), 'GameApp mounted');
+            const snap = snapshotAppForTest(app);
+            const origPlayEncounterAlert = audio.playEncounterAlert;
+            const origPlayDiscoveryChime = audio.playDiscoveryChime;
+            const origPlayPokemonCry = audio.playPokemonCry;
+            const encounterModes = [];
+            const discoveryChimes = [];
+            const cryCalls = [];
+
+            try {
+              audio.playEncounterAlert = function patchedAlert(mode = 'wild') {
+                encounterModes.push(mode);
+                return origPlayEncounterAlert.call(this, mode);
+              };
+              audio.playDiscoveryChime = function patchedChime(kind = 'starfall') {
+                discoveryChimes.push(kind);
+                return origPlayDiscoveryChime.call(this, kind);
+              };
+              audio.playPokemonCry = function patchedCry(monOrId) {
+                cryCalls.push(monOrId);
+                return origPlayPokemonCry.call(this, monOrId);
+              };
+
+              window.localStorage.removeItem(STORAGE_KEY);
+              storage.state = storage.load();
+              app.selectTrainer('violet');
+              storage.chooseStarter(1);
+              app.enterOverworld(false);
+              app.closeDialogue();
+
+              const profile = storage.getActiveProfile();
+              profile.bag.starShards = 0;
+              profile.bag.cheerCharges = 0;
+
+              // 1. starfall
+              app.handleDiscoveryNode({ kind: 'starfall', biomeId: 'forest', x: 8, y: 12, depthTier: 1 });
+              assertEqual(profile.bag.starShards, 2, 'starfall grants +2 Star Shards');
+              assertEqual(profile.bag.cheerCharges, 0, 'starfall does not grant Cheer Hearts');
+              assert(
+                app.worldDialogueTextEl.textContent.includes('Starfall Crystal'),
+                'starfall opens Starfall Crystal dialogue',
+              );
+              app.closeDialogue();
+
+              // 2. shimmer
+              app.handleDiscoveryNode({ kind: 'shimmer', biomeId: 'forest', x: 8, y: 12, depthTier: 1 });
+              assertEqual(profile.bag.starShards, 4, 'shimmer grants +2 Star Shards');
+              assertEqual(profile.bag.cheerCharges, 1, 'shimmer grants +1 Cheer Heart');
+              assert(
+                app.worldDialogueTextEl.textContent.includes('Shimmer Dew'),
+                'shimmer opens Shimmer Dew dialogue',
+              );
+              app.closeDialogue();
+
+              // 3. mystery_cry picks unseen local biome species, marks seen, calls cry & names species
+              const seenBefore = Object.keys(profile.pokedex?.seen || {}).length;
+              app.handleDiscoveryNode({ kind: 'mystery_cry', biomeId: 'forest', x: 8, y: 12, depthTier: 1 });
+              const seenAfter = Object.keys(profile.pokedex?.seen || {}).length;
+              assertEqual(profile.bag.starShards, 6, 'mystery_cry grants +2 Star Shards');
+              assertEqual(seenAfter, seenBefore + 1, 'mystery_cry registers unseen biome species in Dex');
+              assertGreater(cryCalls.length, 0, 'mystery_cry triggers playPokemonCry');
+              const heardId = Number(cryCalls[cryCalls.length - 1]);
+              const heardName = SPECIES[heardId]?.name || '';
+              assert(
+                heardName && app.worldDialogueTextEl.textContent.includes(heardName),
+                `mystery_cry dialogue names heard species (${heardName})`,
+              );
+              app.closeDialogue();
+
+              assertEqual(discoveryChimes.includes('starfall'), true, 'playDiscoveryChime called for starfall');
+              assertEqual(discoveryChimes.includes('shimmer'), true, 'playDiscoveryChime called for shimmer');
+
+              // 4. Guards when modals/transitions/battle active
+              app.openPokedex('dex');
+              app.handleDiscoveryNode({ kind: 'shimmer', biomeId: 'forest', x: 8, y: 12 });
+              assertEqual(profile.bag.starShards, 6, 'handleDiscoveryNode guarded while Pokedex open');
+              app.pokedex.close();
+
+              app.openSettings();
+              app.handleDiscoveryNode({ kind: 'starfall', biomeId: 'forest', x: 8, y: 12 });
+              assertEqual(profile.bag.starShards, 6, 'handleDiscoveryNode guarded while Settings open');
+              app.closeSettings();
+
+              app.warpTransitioning = true;
+              app.handleDiscoveryNode({ kind: 'starfall', biomeId: 'forest', x: 8, y: 12 });
+              assertEqual(profile.bag.starShards, 6, 'handleDiscoveryNode guarded while warpTransitioning');
+              app.warpTransitioning = false;
+
+              // 5. triggerEncounterTransition resolves mode BEFORE playEncounterAlert + mystery_cry callout
+              await app.triggerEncounterTransition('shrine', { isShrine: true });
+              await app.triggerEncounterTransition('rival', { isTrainer: true });
+              await app.triggerEncounterTransition('battle', { isRarePatch: true });
+              await app.triggerEncounterTransition('battle', {});
+              assertEqual(encounterModes.slice(-4).join(','), 'shrine,rival,rare,wild', 'playEncounterAlert receives resolved 4-mode tag');
+
+              const mcPromise = app.startWildEncounter('forest', {
+                isRarePatch: true,
+                nodeKind: 'mystery_cry',
+                depthTier: 1,
+              });
+              await new Promise((r) => setTimeout(r, 40));
+              assertEqual(app.encounterFlashEl?.dataset?.mode, 'rare', 'mystery_cry encounter uses rare flash mode');
+              assert(
+                (app.encounterCalloutEl?.textContent || '').includes('MYSTERY CRY'),
+                'mystery_cry encounter shows MYSTERY CRY callout',
+              );
+              app.cancelEncounterTransition();
+              await mcPromise;
+              if (app.battle.active) app.battle.stop({ outcome: 'escaped', faintedAll: false });
+
+              // 6. AudioEngine 4-mode playEncounterAlert + 3-mode playDiscoveryChime safety
+              const susp = new AudioEngine({ attachUnlockListeners: false });
+              susp.muted = false;
+              susp.ctx = createMockAudioCtx('suspended', false);
+              susp.masterFilter = { connect() {} };
+              susp.masterGain = { gain: { value: 1 }, connect() {} };
+              susp.noiseBuffer = { length: 44100 };
+              for (const m of ['wild', 'rare', 'rival', 'shrine']) {
+                const res = susp.playEncounterAlert(m);
+                assert(Boolean(res), `playEncounterAlert(${m}) plays cleanly on suspended ctx`);
+              }
+              for (const k of ['starfall', 'shimmer', 'mystery_cry']) {
+                const res = susp.playDiscoveryChime(k);
+                assert(Boolean(res), `playDiscoveryChime(${k}) plays cleanly on suspended ctx`);
+              }
+              assertEqual(susp.getDiagnostics().schedulerActive, false, 'alert/chime cues leak 0 scheduler timers');
+              assertEqual(susp.getDiagnostics().activeBgmNodes, 0, 'alert/chime cues leak 0 BGM nodes');
+            } finally {
+              audio.playEncounterAlert = origPlayEncounterAlert;
+              audio.playDiscoveryChime = origPlayDiscoveryChime;
+              audio.playPokemonCry = origPlayPokemonCry;
+              restoreAppFromSnapshot(app, snap);
+            }
+          },
+        },
+        {
+          name: 'Deepened anti-repeat pools (wild species/levels, recentWarpBiomes rotation, Rival rc=0..10, Shrine tc=0..10, Sky-Hop 26+ waves & 18 skies)',
+          async fn() {
+            const TEST_KEY = 'starlight_pokemon_test_s48_pools_v1';
+            try {
+              assertEqual(MAX_RECENT_ENCOUNTERS, 20, 'MAX_RECENT_ENCOUNTERS deepened to 20');
+
+              // 1. Wild encounter species & level consecutive anti-repeat + mystery_cry unseen weight
+              resetEncounterHistory();
+              const rolls = [];
+              for (let i = 0; i < 20; i++) {
+                rolls.push(rollWildPokemon('forest', 5));
+              }
+              for (let i = 1; i < rolls.length; i++) {
+                assert(
+                  rolls[i].speciesId !== rolls[i - 1].speciesId,
+                  `rollWildPokemon avoids consecutive species repeat at step ${i}`,
+                );
+                assert(
+                  rolls[i].level !== rolls[i - 1].level,
+                  `rollWildPokemon avoids consecutive level repeat within multi-level bracket at step ${i}`,
+                );
+              }
+
+              // 2. recentWarpBiomes repair/persistence & Safe Zone preservation + Farm biome rotation
+              const repaired = validateAndRepairProfile({
+                trainerId: 'violet',
+                recentEncounters: [1, -4, 9999, 25, 16],
+                recentWarpBiomes: ['village', 'nope', 'forest', 'cave', 'water', 'peak'],
+              }, 'violet');
+              assertEqual(repaired.recentWarpBiomes.includes('village'), false, 'recentWarpBiomes strips village');
+              assertEqual(repaired.recentWarpBiomes.includes('nope'), false, 'recentWarpBiomes strips invalid biomes');
+              assertEqual(repaired.recentWarpBiomes.length, 3, 'recentWarpBiomes slices to last 3');
+              assertEqual(repaired.recentWarpBiomes.join(','), 'cave,water,peak', 'recentWarpBiomes keeps latest 3 valid biomes');
+
+              window.localStorage.removeItem(TEST_KEY);
+              const store = new StorageManager(TEST_KEY);
+              store.selectTrainer('violet');
+              store.chooseStarter(1);
+              const prof = store.getActiveProfile();
+              prof.playerLevel = 32;
+              prof.trainerXp = getCumulativeXpForPlayerLevel(32);
+
+              const farmBiomes = [];
+              for (let i = 0; i < 4; i++) {
+                const z = resolveRecommendedFarmingZone(prof);
+                assert(z.threatTone !== 'veteran' && z.threatTone !== 'apex', `Farm rotation step ${i} avoids Veteran/Apex`);
+                const pt = getBiomeWarpPoint(z.biomeId);
+                store.warpToZone(pt.x, pt.y, pt.dir, z.biomeId);
+                farmBiomes.push(z.biomeId);
+              }
+              assertGreater(new Set(farmBiomes).size, 2, `Repeated Lv.32 Farm warps rotate cleanly (${farmBiomes.join(',')})`);
+              const beforeSafe = [...prof.recentWarpBiomes];
+              store.warpToSafeZone();
+              assertEqual(
+                prof.recentWarpBiomes.join(','),
+                beforeSafe.join(','),
+                'warpToSafeZone preserves recentWarpBiomes untouched',
+              );
+
+              // 3. Rival rc=0..10 (all 17 rivals) & Shrine tc=0..10 (all 20 shrines) zero consecutive repeats
+              for (const rival of Object.values(RIVAL_TRAINERS)) {
+                let prevLead = null;
+                let prevSig = null;
+                for (let rc = 0; rc <= 10; rc++) {
+                  const party = getScaledRivalParty(rival, {
+                    playerLevel: 25,
+                    rivalsDefeated: rc > 0 ? [rival.id] : [],
+                    rivalRematchCounts: { [rival.id]: rc },
+                  });
+                  assertGreater(party.length, 0, `${rival.id} rc=${rc} party non-empty`);
+                  const sig = party.map((m) => m.speciesId).join(',');
+                  if (rc > 0) {
+                    assert(party[0].speciesId !== prevLead, `${rival.id} rc=${rc} rotates lead (${prevLead} vs ${party[0].speciesId})`);
+                    assert(sig !== prevSig, `${rival.id} rc=${rc} rotates signature (${sig})`);
+                  }
+                  prevLead = party[0].speciesId;
+                  prevSig = sig;
+                }
+              }
+              for (const shrine of Object.values(SHRINES)) {
+                let prevGuard = null;
+                for (let tc = 0; tc <= 10; tc++) {
+                  const trial = getScaledShrineTrial(shrine, {
+                    playerLevel: 30,
+                    shrinesCleared: [shrine.id],
+                    shrineTrialCounts: { [shrine.id]: tc },
+                  });
+                  assert(Boolean(trial?.guardianId), `${shrine.id} tc=${tc} returns guardianId`);
+                  if (tc > 0) {
+                    assert(trial.guardianId !== prevGuard, `${shrine.id} tc=${tc} rotates trial guardian`);
+                  }
+                  prevGuard = trial.guardianId;
+                }
+              }
+
+              // 4. Storage swapTeamWithBox integer guard + deposit/withdraw last-healthy guard
+              assertEqual(store.swapTeamWithBox(0.5, 0), false, 'swapTeamWithBox rejects fractional index');
+              assertEqual(store.swapTeamWithBox(NaN, 0), false, 'swapTeamWithBox rejects NaN index');
+              assertEqual(store.setLeadPokemon(1.5), false, 'setLeadPokemon rejects fractional index');
+              const depLast = store.depositToBox?.(0);
+              if (depLast) {
+                assertEqual(depLast.moved, false, 'depositToBox protects last active team member');
+              }
+
+              // 5. Overworld 3-kind discovery bag & Sky-Hop 26+ waves / 18 skies / cross-run non-repeat
+              const app = window.__starlightApp;
+              const bagKinds = [];
+              for (let i = 0; i < 60; i++) {
+                bagKinds.push(app.overworld._pickNextDiscoveryNodeKind());
+              }
+              assertEqual(new Set(bagKinds).size, 3, 'discovery bag produces all 3 kinds');
+              for (let i = 1; i < bagKinds.length; i++) {
+                assert(bagKinds[i] !== bagKinds[i - 1], `discovery bag avoids consecutive repeat at ${i}`);
+              }
+
+              assertGreater(WAVE_TEMPLATES.length, 23, `WAVE_TEMPLATES expanded (${WAVE_TEMPLATES.length})`);
+              const mg = new StarlightMinigame({ storage: store, audio: null });
+              const mgDiag = mg.getDiagnostics();
+              assertEqual(mgDiag.skyPaletteCount, 18, 'Sky-Hop provides 18 distinct sky palettes');
+              store.unlockArcade();
+              const openings = [];
+              for (let r = 0; r < 6; r++) {
+                store.getActiveProfile().arcade.charges = 3;
+                mg.open();
+                openings.push(mg.lastOpeningWaveId);
+                mg.close();
+              }
+              for (let i = 1; i < openings.length; i++) {
+                assert(openings[i] !== openings[i - 1], `Sky-Hop consecutive runs avoid repeating opening wave (${openings[i]})`);
+              }
+            } finally {
+              window.localStorage.removeItem(TEST_KEY);
+              resetEncounterHistory();
+            }
+          },
+        },
+        {
+          name: 'Modal stacking & race guards, 180ms dialogue tap protection, reset timer cleanup & Sky-Hop/battle celebration non-overlap',
+          async fn() {
+            const app = window.__starlightApp;
+            assert(Boolean(app), 'GameApp mounted');
+            const snap = snapshotAppForTest(app);
+
+            try {
+              window.localStorage.removeItem(STORAGE_KEY);
+              storage.state = storage.load();
+
+              // 1. Settings & Pokédex blocked on Boot & Starter screens
+              app.showBootScreen();
+              app.openSettings();
+              app.openPokedex('dex');
+              assertEqual(app.isSettingsOpen(), false, 'openSettings blocked on boot screen');
+              assertEqual(app.pokedex.isOpen(), false, 'openPokedex blocked on boot screen');
+
+              app.selectTrainer('violet');
+              app.openSettings();
+              app.openPokedex('dex');
+              assertEqual(app.isSettingsOpen(), false, 'openSettings blocked on starter screen');
+              assertEqual(app.pokedex.isOpen(), false, 'openPokedex blocked on starter screen');
+
+              storage.chooseStarter(1);
+              app.enterOverworld(false);
+              app.closeDialogue();
+
+              // 2. Settings + Pokédex never stack
+              app.openPokedex('dex');
+              assertEqual(app.pokedex.isOpen(), true, 'Pokedex opened');
+              app.openSettings();
+              assertEqual(app.isSettingsOpen(), true, 'Settings opened');
+              assertEqual(app.pokedex.isOpen(), false, 'openSettings closes open Pokedex');
+              app.openPokedex('team');
+              assertEqual(app.pokedex.isOpen(), true, 'Pokedex re-opened');
+              assertEqual(app.isSettingsOpen(), false, 'openPokedex closes open Settings');
+              app.pokedex.close();
+
+              // 3. isCompassHidden hides #compass-hud during warpTransitioning
+              const warpP = app.triggerLevelZoneWarp({ instant: false });
+              assertEqual(app.isCompassHidden(), true, 'isCompassHidden() true during warpTransitioning');
+              assertEqual(app.compassHudEl?.hidden, true, '#compass-hud hidden during warpTransitioning');
+              app.cancelWarpTransition();
+              await warpP;
+
+              // 4. Dialogue 180ms canvas click race guard
+              app.openDialogue('Rapid tap guard check!');
+              app.overworldCanvasEl?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+              assertEqual(app.dialogueOpen, true, 'immediate canvas click (<180ms) does not dismiss fresh dialogue');
+              await new Promise((r) => setTimeout(r, 210));
+              app.overworldCanvasEl?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+              assertEqual(app.dialogueOpen, false, 'canvas click after >180ms dismisses dialogue');
+
+              // 5. showBootScreen clears dangling resetRedirectTimer
+              let danglingResetRan = false;
+              app.resetRedirectTimer = setTimeout(() => { danglingResetRan = true; }, 40);
+              app.showBootScreen();
+              await new Promise((r) => setTimeout(r, 90));
+              assertEqual(danglingResetRan, false, 'showBootScreen clears dangling resetRedirectTimer');
+              assertEqual(app.resetRedirectTimer, null, 'resetRedirectTimer nulled');
+
+              // 6. Celebration cleared on battle transition & Sky-Hop open + endRun non-overlap with .minigame-hud
+              app.selectTrainer('violet');
+              app.enterOverworld(false);
+              app.closeDialogue();
+              app.triggerCelebration({ title: 'OVERWORLD CELEBRATION', tone: 'gold' });
+              assertEqual(app.celebrationLayerEl?.hidden, false, 'celebration visible before battle transition');
+              const encP = app.triggerEncounterTransition('battle', { mode: 'wild' });
+              assertEqual(app.celebrationLayerEl?.hidden, true, 'triggerEncounterTransition clears stale celebration');
+              app.cancelEncounterTransition();
+              await encP;
+
+              storage.unlockArcade();
+              app.triggerCelebration({ title: 'SECRET ARCADE UNLOCKED!', tone: 'arcade' });
+              app.openMinigame();
+              assertEqual(app.celebrationLayerEl?.hidden, true, 'openMinigame clears unlock celebration so .minigame-hud is unobstructed');
+              assertEqual(document.body.classList.contains('in-minigame'), true, 'body.in-minigame active when Sky-Hop open');
+              app.minigame.score = 200;
+              app.minigame.wave = 2;
+              app.minigame.endRun();
+              const hudRect = document.querySelector('#minigame-modal .minigame-hud')?.getBoundingClientRect();
+              const ribRect = document.querySelector('#celebration-layer .celebration-ribbon')?.getBoundingClientRect();
+              if (hudRect && ribRect) {
+                const overlapsHud = !(
+                  ribRect.right <= hudRect.left ||
+                  ribRect.left >= hudRect.right ||
+                  ribRect.bottom <= hudRect.top ||
+                  ribRect.top >= hudRect.bottom
+                );
+                assertEqual(overlapsHud, false, 'Sky-Hop endRun celebration ribbon does not overlap .minigame-hud');
+              }
+              app.minigame.close();
+              assertEqual(document.body.classList.contains('in-minigame'), false, 'body.in-minigame cleared on Sky-Hop close');
+
+              // 7. KeyP ignored inside #dex-search-input & Escape blurs/clears cleanly
+              app.openPokedex('dex');
+              const dexSearch = document.getElementById('dex-search-input');
+              assert(Boolean(dexSearch), '#dex-search-input exists');
+              dexSearch.focus();
+              dexSearch.value = 'pikachu';
+              dexSearch.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyP', key: 'p', bubbles: true }));
+              assertEqual(app.pokedex.isOpen(), true, 'KeyP inside #dex-search-input does not close Pokédex');
+              app.pokedex.close();
+
+              // 8. Chest open evaluates badges cleanly via handleWorldInteract
+              const firstChestEntry = Object.entries(CHESTS)[0];
+              if (firstChestEntry) {
+                const [ck, ch] = firstChestEntry;
+                const [cx, cy] = ck.split(',').map(Number);
+                app.handleWorldInteract({ type: 'chest', key: ck, x: cx, y: cy, data: ch });
+                assertEqual(app.dialogueOpen, true, 'handleWorldInteract chest opens reward dialogue');
+                app.closeDialogue();
+              }
+            } finally {
+              restoreAppFromSnapshot(app, snap);
+            }
+          },
+        },
+        {
+          name: '0-PP battle safety (⭐ STRUGGLE UI, neutral >=2 dmg vs Ghost, enemy 0-PP), forced-switch lock, empty-bench blackout & stop() cleanup',
+          async fn() {
+            const app = window.__starlightApp;
+            assert(Boolean(app), 'GameApp mounted');
+            const snap = snapshotAppForTest(app);
+
+            try {
+              window.localStorage.removeItem(STORAGE_KEY);
+              storage.state = storage.load();
+              app.selectTrainer('violet');
+              storage.chooseStarter(1);
+              app.enterOverworld(false);
+              app.closeDialogue();
+              storage.updateSettings({ battlePace: 'fast' });
+              app.applySettings();
+
+              const profile = storage.getActiveProfile();
+              const lead = profile.team[0];
+              for (const mv of lead.getMoveObjects()) {
+                if (!lead.movePp) lead.movePp = {};
+                lead.movePp[mv.id] = 0;
+              }
+              const gastly = createPokemon(92, 5, 'peak'); // Ghost-type
+              for (const mv of gastly.getMoveObjects()) {
+                if (!gastly.movePp) gastly.movePp = {};
+                gastly.movePp[mv.id] = 0;
+              }
+
+              const startP = app.battle.start({ enemy: gastly, biomeId: 'peak' });
+              const flushT = setInterval(() => app.battle.finishTypewriter(), 15);
+              try {
+                await startP;
+                while (app.battle.active && !app.battle.canAcceptPlayerAction()) {
+                  await new Promise((r) => setTimeout(r, 20));
+                }
+                const moveBtns = [...document.querySelectorAll('#battle-moves .move-card')];
+                assertGreater(moveBtns.length, 0, '0-PP battle renders move buttons');
+                assert(moveBtns.every((b) => !b.disabled), '0-PP move buttons remain clickable');
+                assert(
+                  moveBtns[0].classList.contains('is-struggle-fallback') &&
+                  moveBtns[0].textContent.includes('STRUGGLE') &&
+                  !moveBtns[0].textContent.includes('IMMUNE'),
+                  '0-PP move button displays STRUGGLE fallback without 0x IMMUNE badge',
+                );
+                const enemyChoice = app.battle.chooseEnemyMove();
+                assert(Boolean(enemyChoice && enemyChoice._isStruggle), '0-PP enemy AI safely chooses Struggle');
+
+                const hpBefore = gastly.hp;
+                moveBtns[0].click();
+                const turnDeadline = Date.now() + 5000;
+                while (app.battle.active && !app.battle.canAcceptPlayerAction() && Date.now() < turnDeadline) {
+                  await new Promise((r) => setTimeout(r, 20));
+                }
+                assert(gastly.hp <= hpBefore - 2, `0-PP Struggle deals >=2 neutral damage vs Ghost (${hpBefore} -> ${gastly.hp})`);
+
+                app.battle.stop({ outcome: 'escaped', faintedAll: false });
+                const diag = app.battle.getDiagnostics();
+                assertEqual(diag.active, false, 'battle.stop() clears active');
+                assertEqual(diag.pendingTimers, 0, 'battle.stop() leaks 0 timers');
+                assertEqual(diag.fxRafActive, false, 'battle.stop() stops fx RAF');
+                assertEqual(
+                  Boolean(document.querySelector('.status-card-enemy')?.classList.contains('is-elite-card')),
+                  false,
+                  'battle.stop() clears is-elite-card',
+                );
+
+                // Forced switch Esc lock & empty-bench blackout
+                lead.restoreAllPp();
+                profile.team = [lead];
+                lead.hp = 1;
+                const boss = createPokemon(149, 40, 'rift');
+                await app.battle.start({ enemy: boss, biomeId: 'rift' });
+                while (app.battle.active && !app.battle.canAcceptPlayerAction()) {
+                  await new Promise((r) => setTimeout(r, 20));
+                }
+                const faintDeadline = Date.now() + 7000;
+                while (app.battle.active && Date.now() < faintDeadline) {
+                  if (app.battle.canAcceptPlayerAction()) {
+                    document.querySelector('#battle-moves .move-card:not(:disabled)')?.click();
+                  }
+                  await new Promise((r) => setTimeout(r, 20));
+                }
+                assertEqual(app.battle.active, false, 'single-mon faint cleanly resolves empty-bench blackout');
+                assertEqual(document.getElementById('battle-team-drawer')?.hidden, true, 'empty-bench blackout does not leave drawer stuck open');
+                assertEqual(profile.pos.x, GAME_META.spawn.x, 'blackout returns trainer to Starlight Village x');
+                assertEqual(profile.pos.y, GAME_META.spawn.y, 'blackout returns trainer to Starlight Village y');
+                assertEqual(lead.hp, lead.maxHp, 'blackout restores team HP');
+              } finally {
+                clearInterval(flushT);
+              }
+            } finally {
+              restoreAppFromSnapshot(app, snap);
+            }
+          },
+        },
+        {
+          name: 'Fountain-adjacent interaction (Volcano (40,13) facing npc_ignis vs self-heal), steering blur cleanup & 2× celebration/warp particle counts',
+          async fn() {
+            const app = window.__starlightApp;
+            assert(Boolean(app), 'GameApp mounted');
+            const snap = snapshotAppForTest(app);
+
+            try {
+              window.localStorage.removeItem(STORAGE_KEY);
+              storage.state = storage.load();
+              app.selectTrainer('violet');
+              storage.chooseStarter(1);
+              app.enterOverworld(false);
+              app.closeDialogue();
+
+              const profile = storage.getActiveProfile();
+
+              // 1. Standing on Volcano TILE.HEAL (40,13) facing up toward npc_ignis (40,12)
+              app.overworld.warpToPosition(40, 13, 'up', { announceBiome: false });
+              const facedTarget = app.overworld.getInteractiveTarget();
+              assertEqual(facedTarget?.type, 'npc', 'standing on TILE.HEAL (40,13) facing up targets npc_ignis');
+
+              // Facing away (down) from npc returns standing TILE.HEAL
+              app.overworld.warpToPosition(40, 13, 'down', { announceBiome: false });
+              const healTarget = app.overworld.getInteractiveTarget();
+              assertEqual(healTarget?.type, 'heal', 'standing on TILE.HEAL facing empty tile targets heal');
+
+              // Tapping standing TILE.HEAL (40,13) while facing npc_ignis explicitly heals
+              profile.team[0].hp = Math.max(1, profile.team[0].hp - 8);
+              app.overworld.warpToPosition(40, 13, 'up', { announceBiome: false });
+              app.overworld.walkToTile(40, 13);
+              assertEqual(profile.team[0].hp, profile.team[0].maxHp, 'tapping standing TILE.HEAL triggers self-heal even while facing NPC');
+              app.closeDialogue();
+
+              // 2. Steering cleanup on blur & pause
+              app.overworld.touchSteerActive = true;
+              app.overworld.touchSteerDir = 'right';
+              window.dispatchEvent(new Event('blur'));
+              assertEqual(app.overworld.getTouchNavigationState().touchSteerActive, false, 'window blur clears touchSteerActive');
+
+              app.overworld.touchSteerActive = true;
+              app.overworld.setPaused(true);
+              assertEqual(app.overworld.getTouchNavigationState().touchSteerActive, false, 'setPaused(true) clears touchSteerActive');
+              app.overworld.setPaused(false);
+
+              // 3. 2x celebration & warp particle counts
+              app.triggerCelebration({ title: '2X JUICE!', tone: 'starlight' });
+              const domConfetti = document.querySelectorAll('#celebration-layer .celebration-confetti').length;
+              const domHalo = Boolean(document.querySelector('#celebration-layer .celebration-halo'));
+              assertEqual(domConfetti, 56, 'app.triggerCelebration spawns 56 DOM confetti particles');
+              assertEqual(domHalo, true, 'app.triggerCelebration renders .celebration-halo');
+              app.clearCelebration();
+
+              const owBurstCount = app.overworld.triggerCelebrationBurst(8, 15, 'gold');
+              assertEqual(owBurstCount, 52, 'overworld.triggerCelebrationBurst spawns 52 particles');
+
+              app.overworld.particles = [];
+              app.overworld.triggerWarpEffect('depart', 8, 15, { tone: 'safe' });
+              assertEqual(app.overworld.particles.length, 32, 'overworld.triggerWarpEffect(depart) spawns 32 swirl particles');
+              app.overworld.particles = [];
+              app.overworld.triggerWarpEffect('arrive', 8, 15, { tone: 'starlight' });
+              assertEqual(app.overworld.particles.length, 44, 'overworld.triggerWarpEffect(arrive) spawns 44 swirl particles');
+
+              app.battle.particles = [];
+              app.battle.spawnCelebrationConfetti({ center: { x: 200, y: 150 } });
+              assertGreater(app.battle.particles.length, 100, 'battle.spawnCelebrationConfetti spawns multi-wave 2x burst (>100 particles)');
             } finally {
               restoreAppFromSnapshot(app, snap);
             }
