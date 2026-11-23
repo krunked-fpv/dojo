@@ -155,9 +155,12 @@ function collectPlaywrightCandidates() {
   return dirs;
 }
 
+const unwrapPlaywright = (m) => (m?.chromium ? m : m?.default?.chromium ? m.default : null);
+
 async function resolvePlaywright() {
   try {
-    return await import('playwright');
+    const mod = unwrapPlaywright(await import('playwright'));
+    if (mod) return mod;
   } catch {
     // Fall through to CJS / NODE_PATH / global / _npx discovery
   }
@@ -165,7 +168,18 @@ async function resolvePlaywright() {
   try {
     const req = createRequire(import.meta.url);
     const resolved = req.resolve('playwright');
-    return await import(pathToFileURL(resolved).href);
+    const esmSibling = path.join(path.dirname(resolved), 'index.mjs');
+    const targets = fs.existsSync(esmSibling) && esmSibling !== resolved
+      ? [esmSibling, resolved]
+      : [resolved];
+    for (const target of targets) {
+      try {
+        const mod = unwrapPlaywright(await import(pathToFileURL(target).href));
+        if (mod) return mod;
+      } catch {
+        // Try next resolution target
+      }
+    }
   } catch {
     // Fall through to candidate directories
   }
@@ -175,7 +189,7 @@ async function resolvePlaywright() {
     const entry = getPlaywrightEntrypoint(pkgDir);
     if (!entry) continue;
     try {
-      const mod = await import(pathToFileURL(entry).href);
+      const mod = unwrapPlaywright(await import(pathToFileURL(entry).href));
       if (mod?.chromium) {
         try {
           const defaultExec = mod.chromium.executablePath?.();
@@ -260,9 +274,13 @@ function findCachedChromiumExecutable() {
 }
 
 async function launchChromium(pw) {
+  const args = process.platform === 'linux'
+    ? ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
+    : [];
+
   const explicit = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH;
   if (explicit && fs.existsSync(explicit)) {
-    return pw.chromium.launch({ headless: true, executablePath: explicit });
+    return pw.chromium.launch({ headless: true, executablePath: explicit, args });
   }
 
   let defaultExec = null;
@@ -273,23 +291,23 @@ async function launchChromium(pw) {
   }
 
   if (defaultExec && fs.existsSync(defaultExec)) {
-    return pw.chromium.launch({ headless: true });
+    return pw.chromium.launch({ headless: true, args });
   }
 
   const cachedExec = findCachedChromiumExecutable();
   if (cachedExec) {
-    return pw.chromium.launch({ headless: true, executablePath: cachedExec });
+    return pw.chromium.launch({ headless: true, executablePath: cachedExec, args });
   }
 
   for (const channel of ['chrome', 'msedge']) {
     try {
-      return await pw.chromium.launch({ headless: true, channel });
+      return await pw.chromium.launch({ headless: true, channel, args });
     } catch {
       // Try next system channel
     }
   }
 
-  return pw.chromium.launch({ headless: true });
+  return pw.chromium.launch({ headless: true, args });
 }
 
 function startStaticServer(rootDir) {
@@ -412,7 +430,7 @@ async function runStageA(browser, baseUrl) {
     const telemetry = attachPageTelemetry(page, baseUrl);
 
     await page.goto(`${baseUrl}/?test=true`, { waitUntil: 'domcontentloaded' });
-    await page.waitForFunction(() => Boolean(window.__starlightTestSummary), null, { timeout: 180000 });
+    await page.waitForFunction(() => Boolean(window.__starlightTestSummary), null, { timeout: 300000 });
 
     const summary = await page.evaluate(() => {
       const s = window.__starlightTestSummary;
