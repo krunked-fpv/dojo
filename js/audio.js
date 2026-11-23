@@ -3877,6 +3877,38 @@ export class AudioEngine {
     });
   }
 
+  playComposureBrace() {
+    // Crisp, gentle defensive brace cue: grounded low-mid guard thump + crystalline fifth shimmer
+    this.triggerVoice({
+      freq: 220.0,
+      endFreq: 146.83,
+      wave: 'triangle',
+      duration: 0.085,
+      attack: 0.004,
+      sustain: 0.35,
+      gain: 0.09,
+    });
+    const notes = [523.25, 783.99];
+    notes.forEach((f, i) => {
+      this.triggerVoice({
+        freq: f,
+        wave: 'sine',
+        duration: 0.17,
+        attack: 0.006,
+        sustain: 0.42,
+        gain: i === 0 ? 0.085 : 0.072,
+        delay: 0.035 + i * 0.052,
+      });
+      this.triggerVoice({
+        freq: f * 0.5,
+        wave: 'triangle',
+        duration: 0.14,
+        gain: 0.045,
+        delay: 0.035 + i * 0.052,
+      });
+    });
+  }
+
   playShinySparkle() {
     const notes = [659.25, 783.99, 987.77, 1318.51, 1567.98];
     notes.forEach((f, i) => {
