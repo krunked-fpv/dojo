@@ -3342,120 +3342,487 @@ export function getBiomeWarpPoint(biomeId) {
   return { biomeId: biome.id, x: safe.x, y: safe.y, dir: safe.dir };
 }
 
-function clampFarmingLevel(value) {
+export const BIOME_SCALING_OFFSETS = {
+  village: -2,
+  forest: -1,
+  cave: 0,
+  water: 0,
+  volcano: 0,
+  desert: 0,
+  peak: 1,
+  grove: 1,
+  marsh: 1,
+  faeveldt: 1,
+  canyon: 1,
+  sanctum: 1,
+  atoll: 1,
+  reef: 1,
+  highlands: 1,
+  ruins: 1,
+  crater: 1,
+  rift: 1,
+};
+
+export const TRAINER_XP_WEIGHTS = {
+  battleWin: 14,
+  badge: 60,
+  shrine: 85,
+  rival: 50,
+  rivalRematch: 30,
+  shrineTrial: 40,
+  quest: 45,
+  speciesCaught: 4,
+};
+
+function clampPlayerLevel(value) {
   return Math.max(1, Math.min(50, Math.round(value)));
 }
 
-function resolveTargetFarmingLevel(levelOrProfile) {
-  if (levelOrProfile === -Infinity) return 1;
-  if (levelOrProfile === Infinity) return 50;
-  if (typeof levelOrProfile === 'number') {
-    return Number.isFinite(levelOrProfile) ? clampFarmingLevel(levelOrProfile) : 5;
+function toValidNonNegInt(value) {
+  if (typeof value === 'boolean' || value === null || value === undefined) return null;
+  if (typeof value === 'string' && value.trim() === '') return null;
+  const num = Number(value);
+  if (!Number.isFinite(num) || num < 0) return null;
+  return Math.floor(num);
+}
+
+function toValidInt1to50(value) {
+  if (typeof value === 'boolean' || value === null || value === undefined) return null;
+  if (typeof value === 'string' && value.trim() === '') return null;
+  const num = Number(value);
+  if (!Number.isInteger(num) || num < 1 || num > 50) return null;
+  return num;
+}
+
+function countUniqueKeys(collection) {
+  if (!collection) return 0;
+  const items = collection instanceof Set
+    ? Array.from(collection)
+    : (Array.isArray(collection) ? collection : []);
+  if (items.length === 0) return 0;
+  const seen = new Set();
+  for (const item of items) {
+    if (item !== null && item !== undefined && item !== '' && item !== false) {
+      seen.add(String(item));
+    }
   }
-  if (
-    levelOrProfile === null
-    || levelOrProfile === undefined
-    || typeof levelOrProfile === 'boolean'
-  ) {
-    return 5;
+  return seen.size;
+}
+
+function sumNonNegIntValues(record) {
+  if (!record || typeof record !== 'object' || Array.isArray(record)) return 0;
+  let total = 0;
+  for (const val of Object.values(record)) {
+    const n = toValidNonNegInt(val);
+    if (n !== null && n > 0) {
+      total += n;
+    }
   }
-  if (typeof levelOrProfile === 'string') {
-    const trimmed = levelOrProfile.trim();
-    if (!trimmed) return 5;
-    if (trimmed === '-Infinity') return 1;
-    if (trimmed === 'Infinity') return 50;
-    const parsed = Number(trimmed);
-    return Number.isFinite(parsed) ? clampFarmingLevel(parsed) : 5;
+  return total;
+}
+
+function countUniqueCaughtSpecies(profile) {
+  const caught = profile?.pokedex?.caught;
+  if (!caught) return 0;
+  if (Array.isArray(caught) || caught instanceof Set) {
+    return countUniqueKeys(caught);
   }
-
-  const rawTeam = Array.isArray(levelOrProfile)
-    ? levelOrProfile
-    : (Array.isArray(levelOrProfile?.team) ? levelOrProfile.team : []);
-
-  const validMons = rawTeam.filter((m) => (
-    m && typeof m === 'object'
-    && typeof m.level !== 'boolean'
-    && m.level !== null
-    && m.level !== undefined
-    && m.level !== ''
-    && Number.isFinite(Number(m.level))
-    && Number(m.level) > 0
-  ));
-  if (validMons.length === 0) return 5;
-
-  const healthyMons = validMons.filter((m) => Number(m.hp) > 0 && !m.isFainted);
-  const pool = healthyMons.length > 0 ? healthyMons : validMons;
-  const levels = pool
-    .map((m) => clampFarmingLevel(Number(m.level)))
-    .sort((a, b) => b - a);
-
-  if (levels.length === 1) return levels[0];
-  return clampFarmingLevel(0.68 * levels[0] + 0.32 * levels[1]);
+  if (typeof caught !== 'object') return 0;
+  const seen = new Set();
+  for (const [id, val] of Object.entries(caught)) {
+    if (val === true) {
+      seen.add(String(id));
+    } else {
+      const n = toValidNonNegInt(val);
+      if (n !== null && n > 0) {
+        seen.add(String(id));
+      }
+    }
+  }
+  return seen.size;
 }
 
 /**
- * Deterministically resolve the best farming biome and landing warp coordinate for a level or party profile.
- * @param {number|object|Array} levelOrProfile
+ * XP required to advance from `level` to `level + 1` (0 at max Lv.50).
+ * @param {number} level
+ * @returns {number}
+ */
+export function getPlayerLevelXpRequired(level = 1) {
+  const num = Number(level);
+  if (num >= 50) return 0;
+  const lv = Math.max(1, Math.floor(Number.isFinite(num) ? num : 1));
+  if (lv >= 50) return 0;
+  return 30 + (lv - 1) * 10;
+}
+
+/**
+ * Total cumulative Trainer XP required to reach `level` (Lv.1 = 0).
+ * @param {number} level
+ * @returns {number}
+ */
+export function getCumulativeXpForPlayerLevel(level = 1) {
+  const num = Number(level);
+  const target = num === Infinity
+    ? 50
+    : (num === -Infinity || !Number.isFinite(num) ? 1 : clampPlayerLevel(num));
+  let total = 0;
+  for (let i = 1; i < target; i++) {
+    total += getPlayerLevelXpRequired(i);
+  }
+  return total;
+}
+
+/**
+ * Compute milestone-based Trainer XP strictly from trainer accomplishments (never team/box levels).
+ * @param {object|null} profile
+ * @returns {number}
+ */
+export function computeMilestoneTrainerXp(profile) {
+  if (!profile || typeof profile !== 'object' || Array.isArray(profile)) return 0;
+  const battlesWon = toValidNonNegInt(profile.stats?.battlesWon) || 0;
+  const badgeCount = countUniqueKeys(profile.badges);
+  const shrineCount = countUniqueKeys(profile.shrinesCleared);
+  const rivalCount = countUniqueKeys(profile.rivalsDefeated);
+  const rivalRematchTotal = sumNonNegIntValues(profile.rivalRematchCounts);
+  const shrineTrialTotal = sumNonNegIntValues(profile.shrineTrialCounts);
+  const questCount = countUniqueKeys(profile.questsCompleted);
+  const uniqueCaughtCount = countUniqueCaughtSpecies(profile);
+
+  return (
+    battlesWon * TRAINER_XP_WEIGHTS.battleWin
+    + badgeCount * TRAINER_XP_WEIGHTS.badge
+    + shrineCount * TRAINER_XP_WEIGHTS.shrine
+    + rivalCount * TRAINER_XP_WEIGHTS.rival
+    + rivalRematchTotal * TRAINER_XP_WEIGHTS.rivalRematch
+    + shrineTrialTotal * TRAINER_XP_WEIGHTS.shrineTrial
+    + questCount * TRAINER_XP_WEIGHTS.quest
+    + Math.max(0, uniqueCaughtCount - 1) * TRAINER_XP_WEIGHTS.speciesCaught
+  );
+}
+
+/**
+ * Resolve player progression state from cumulative Trainer XP (Lv.1..50).
+ * @param {number} xp
+ * @returns {{ level: number, xp: number, xpIntoLevel: number, xpToNext: number, progressPct: number, isMaxLevel: boolean }}
+ */
+export function getPlayerLevelFromXp(xp = 0) {
+  const maxXpFloor = getCumulativeXpForPlayerLevel(50);
+  const isInfinity = xp === Infinity || (typeof xp === 'string' && xp.trim() === 'Infinity');
+  const safeXp = isInfinity
+    ? maxXpFloor
+    : (toValidNonNegInt(xp) ?? 0);
+
+  let level = 1;
+  let levelStartXp = 0;
+  while (level < 50) {
+    const req = getPlayerLevelXpRequired(level);
+    if (safeXp < levelStartXp + req) break;
+    levelStartXp += req;
+    level += 1;
+  }
+
+  const isMaxLevel = level >= 50;
+  const xpToNext = isMaxLevel ? 0 : getPlayerLevelXpRequired(level);
+  const xpIntoLevel = isMaxLevel ? 0 : Math.max(0, safeXp - levelStartXp);
+  const progressPct = isMaxLevel
+    ? 100
+    : (xpToNext > 0 ? Math.max(0, Math.min(100, Math.round((xpIntoLevel / xpToNext) * 100))) : 100);
+
+  return {
+    level,
+    xp: safeXp,
+    xpIntoLevel,
+    xpToNext,
+    progressPct,
+    isMaxLevel,
+  };
+}
+
+/**
+ * Single-source player progression resolver from a trainer profile or scalar level.
+ * Never derives player level from party or box Pokémon levels.
+ * @param {object|number|string|null} profileOrLevel
+ * @returns {{ level: number, xp: number, xpIntoLevel: number, xpToNext: number, progressPct: number, isMaxLevel: boolean }}
+ */
+export function getPlayerProgression(profileOrLevel = null) {
+  if (
+    profileOrLevel === null
+    || profileOrLevel === undefined
+    || typeof profileOrLevel === 'boolean'
+    || Array.isArray(profileOrLevel)
+  ) {
+    return getPlayerLevelFromXp(0);
+  }
+
+  if (typeof profileOrLevel === 'number') {
+    if (profileOrLevel === -Infinity) return getPlayerLevelFromXp(0);
+    if (profileOrLevel === Infinity) return getPlayerLevelFromXp(getCumulativeXpForPlayerLevel(50));
+    if (!Number.isFinite(profileOrLevel)) return getPlayerLevelFromXp(0);
+    const level = clampPlayerLevel(profileOrLevel);
+    return getPlayerLevelFromXp(getCumulativeXpForPlayerLevel(level));
+  }
+
+  if (typeof profileOrLevel === 'string') {
+    const trimmed = profileOrLevel.trim();
+    if (!trimmed) return getPlayerLevelFromXp(0);
+    if (trimmed === '-Infinity') return getPlayerLevelFromXp(0);
+    if (trimmed === 'Infinity') return getPlayerLevelFromXp(getCumulativeXpForPlayerLevel(50));
+    const parsed = Number(trimmed);
+    if (!Number.isFinite(parsed)) return getPlayerLevelFromXp(0);
+    const level = clampPlayerLevel(parsed);
+    return getPlayerLevelFromXp(getCumulativeXpForPlayerLevel(level));
+  }
+
+  if (typeof profileOrLevel === 'object') {
+    const milestoneXp = computeMilestoneTrainerXp(profileOrLevel);
+    const persistedXp = toValidNonNegInt(profileOrLevel.trainerXp) || 0;
+    const explicitLv = toValidInt1to50(profileOrLevel.playerLevel);
+    const explicitFloorXp = (persistedXp === 0 && explicitLv !== null)
+      ? getCumulativeXpForPlayerLevel(explicitLv)
+      : 0;
+    const effectiveXp = Math.max(persistedXp, milestoneXp, explicitFloorXp);
+    return getPlayerLevelFromXp(effectiveXp);
+  }
+
+  return getPlayerLevelFromXp(0);
+}
+
+/**
+ * Single-source Player Level (1..50) from a trainer profile or scalar level.
+ * @param {object|number|string|null} profileOrLevel
+ * @returns {number}
+ */
+export function getPlayerLevel(profileOrLevel = null) {
+  return getPlayerProgression(profileOrLevel).level;
+}
+
+/**
+ * Resolve the Starlight Village Sanctuary warp point beside the Healing Fountain (zero wild encounters).
+ * @returns {{ biomeId: string, biome: object, x: number, y: number, dir: string }}
+ */
+export function getSafeZoneWarpPoint() {
+  const wp = getBiomeWarpPoint('village');
+  return {
+    biomeId: 'village',
+    biome: BIOMES.village,
+    x: wp.x,
+    y: wp.y,
+    dir: wp.dir || 'down',
+  };
+}
+
+function resolveBuiltInScaledRange(biomeId, playerLevel, profile) {
+  const biome = BIOMES[biomeId] || BIOMES.forest;
+  const [rawMin, rawMax] = Array.isArray(biome?.levelRange) ? biome.levelRange : [2, 7];
+  const baseMin = Math.max(1, Math.min(50, Math.round(rawMin)));
+  const baseMax = Math.max(baseMin, Math.min(50, Math.round(rawMax)));
+  const offset = Object.prototype.hasOwnProperty.call(BIOME_SCALING_OFFSETS, biomeId)
+    ? BIOME_SCALING_OFFSETS[biomeId]
+    : 0;
+  const badgesCount = Array.isArray(profile?.badges) ? profile.badges.length : 0;
+  const shouldScale = biomeId !== 'village' && !(badgesCount === 0 && playerLevel <= baseMax);
+
+  let minLv = baseMin;
+  let maxLv = baseMax;
+  if (shouldScale) {
+    const center = Math.round(playerLevel) + offset;
+    const scaledMax = Math.max(baseMax, Math.min(50, center + 2));
+    const scaledMin = Math.max(baseMin, Math.min(scaledMax - 2, center - 3));
+    minLv = Math.max(1, scaledMin);
+    maxLv = Math.max(minLv, scaledMax);
+  }
+
+  const isScaled = minLv !== baseMin || maxLv !== baseMax;
+  const threatRef = (biomeId === 'forest' && !isScaled) ? Math.max(playerLevel, 5) : playerLevel;
+  const delta = maxLv - threatRef;
+  let threatLabel = 'Balanced';
+  let threatTone = 'balanced';
+  if (delta > 10.5) {
+    threatLabel = 'Apex';
+    threatTone = 'apex';
+  } else if (delta > 6) {
+    threatLabel = 'Veteran';
+    threatTone = 'veteran';
+  } else if (delta > 3.5) {
+    threatLabel = 'Challenging';
+    threatTone = 'challenging';
+  }
+
+  return {
+    baseMin,
+    baseMax,
+    minLv,
+    maxLv,
+    threatLabel,
+    threatTone,
+    isScaled,
+  };
+}
+
+function resolveThreatTierFallback(biomeId, playerLevel, maxLv, isScaled) {
+  const threatRef = (biomeId === 'forest' && !isScaled) ? Math.max(playerLevel, 5) : playerLevel;
+  const delta = maxLv - threatRef;
+  if (delta > 10.5) return { threatLabel: 'Apex', threatTone: 'apex' };
+  if (delta > 6) return { threatLabel: 'Veteran', threatTone: 'veteran' };
+  if (delta > 3.5) return { threatLabel: 'Challenging', threatTone: 'challenging' };
+  return { threatLabel: 'Balanced', threatTone: 'balanced' };
+}
+
+/**
+ * Deterministically resolve the best spike-free farming biome and landing warp coordinate
+ * for a scalar Player Level or trainer profile (never keying off party/box Pokémon levels).
+ * @param {number|string|object|null} levelOrProfile
  * @param {object|null} profileArg
+ * @param {{ getScaledRange?: (biomeId: string, target: number|object) => object }} options
  * @returns {object}
  */
-export function resolveFarmingBiomeForLevel(levelOrProfile, profileArg = null) {
-  const profile = profileArg && typeof profileArg === 'object'
+export function resolveFarmingBiomeForLevel(levelOrProfile, profileArg = null, options = {}) {
+  const isScalarInput = typeof levelOrProfile === 'number' || typeof levelOrProfile === 'string';
+  const profile = profileArg && typeof profileArg === 'object' && !Array.isArray(profileArg)
     ? profileArg
     : (levelOrProfile && typeof levelOrProfile === 'object' && !Array.isArray(levelOrProfile)
       ? levelOrProfile
       : null);
 
-  const targetLevel = resolveTargetFarmingLevel(levelOrProfile);
+  const playerLevel = isScalarInput
+    ? getPlayerLevel(levelOrProfile)
+    : getPlayerLevel(profile ?? levelOrProfile);
+
+  let scaledTarget = playerLevel;
+  if (profile) {
+    if (!isScalarInput || getPlayerLevel(profile) === playerLevel) {
+      scaledTarget = toValidInt1to50(profile.playerLevel) === playerLevel
+        ? profile
+        : { ...profile, playerLevel };
+    } else if (Array.isArray(profile.badges) && getPlayerLevel({ badges: profile.badges }) <= playerLevel) {
+      scaledTarget = {
+        badges: profile.badges,
+        playerLevel,
+        trainerXp: getCumulativeXpForPlayerLevel(playerLevel),
+      };
+    }
+  }
+
+  const customGetScaledRange = typeof options?.getScaledRange === 'function'
+    ? options.getScaledRange
+    : null;
+
+  const evaluations = [];
+  for (let orderIdx = 0; orderIdx < FARMING_BIOME_ORDER.length; orderIdx++) {
+    const biomeId = FARMING_BIOME_ORDER[orderIdx];
+    if (biomeId === 'village') continue;
+    const biome = BIOMES[biomeId];
+    if (!biome || !Array.isArray(biome.levelRange) || biome.levelRange.length < 2) continue;
+
+    const builtIn = resolveBuiltInScaledRange(biomeId, playerLevel, profile);
+    const rawScaled = customGetScaledRange ? customGetScaledRange(biomeId, scaledTarget) : null;
+    const baseMin = Number.isFinite(Number(rawScaled?.baseMin)) ? Number(rawScaled.baseMin) : builtIn.baseMin;
+    const baseMax = Number.isFinite(Number(rawScaled?.baseMax)) ? Number(rawScaled.baseMax) : builtIn.baseMax;
+    const minLv = Number.isFinite(Number(rawScaled?.minLv)) ? Number(rawScaled.minLv) : builtIn.minLv;
+    const maxLv = Number.isFinite(Number(rawScaled?.maxLv)) ? Number(rawScaled.maxLv) : builtIn.maxLv;
+    const isScaled = typeof rawScaled?.isScaled === 'boolean'
+      ? rawScaled.isScaled
+      : (minLv !== baseMin || maxLv !== baseMax);
+    const derivedThreat = resolveThreatTierFallback(biomeId, playerLevel, maxLv, isScaled);
+    const threatTone = rawScaled?.threatTone || derivedThreat.threatTone;
+    const threatLabel = rawScaled?.threatLabel || derivedThreat.threatLabel;
+
+    const safeThreat = threatTone !== 'veteran' && threatTone !== 'apex';
+    const safeCap = maxLv <= Math.max(7, playerLevel + 4) && minLv <= Math.max(2, playerLevel + 1);
+    const inActual = minLv <= playerLevel && playerLevel <= maxLv;
+    const inBase = baseMin <= playerLevel && playerLevel <= baseMax;
+
+    evaluations.push({
+      biomeId,
+      biome,
+      orderIdx,
+      baseMin,
+      baseMax,
+      minLv,
+      maxLv,
+      baseMid: (baseMin + baseMax) / 2,
+      actualMid: (minLv + maxLv) / 2,
+      threatLabel,
+      threatTone,
+      isScaled,
+      safeThreat,
+      safeCap,
+      inActual,
+      inBase,
+    });
+  }
+
+  let filtered = evaluations.filter((e) => e.safeThreat && e.safeCap && e.inActual);
+  if (filtered.length === 0) {
+    filtered = evaluations.filter((e) => e.safeThreat && e.safeCap);
+  }
+  if (filtered.length === 0) {
+    filtered = evaluations.filter((e) => e.safeThreat);
+  }
+  if (filtered.length === 0) {
+    filtered = evaluations;
+  }
+
+  const nativeMatches = filtered.filter((e) => e.inBase);
+  const candidates = nativeMatches.length > 0 ? nativeMatches : filtered;
 
   const hasShrinesCleared = Boolean(
     profile && (Array.isArray(profile.shrinesCleared) || profile.shrinesCleared instanceof Set),
   );
   const clearedSet = hasShrinesCleared ? new Set(profile.shrinesCleared) : null;
 
-  let biome = null;
-  let clamped = null;
+  candidates.sort((a, b) => {
+    const scoreA = Math.abs(playerLevel - a.actualMid) * 1.2
+      + Math.abs(playerLevel - a.baseMid) * 0.8
+      + (a.threatTone === 'balanced' ? 0 : 0.6);
+    const scoreB = Math.abs(playerLevel - b.actualMid) * 1.2
+      + Math.abs(playerLevel - b.baseMid) * 0.8
+      + (b.threatTone === 'balanced' ? 0 : 0.6);
+    if (Math.abs(scoreA - scoreB) > 1e-6) {
+      return scoreA - scoreB;
+    }
 
-  if (targetLevel < 2) {
-    biome = BIOMES.forest;
-    clamped = 'low';
-  } else if (targetLevel > 36) {
-    biome = BIOMES.rift;
-    clamped = 'high';
-  } else {
-    const farmingBiomes = FARMING_BIOME_ORDER.map((id) => BIOMES[id]).filter(Boolean);
-    const matching = farmingBiomes.filter(
-      (b) => b.levelRange[0] <= targetLevel && targetLevel <= b.levelRange[1],
-    );
-    const candidates = matching.length > 0 ? matching : farmingBiomes;
-    candidates.sort((a, b) => {
-      const midA = (a.levelRange[0] + a.levelRange[1]) / 2;
-      const midB = (b.levelRange[0] + b.levelRange[1]) / 2;
-      const midDiff = Math.abs(targetLevel - midA) - Math.abs(targetLevel - midB);
-      if (midDiff !== 0) return midDiff;
+    if (clearedSet) {
+      const aUncleared = (SHRINES_BY_BIOME[a.biomeId] || []).some((sid) => !clearedSet.has(sid)) ? 0 : 1;
+      const bUncleared = (SHRINES_BY_BIOME[b.biomeId] || []).some((sid) => !clearedSet.has(sid)) ? 0 : 1;
+      if (aUncleared !== bUncleared) return aUncleared - bUncleared;
+    }
 
-      if (clearedSet) {
-        const aUncleared = (SHRINES_BY_BIOME[a.id] || []).some((sid) => !clearedSet.has(sid)) ? 0 : 1;
-        const bUncleared = (SHRINES_BY_BIOME[b.id] || []).some((sid) => !clearedSet.has(sid)) ? 0 : 1;
-        if (aUncleared !== bUncleared) return aUncleared - bUncleared;
-      }
+    return a.orderIdx - b.orderIdx;
+  });
 
-      return FARMING_BIOME_ORDER.indexOf(a.id) - FARMING_BIOME_ORDER.indexOf(b.id);
-    });
-    biome = candidates[0] || BIOMES.forest;
-  }
+  const chosen = candidates[0] || {
+    biomeId: 'forest',
+    biome: BIOMES.forest,
+    baseMin: BIOMES.forest.levelRange[0],
+    baseMax: BIOMES.forest.levelRange[1],
+    minLv: BIOMES.forest.levelRange[0],
+    maxLv: BIOMES.forest.levelRange[1],
+    threatLabel: 'Balanced',
+    threatTone: 'balanced',
+    isScaled: false,
+  };
 
-  const warp = getBiomeWarpPoint(biome.id);
+  const clamped = playerLevel < 2 ? 'low' : (playerLevel > 36 ? 'high' : null);
+  const warp = getBiomeWarpPoint(chosen.biomeId);
+
   return {
-    biomeId: biome.id,
-    biome,
-    targetLevel,
-    levelRange: [...biome.levelRange],
-    minLv: biome.levelRange[0],
-    maxLv: biome.levelRange[1],
+    biomeId: chosen.biomeId,
+    biome: chosen.biome,
+    playerLevel,
+    targetLevel: playerLevel,
+    partyLevel: playerLevel,
+    baseMin: chosen.baseMin,
+    baseMax: chosen.baseMax,
+    minLv: chosen.minLv,
+    maxLv: chosen.maxLv,
+    levelRange: [...chosen.biome.levelRange],
+    threatLabel: chosen.threatLabel,
+    threatTone: chosen.threatTone,
+    isScaled: chosen.isScaled,
+    clamped,
     x: warp.x,
     y: warp.y,
     dir: warp.dir,
-    clamped,
   };
 }
