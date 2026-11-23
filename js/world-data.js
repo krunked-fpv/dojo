@@ -1,3 +1,5 @@
+import { BALANCE } from './balance.js';
+
 export const TILE = {
   GRASS: 0,
   PATH: 1,
@@ -3362,26 +3364,9 @@ export function getBiomeWarpPoint(biomeId) {
   return { biomeId: biome.id, x: safe.x, y: safe.y, dir: safe.dir };
 }
 
-export const BIOME_SCALING_OFFSETS = {
-  village: -2,
-  forest: -1,
-  cave: 0,
-  water: 0,
-  volcano: 0,
-  desert: 0,
-  peak: 1,
-  grove: 1,
-  marsh: 1,
-  faeveldt: 1,
-  canyon: 1,
-  sanctum: 1,
-  atoll: 1,
-  reef: 1,
-  highlands: 1,
-  ruins: 1,
-  crater: 1,
-  rift: 1,
-};
+export const BIOME_SCALING_OFFSETS = Object.freeze({
+  ...BALANCE.scaling.biomeOffsets,
+});
 
 export const TRAINER_XP_WEIGHTS = {
   battleWin: 14,

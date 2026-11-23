@@ -2703,6 +2703,24 @@ export class PokedexUI {
       const recommendedTag = isRecommended
         ? '<span class="biome-recommended-tag">🌟 Best Lv. Match</span>'
         : '';
+      let readinessPill = '';
+      if (!scaled.isSafe && typeof PokemonMod.assessEncounterReadiness === 'function') {
+        const enemyTypes = [...new Set(
+          (biome.encounters || [])
+            .map((enc) => SPECIES[enc?.id ?? enc?.speciesId ?? enc]?.type)
+            .filter(Boolean),
+        )];
+        const readiness = PokemonMod.assessEncounterReadiness(profile, {
+          kind: 'biome',
+          minLv: scaled.minLv,
+          maxLv: scaled.maxLv,
+          enemyTypes,
+          label: biome.name,
+        });
+        if (readiness) {
+          readinessPill = `<span class="biome-readiness-pill is-${escapeHtml(readiness.tier)}" data-tier="${escapeHtml(readiness.tier)}" title="${escapeHtml(readiness.tip)}">${escapeHtml(readiness.badgeText)}</span>`;
+        }
+      }
       const threatPill = !scaled.isSafe
         ? `<span class="biome-threat-tag is-${scaled.threatTone}" title="${scaled.isScaled ? `Scaled from base Lv.${scaled.baseMin}–${scaled.baseMax}` : 'Matches base island level range'}">${scaled.threatLabel}</span>`
         : '';
@@ -2712,6 +2730,7 @@ export class PokedexUI {
           <strong>${biome.icon} ${biome.name}</strong>
           <div class="biome-card-pills">
             ${recommendedTag}
+            ${readinessPill}
             ${threatPill}
             <span class="biome-lv-pill">${lvRange}</span>
           </div>

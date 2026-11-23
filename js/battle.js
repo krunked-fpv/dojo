@@ -1,5 +1,6 @@
 import * as Config from './config.js';
 import * as PokemonMod from './pokemon.js';
+import { BALANCE, computeBattleXpReward, computeBenchXpShare } from './balance.js';
 
 const FALLBACK_TYPES = {
   grass: { id: 'grass', label: 'Grass', color: '#22c55e', bg: '#14532d', icon: '🌿' },
@@ -1132,6 +1133,10 @@ export class BattleEngine {
     }
     const enemyCard = this.enemyStatusCardEl || this.enemyNameEl?.closest('.status-card-enemy') || document.querySelector('.status-card-enemy');
     enemyCard?.classList.remove('is-elite-card');
+    if (this.enemyLevelEl) {
+      this.enemyLevelEl.classList.remove('is-high-threat');
+      this.enemyLevelEl.title = '';
+    }
     if (this.enemyPartyPipsEl) {
       this.enemyPartyPipsEl.innerHTML = '';
       this.enemyPartyPipsEl.hidden = true;
@@ -1246,7 +1251,15 @@ export class BattleEngine {
     this.enemySpriteEl?.classList.toggle('is-elite-sprite', Boolean(this.enemy.isElite));
 
     if (this.enemyNameEl) this.enemyNameEl.textContent = this.enemy.name;
-    if (this.enemyLevelEl) this.enemyLevelEl.textContent = `Lv.${this.enemy.level}`;
+    if (this.enemyLevelEl) {
+      this.enemyLevelEl.textContent = `Lv.${this.enemy.level}`;
+      const levelGap = (Number(this.enemy.level) || 1) - (Number(this.player.level) || 1);
+      const isHighThreat = levelGap >= 4;
+      this.enemyLevelEl.classList.toggle('is-high-threat', isHighThreat);
+      this.enemyLevelEl.title = isHighThreat
+        ? `Strong foe (+${levelGap} Lv above your active Pokémon)`
+        : '';
+    }
     this.syncRankPill('enemy', this.enemy);
     const eType = resolveTypeMeta(this.enemy.type);
     if (this.enemyTypeEl) {
@@ -6124,6 +6137,66 @@ export class BattleEngine {
     this.spawnFloatingText(center.x, center.y - 34, 'ENDURED! 1 HP', '#f472b6', 22, 0, 1.55);
   }
 
+  spawnComposureBraceFX(side = 'player', pace = null) {
+    const center = this.getSpriteCenter(side);
+    const lifeScale = Math.min(1.25, pace?.particleLifeScale || 1.1);
+    const canvasH = (this.fxCanvas && this.fxCanvas.height > 0) ? this.fxCanvas.height : 240;
+
+    // Brief, crisp defensive ring pulse around the bracing defender
+    this.particles.push({
+      x: center.x,
+      y: center.y,
+      vx: 0,
+      vy: 0,
+      gravity: 0,
+      life: 0,
+      maxLife: 0.42 * lifeScale,
+      color: '#67e8f9',
+      size: 16,
+      maxRadius: 84,
+      lineWidth: 3.2,
+      shape: 'ring',
+    });
+    this.particles.push({
+      x: center.x,
+      y: center.y,
+      vx: 0,
+      vy: 0,
+      gravity: 0,
+      life: -0.04,
+      maxLife: 0.36 * lifeScale,
+      color: '#e0f2fe',
+      size: 12,
+      maxRadius: 62,
+      lineWidth: 2.2,
+      shape: 'ring',
+    });
+
+    const glintCols = ['#67e8f9', '#e0f2fe', '#fde047'];
+    for (let i = 0; i < 6; i++) {
+      const ang = (Math.PI * 2 * i) / 6 + Math.PI / 6;
+      const spd = 48 + (i % 2) * 20;
+      this.particles.push({
+        x: center.x + Math.cos(ang) * 18,
+        y: center.y + Math.sin(ang) * 14,
+        vx: Math.cos(ang) * spd,
+        vy: Math.sin(ang) * spd - 12,
+        gravity: 0,
+        life: -(i * 0.012),
+        maxLife: 0.46 * lifeScale,
+        color: glintCols[i % glintCols.length],
+        size: 4.5,
+        rotation: ang,
+        spin: 4.5,
+        shape: 'diamond',
+      });
+    }
+
+    // Offset cleanly below the -damage popup (center.y - 24) so it never covers damage or eff/crit badges
+    const badgeY = Math.max(26, Math.min(canvasH - 14, center.y + 12));
+    this.spawnFloatingText(center.x, badgeY, '🛡️ BRACED!', '#67e8f9', 16, 0.06, 1.45);
+  }
+
   startFxLoop() {
     if (this.fxRaf !== null) {
       cancelAnimationFrame(this.fxRaf);
@@ -7997,6 +8070,14 @@ export class BattleEngine {
       if (result.isCrit) {
         this.spawnFloatingText(center.x, center.y + tagOffsetY, 'CRITICAL HIT!', '#fb923c', 17, 0.09, 1.45);
       }
+      if (result.composureCapped) {
+        this.spawnComposureBraceFX(defenderSide, pace);
+        if (typeof this.audio?.playComposureBrace === 'function') {
+          this.audio.playComposureBrace();
+        } else {
+          this.audio?.playShieldChime?.();
+        }
+      }
     }
 
     await this.wait(pace.postImpactMs, sessionId);
@@ -8021,20 +8102,83 @@ export class BattleEngine {
     if (moves.length === 0) {
       return createStruggleMove();
     }
+
+    const maxHp = Math.max(1, Number(this.enemy.maxHp) || 1);
+    const hpRatio = Math.max(0, Math.min(1, (Number(this.enemy.hp) || 0) / maxHp));
+    const isShielded = (Number(this.enemy.shieldTurns) || 0) > 0;
+    const isBossOrRival = Boolean(this.isTrainer || this.isShrine);
+    const isAstralTrial = Boolean(this.isShrine && this.shrineData?.isAstralTrial);
+    const buffCap = isAstralTrial ? 2 : 1;
+
     const attacks = moves.filter((m) => m.category === 'attack' || !m.category);
-    let chosen = moves[Math.floor(Math.random() * moves.length)];
-    if (chosen.category === 'heal' && this.enemy.hp > this.enemy.maxHp * 0.6 && attacks.length > 0) {
-      chosen = attacks[Math.floor(Math.random() * attacks.length)];
-    } else if (chosen.category === 'shield' && (this.enemy.shieldTurns || 0) > 0 && attacks.length > 0) {
-      chosen = attacks[Math.floor(Math.random() * attacks.length)];
-    } else if (chosen.category === 'buff') {
-      const stat = chosen.buffStat || 'atk';
+    const heals = moves.filter((m) => m.category === 'heal');
+    const shields = moves.filter((m) => m.category === 'shield');
+    const buffs = moves.filter((m) => m.category === 'buff');
+    const pickRandom = (list) => list[Math.min(list.length - 1, Math.floor(Math.random() * list.length))];
+
+    const isBuffAllowed = (move) => {
+      const stat = move.buffStat || 'atk';
       const stage = Number(this.enemy.battleStages?.[stat] || 0);
-      if ((stage >= 2 || this.enemy.hp < this.enemy.maxHp * 0.35) && attacks.length > 0) {
-        chosen = attacks[Math.floor(Math.random() * attacks.length)];
+      return stage < buffCap && hpRatio >= 0.35;
+    };
+
+    // Wild AI: natural variety without wasteful heals (>60% HP), re-shields, or >+1 buff stacking
+    if (!isBossOrRival) {
+      const sensibleMoves = moves.filter((m) => {
+        if (m.category === 'heal') return hpRatio <= 0.6;
+        if (m.category === 'shield') return !isShielded;
+        if (m.category === 'buff') return isBuffAllowed(m);
+        return true;
+      });
+      const pool = sensibleMoves.length > 0 ? sensibleMoves : (attacks.length > 0 ? attacks : moves);
+      return pickRandom(pool);
+    }
+
+    // Rival & Shrine AI: fair tactical pacing without mindless buff-stacking sweeps
+    const allowedHeals = hpRatio <= 0.6 ? heals : [];
+    const allowedShields = !isShielded ? shields : [];
+    const allowedBuffs = buffs.filter(isBuffAllowed);
+
+    // Prefer tactical heal or shield when HP is in the 25%–55% stabilization window
+    if (hpRatio >= 0.25 && hpRatio <= 0.55) {
+      const tacticalDefense = [...heals, ...allowedShields];
+      if (tacticalDefense.length > 0 && Math.random() < 0.65) {
+        if (heals.length > 0 && hpRatio <= 0.40) {
+          return pickRandom(heals);
+        }
+        return pickRandom(tacticalDefense);
       }
     }
-    return chosen;
+
+    const pickSmartAttack = () => {
+      if (attacks.length === 0) return null;
+      const scored = attacks.map((m) => ({
+        move: m,
+        eff: computeTypeEffectiveness(m.type, this.player.type),
+      }));
+      const superEffective = scored.filter((entry) => entry.eff > 1).map((entry) => entry.move);
+      const nonResisted = scored.filter((entry) => entry.eff >= 1).map((entry) => entry.move);
+      const nonImmune = scored.filter((entry) => entry.eff > 0).map((entry) => entry.move);
+
+      // ~65% tactical pick among effective/non-resisted attacks; ~35% playful variety
+      if (Math.random() < 0.65) {
+        if (superEffective.length > 0) return pickRandom(superEffective);
+        if (nonResisted.length > 0) return pickRandom(nonResisted);
+        if (nonImmune.length > 0) return pickRandom(nonImmune);
+        return pickRandom(attacks);
+      }
+      return pickRandom(nonImmune.length > 0 ? nonImmune : attacks);
+    };
+
+    const allowedUtility = [...allowedBuffs, ...allowedShields, ...allowedHeals];
+    if (attacks.length > 0) {
+      if (allowedUtility.length > 0 && Math.random() < 0.25) {
+        return pickRandom(allowedUtility);
+      }
+      return pickSmartAttack();
+    }
+
+    return pickRandom(allowedUtility.length > 0 ? allowedUtility : moves);
   }
 
   async handlePlayerMove(move) {
@@ -8144,11 +8288,15 @@ export class BattleEngine {
 
     const rawResult = PokemonMod.calculateDamage(attacker, defender, move, {
       applyAbilities: this.abilitiesEnabled !== false,
+      applyComposure: true,
+      defenderSide: defSide,
+      isBoss: this.isShrine,
     });
     const result = move?._isStruggle
       ? {
           ...rawResult,
           effectiveness: 1,
+          composureCapped: rawResult.effectiveness === 0 ? false : Boolean(rawResult.composureCapped),
           damage: rawResult.effectiveness === 0
             ? Math.max(Number(rawResult.damage) || 1, Math.max(2, Math.round(((attacker.level || 5) + 4) * 0.45)))
             : Math.max(1, Number(rawResult.damage) || 1),
@@ -8319,6 +8467,14 @@ export class BattleEngine {
     if (result.isCrit) {
       await this.say('A critical hit!');
     }
+    if (result.composureCapped && !buddyEndured && !defender.isFainted && this.isSessionValid(sid)) {
+      if (defSide === 'player') {
+        const playerLabel = defender.displayName || defender.name;
+        await this.say(`🛡️ ${playerLabel} braced the heavy opening hit!`);
+      } else if (!this.isShrine && !this.isTrainer) {
+        await this.say(`🛡️ ${defender.name} hung on — ready to catch!`);
+      }
+    }
     if (buddyEndured && this.isSessionValid(sid)) {
       const playerName = this.player.displayName || this.player.name;
       await this.say(`💖 ${playerName} toughed it out at 1 HP for its trainer!`);
@@ -8376,7 +8532,10 @@ export class BattleEngine {
     this.audio?.playHealChime?.();
 
     try {
-      const healAmount = Math.max(18, Math.round(this.player.maxHp * 0.45));
+      const healAmount = Math.max(
+        BALANCE.combat.potionMinHeal,
+        Math.round(this.player.maxHp * BALANCE.combat.potionHealRatio),
+      );
       const gained = this.player.healAmount(healAmount);
       this.storage.save();
       this.spawnImpactFX('player', 'heal', `+${gained} HP`, '#86efac', {
@@ -9241,32 +9400,45 @@ export class BattleEngine {
     const bondMult = PokemonMod.getBondTier?.(this.player.bond)?.xpMult ?? 1.0;
     const isSpirited = !this.isShrine && !this.isTrainer && this.enemy?.encounterTrait === 'spirited';
     const traitMult = isSpirited ? 1.15 : 1.0;
-    const xpGain = Math.max(12, Math.round((this.enemy.level * 14 + 12) * scale * bondMult * traitMult));
-    await this.say(isSpirited ? `${playerName} gained ${xpGain} XP (⚡ Spirited +15%)!` : `${playerName} gained ${xpGain} XP!`);
+    const xpRes = computeBattleXpReward(this.player, this.enemy, { scale, bondMult, traitMult });
+    const xpGain = xpRes.xp;
+    const xpTags = [];
+    if (isSpirited) xpTags.push('⚡ Spirited +15%');
+    if (xpRes.isCatchup) xpTags.push('Catch-Up Bonus!');
+    const xpTagText = xpTags.length > 0 ? ` (${xpTags.join(' • ')})` : '';
+    await this.say(`${playerName} gained ${xpGain} XP${xpTagText}!`);
     if (!this.isSessionValid(sid)) return [];
 
-    const levelResult = this.player.gainXp(xpGain);
     const profile = this.storage.getActiveProfile?.();
     const excludeSet = new Set(Array.isArray(excludeUids) ? excludeUids.filter(Boolean) : []);
-    const benchShareXp = Math.max(6, Math.round(xpGain * 0.4));
-    const benchReceivers = [];
-    const benchLevelUps = [];
+    const benchPlan = [];
     if (profile && Array.isArray(profile.team)) {
       for (const mate of profile.team) {
         if (!mate || mate === this.player || (this.player.uid && mate.uid === this.player.uid)) continue;
         if (mate.uid && excludeSet.has(mate.uid)) continue;
         if (mate.isFainted || Number(mate.hp) <= 0) continue;
-        const benchRes = mate.gainXp?.(benchShareXp);
-        if (grantBenchBond) {
-          mate.gainBond?.(2);
-        }
-        benchReceivers.push(mate);
-        if (benchRes?.leveledUp) {
-          benchLevelUps.push({
-            name: mate.displayName || mate.name,
-            newLevel: benchRes.newLevel,
-          });
-        }
+        const shareRes = computeBenchXpShare(mate, this.player, this.enemy, xpRes.baseXp);
+        benchPlan.push({ mate, shareRes });
+      }
+    }
+
+    const levelResult = this.player.gainXp(xpGain);
+    const benchReceivers = [];
+    const benchLevelUps = [];
+    const benchXpGains = [];
+    for (const { mate, shareRes } of benchPlan) {
+      const mateXp = shareRes.xp;
+      benchXpGains.push(mateXp);
+      const benchRes = mate.gainXp?.(mateXp);
+      if (grantBenchBond) {
+        mate.gainBond?.(2);
+      }
+      benchReceivers.push(mate);
+      if (benchRes?.leveledUp) {
+        benchLevelUps.push({
+          name: mate.displayName || mate.name,
+          newLevel: benchRes.newLevel,
+        });
       }
     }
 
@@ -9321,10 +9493,13 @@ export class BattleEngine {
           ringColors: ['#fde047', '#38bdf8'],
         });
       }
+      const minBenchXp = Math.min(...benchXpGains);
+      const maxBenchXp = Math.max(...benchXpGains);
+      const benchXpLabel = minBenchXp === maxBenchXp ? `${minBenchXp}` : `${minBenchXp}–${maxBenchXp}`;
       const lvlSummary = benchLevelUps.length > 0
         ? ` (${benchLevelUps.map((u) => `${u.name} → Lv.${u.newLevel}!`).join(', ')})`
         : '';
-      await this.say(`Team bench gained ${benchShareXp} Catch-Up XP!${lvlSummary}`);
+      await this.say(`Team bench gained ${benchXpLabel} Catch-Up XP!${lvlSummary}`);
       if (!this.isSessionValid(sid)) return [];
     }
 

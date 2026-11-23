@@ -1,7 +1,14 @@
+import { BALANCE } from './balance.js';
 import * as Config from './config.js';
-import { GAME_META, SPECIES, TRAINERS, TYPES, getSpriteUrls } from './config.js';
+import { GAME_META, SPECIES, TRAINERS, TYPES, TYPE_CHART, getSpriteUrls } from './config.js';
 import * as PokemonMod from './pokemon.js';
-import { generateSilhouetteDataUri } from './pokemon.js';
+import {
+  assessEncounterReadiness,
+  generateSilhouetteDataUri,
+  getScaledRivalParty,
+  getScaledShrineGuard,
+  getScaledShrineTrial,
+} from './pokemon.js';
 import {
   CHESTS,
   FIELD_QUESTS,
@@ -279,6 +286,51 @@ const CELEBRATION_PALETTES = {
 
 const WARP_SWIRL_COLORS = ['#67e8f9', '#38bdf8', '#c084fc', '#e879f9', '#fde047', '#ffffff'];
 const SAFE_WARP_SWIRL_COLORS = ['#fde047', '#fbbf24', '#4ade80', '#86efac', '#fef08a', '#ffffff'];
+
+const READINESS_AURA_STYLES = Object.freeze({
+  favored: Object.freeze({
+    ring: '#34d399',
+    glow: '#67e8f9',
+    dot: '#4ade80',
+    dotCore: '#ecfdf5',
+    badgeBg: 'rgba(6, 95, 70, 0.92)',
+    badgeBorder: '#6ee7b7',
+    pulseSpeed: 0.0045,
+    isWarning: false,
+  }),
+  balanced: Object.freeze({
+    ring: '#38bdf8',
+    glow: '#fde047',
+    dot: '#67e8f9',
+    dotCore: '#fef9c3',
+    badgeBg: 'rgba(14, 116, 144, 0.92)',
+    badgeBorder: '#fde047',
+    pulseSpeed: 0.0052,
+    isWarning: false,
+  }),
+  challenging: Object.freeze({
+    ring: '#f59e0b',
+    glow: '#fde047',
+    dot: '#fbbf24',
+    dotCore: '#fffbeb',
+    badgeBg: 'rgba(146, 64, 14, 0.94)',
+    badgeBorder: '#fbbf24',
+    pulseSpeed: 0.0072,
+    isWarning: true,
+  }),
+  danger: Object.freeze({
+    ring: '#fb7185',
+    glow: '#ef4444',
+    dot: '#f43f5e',
+    dotCore: '#fff1f2',
+    badgeBg: 'rgba(159, 18, 57, 0.95)',
+    badgeBorder: '#fda4af',
+    pulseSpeed: 0.0095,
+    isWarning: true,
+  }),
+});
+
+const READINESS_CACHE_TTL_MS = 450;
 
 function hash2d(x, y) {
   const n = Math.sin(x * 127.1 + y * 311.7) * 43758.5453;
@@ -573,10 +625,19 @@ export class OverworldEngine {
     this.moveDuration = 0.145;
     this.walkFrame = 0;
 
-    this.stepsSinceBattle = 4;
+    this.stepsSinceBattle = BALANCE.overworld.minStepsBetweenWilds;
     this.encounterTileStreak = 0;
+    this.encounterGraceSteps = 0;
     this.currentBiomeId = null;
     this.lastHintKey = null;
+
+    this._shrineReadinessCache = new Map();
+    this._rivalReadinessCache = new Map();
+    this._readinessCacheSig = null;
+    this._readinessCacheAt = -Infinity;
+    this._readinessCacheTrainerId = null;
+    this._readinessCacheProfileRef = null;
+    this._readinessCacheDirty = true;
 
     this.autoPath = [];
     this.autoInteractTarget = null;
@@ -874,6 +935,7 @@ export class OverworldEngine {
     this.clearTouchNavigation();
     this._resizeObserver?.disconnect?.();
     this._warpBeam = null;
+    this._invalidateReadinessCache();
 
     if (this._boundWindow && this._onWindowBlur && typeof this._boundWindow.removeEventListener === 'function') {
       this._boundWindow.removeEventListener('blur', this._onWindowBlur);
@@ -1387,14 +1449,16 @@ export class OverworldEngine {
     this.moveTargetX = profile.pos.x;
     this.moveTargetY = profile.pos.y;
     this.moveProgress = 0;
-    this.stepsSinceBattle = 4;
+    this.stepsSinceBattle = BALANCE.overworld.minStepsBetweenWilds;
     this.encounterTileStreak = 0;
     this.rustleTile = null;
     this.particles = [];
     this.ripples = [];
     if (this.followerTrainerId && this.followerTrainerId !== profile.trainerId) {
       this.rarePatches = [];
+      this.encounterGraceSteps = 0;
     }
+    this._invalidateReadinessCache();
     this.rarePatchSpawnCooldown = 0;
     this.refreshRarePatches(profile, 0);
 
@@ -1440,6 +1504,8 @@ export class OverworldEngine {
       this.moveProgress = 0;
       this.followerMoving = false;
       this.followerInitialized = false;
+      this.encounterGraceSteps = 0;
+      this._invalidateReadinessCache();
       this.rustleTile = null;
       this._warpBeam = null;
     }
@@ -1834,6 +1900,169 @@ export class OverworldEngine {
   }
 
   /**
+   * Grant anti-ambush encounter grace steps during which random tall-grass
+   * encounters are suppressed (intentional discovery nodes still trigger).
+   * Never shortens an already longer active grace window.
+   * @param {number} [steps]
+   * @returns {number} Active remaining encounter grace steps.
+   */
+  grantEncounterGrace(steps = BALANCE.overworld.postWarpGraceSteps) {
+    if (
+      steps === null
+      || steps === ''
+      || typeof steps === 'boolean'
+      || typeof steps === 'object'
+    ) {
+      return this.encounterGraceSteps;
+    }
+    const num = Number(steps);
+    if (!Number.isFinite(num)) {
+      return this.encounterGraceSteps;
+    }
+    const safeSteps = Math.max(0, Math.floor(num));
+    this.encounterGraceSteps = Math.max(this.encounterGraceSteps, safeSteps);
+    return this.encounterGraceSteps;
+  }
+
+  _invalidateReadinessCache() {
+    this._shrineReadinessCache.clear();
+    this._rivalReadinessCache.clear();
+    this._readinessCacheSig = null;
+    this._readinessCacheAt = -Infinity;
+    this._readinessCacheProfileRef = null;
+    this._readinessCacheDirty = true;
+  }
+
+  _buildReadinessProfileSignature(profile) {
+    if (!profile || typeof profile !== 'object') return '';
+    const badgesLen = Array.isArray(profile.badges) ? profile.badges.length : 0;
+    const shrinesLen = Array.isArray(profile.shrinesCleared) ? profile.shrinesCleared.length : 0;
+    const rivalsLen = Array.isArray(profile.rivalsDefeated) ? profile.rivalsDefeated.length : 0;
+
+    let trialSum = 0;
+    if (profile.shrineTrialCounts && typeof profile.shrineTrialCounts === 'object') {
+      for (const v of Object.values(profile.shrineTrialCounts)) {
+        const n = Number(v);
+        if (Number.isFinite(n) && n > 0) trialSum += Math.floor(n);
+      }
+    }
+    let rematchSum = 0;
+    if (profile.rivalRematchCounts && typeof profile.rivalRematchCounts === 'object') {
+      for (const v of Object.values(profile.rivalRematchCounts)) {
+        const n = Number(v);
+        if (Number.isFinite(n) && n > 0) rematchSum += Math.floor(n);
+      }
+    }
+
+    let sig = `${profile.trainerId || ''}|${badgesLen}|${shrinesLen}|${rivalsLen}|${trialSum}|${rematchSum}`;
+    const team = Array.isArray(profile.team) ? profile.team : [];
+    for (let i = 0; i < team.length; i++) {
+      const mon = team[i];
+      if (!mon) continue;
+      sig += `;${mon.speciesId || 0}:${mon.level || 0}:${mon.hp ?? -1}/${mon.maxHp ?? -1}:${mon.isFainted ? 1 : 0}:${mon.upgradeTier || 0}`;
+    }
+    return sig;
+  }
+
+  _ensureReadinessCacheFresh(profile, nowMs = 0) {
+    if (!profile) {
+      if (this._shrineReadinessCache.size > 0 || this._rivalReadinessCache.size > 0) {
+        this._invalidateReadinessCache();
+      }
+      return;
+    }
+
+    const safeNow = Number.isFinite(nowMs) ? nowMs : 0;
+    const elapsed = safeNow - this._readinessCacheAt;
+    if (
+      !this._readinessCacheDirty
+      && this._readinessCacheProfileRef === profile
+      && this._readinessCacheTrainerId === profile.trainerId
+      && elapsed >= 0
+      && elapsed < READINESS_CACHE_TTL_MS
+    ) {
+      return;
+    }
+
+    const nextSig = this._buildReadinessProfileSignature(profile);
+    if (nextSig !== this._readinessCacheSig) {
+      this._shrineReadinessCache.clear();
+      this._rivalReadinessCache.clear();
+      this._readinessCacheSig = nextSig;
+    }
+    this._readinessCacheProfileRef = profile;
+    this._readinessCacheTrainerId = profile.trainerId ?? null;
+    this._readinessCacheAt = safeNow;
+    this._readinessCacheDirty = false;
+  }
+
+  getShrineReadinessTier(shrine, profile) {
+    if (!shrine || !shrine.id || !profile) return 'balanced';
+    if (this._readinessCacheDirty || this._readinessCacheProfileRef !== profile) {
+      this._ensureReadinessCacheFresh(profile, Number.isFinite(this._readinessCacheAt) ? this._readinessCacheAt + READINESS_CACHE_TTL_MS : 0);
+    }
+    const cached = this._shrineReadinessCache.get(shrine.id);
+    if (cached) return cached;
+
+    const cleared = Boolean(profile.shrinesCleared?.includes(shrine.id));
+    const scaled = cleared
+      ? getScaledShrineTrial(shrine, profile)
+      : getScaledShrineGuard(shrine, profile);
+    const sp = SPECIES[scaled?.guardianId];
+    const enemyTypes = sp?.type ? [sp.type] : [];
+    const readiness = assessEncounterReadiness(profile, {
+      kind: 'shrine',
+      targetLevel: scaled?.level ?? shrine.level,
+      enemyTypes,
+      enemyCount: 1,
+      typeChart: TYPE_CHART,
+    });
+    const tier = READINESS_AURA_STYLES[readiness?.tier] ? readiness.tier : 'balanced';
+    this._shrineReadinessCache.set(shrine.id, tier);
+    return tier;
+  }
+
+  getRivalReadinessTier(rival, profile) {
+    if (!rival || !rival.id || !profile) return 'balanced';
+    if (this._readinessCacheDirty || this._readinessCacheProfileRef !== profile) {
+      this._ensureReadinessCacheFresh(profile, Number.isFinite(this._readinessCacheAt) ? this._readinessCacheAt + READINESS_CACHE_TTL_MS : 0);
+    }
+    const cached = this._rivalReadinessCache.get(rival.id);
+    if (cached) return cached;
+
+    const party = getScaledRivalParty(rival, profile) || [];
+    let maxLv = 1;
+    const enemyTypes = [];
+    for (let i = 0; i < party.length; i++) {
+      const entry = party[i];
+      const lv = Number(entry?.level);
+      if (Number.isFinite(lv) && lv > maxLv) maxLv = lv;
+      const sp = SPECIES[entry?.speciesId];
+      if (sp?.type && !enemyTypes.includes(sp.type)) {
+        enemyTypes.push(sp.type);
+      }
+    }
+    const readiness = assessEncounterReadiness(profile, {
+      kind: 'rival',
+      targetLevel: maxLv,
+      enemyTypes,
+      enemyCount: Math.max(1, party.length),
+      typeChart: TYPE_CHART,
+    });
+    const tier = READINESS_AURA_STYLES[readiness?.tier] ? readiness.tier : 'balanced';
+    this._rivalReadinessCache.set(rival.id, tier);
+    return tier;
+  }
+
+  _traceEllipse(ctx, cx, cy, rx, ry) {
+    if (typeof ctx.ellipse === 'function') {
+      ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
+    } else {
+      ctx.arc(cx, cy, Math.max(1, (rx + ry) * 0.5), 0, Math.PI * 2);
+    }
+  }
+
+  /**
    * Relocate trainer and companion cleanly to a guaranteed-walkable landing tile.
    * @param {number} x
    * @param {number} y
@@ -1852,6 +2081,14 @@ export class OverworldEngine {
     const safe = findNearestSafePosition(x, y, dir);
     const profile = this.getProfile?.();
 
+    this.stepsSinceBattle = Math.max(
+      0,
+      BALANCE.overworld.minStepsBetweenWilds - BALANCE.overworld.postWarpGraceSteps,
+    );
+    this.encounterTileStreak = 0;
+    this.grantEncounterGrace(BALANCE.overworld.postWarpGraceSteps);
+    this._invalidateReadinessCache();
+
     if (profile) {
       if (!profile.pos || typeof profile.pos !== 'object') {
         profile.pos = { x: safe.x, y: safe.y, dir: safe.dir };
@@ -1864,8 +2101,6 @@ export class OverworldEngine {
       this.moveStartY = safe.y;
       this.moveTargetX = safe.x;
       this.moveTargetY = safe.y;
-      this.stepsSinceBattle = 3;
-      this.encounterTileStreak = 0;
 
       this._placeFollowerBehind(safe.x, safe.y, safe.dir);
       this.followerTrainerId = profile.trainerId;
@@ -2107,6 +2342,11 @@ export class OverworldEngine {
     this.refreshInteractHint();
     this.spawnStepRipple(x, y);
 
+    const hadEncounterGrace = this.encounterGraceSteps > 0;
+    if (hadEncounterGrace) {
+      this.encounterGraceSteps = Math.max(0, this.encounterGraceSteps - 1);
+    }
+
     const biome = getBiomeAt(x, y);
     if (biome.id !== this.currentBiomeId) {
       this.currentBiomeId = biome.id;
@@ -2171,10 +2411,15 @@ export class OverworldEngine {
       else if (tile === TILE.TERA_FLOOR) this.spawnParticles(x, y, '#38bdf8', 8, true);
 
       this.stepsSinceBattle += 1;
+      if (hadEncounterGrace) {
+        this.encounterTileStreak = 0;
+        return;
+      }
+
       this.encounterTileStreak += 1;
-      if (this.stepsSinceBattle >= 4) {
-        const guaranteed = this.encounterTileStreak >= 9;
-        if (guaranteed || Math.random() < 0.21) {
+      if (this.stepsSinceBattle >= BALANCE.overworld.minStepsBetweenWilds) {
+        const guaranteed = this.encounterTileStreak >= BALANCE.overworld.maxEncounterStreak;
+        if (guaranteed || Math.random() < BALANCE.overworld.wildEncounterChance) {
           this.stepsSinceBattle = 0;
           this.encounterTileStreak = 0;
           this.clearTouchNavigation();
@@ -2246,6 +2491,8 @@ export class OverworldEngine {
     if (this.active || this.followerInitialized) {
       this.syncFollower(false);
     }
+
+    this._ensureReadinessCacheFresh(profile, nowMs);
 
     const cam = this._getCameraPosition(profile, this._camOut);
     const { px, py, camX, camY } = cam;
@@ -3471,6 +3718,32 @@ export class OverworldEngine {
       case TILE.SHRINE: {
         const shrine = SHRINE_BY_TILE_INDEX.get(ty * WORLD_COLS + tx);
         const cleared = shrine && Boolean(profile?.shrinesCleared?.includes(shrine.id));
+        const readinessTier = shrine && !cleared ? this.getShrineReadinessTier(shrine, profile) : null;
+        const aura = readinessTier ? (READINESS_AURA_STYLES[readinessTier] || READINESS_AURA_STYLES.balanced) : null;
+        const auraPulse = aura ? (0.5 + 0.5 * Math.sin(nowMs * aura.pulseSpeed + tx * 0.7 + ty * 0.5)) : 0;
+
+        // Ground readiness aura ring around uncleared shrine pedestal
+        if (aura) {
+          ctx.save();
+          ctx.globalAlpha = aura.isWarning
+            ? 0.42 + 0.32 * auraPulse
+            : 0.28 + 0.18 * auraPulse;
+          ctx.strokeStyle = aura.ring;
+          ctx.lineWidth = readinessTier === 'danger' ? 1.9 : aura.isWarning ? 1.6 : 1.3;
+          ctx.beginPath();
+          this._traceEllipse(ctx, sx + 16, sy + 27, 12.5, 4);
+          ctx.stroke();
+          if (readinessTier === 'danger') {
+            ctx.globalAlpha = 0.22 + 0.24 * auraPulse;
+            ctx.strokeStyle = aura.glow;
+            ctx.lineWidth = 1.2;
+            ctx.beginPath();
+            this._traceEllipse(ctx, sx + 16, sy + 27, 14.5 + auraPulse * 1.2, 4.8 + auraPulse * 0.4);
+            ctx.stroke();
+          }
+          ctx.restore();
+        }
+
         ctx.fillStyle = '#475569';
         ctx.fillRect(sx + 4, sy + 18, 24, 12);
         ctx.fillStyle = '#94a3b8';
@@ -3517,40 +3790,39 @@ export class OverworldEngine {
                                                 : shrine?.biome === 'peak'
                                                   ? '#67e8f9'
                                                   : '#38bdf8';
-        if (cleared || shrine?.id === 'eclipse_shrine' || shrine?.id === 'grove_shrine' || shrine?.id === 'desert_shrine' || shrine?.id === 'marsh_shrine' || shrine?.id === 'sanctum_shrine' || shrine?.id === 'canyon_shrine' || shrine?.id === 'reef_shrine' || shrine?.id === 'ruins_shrine' || shrine?.id === 'rift_shrine' || shrine?.id === 'faeveldt_shrine' || shrine?.id === 'atoll_shrine' || shrine?.id === 'highlands_shrine' || shrine?.id === 'crater_shrine') {
+        if (cleared) {
           ctx.save();
           ctx.globalAlpha = 0.35 + 0.25 * Math.sin(nowMs * 0.007);
-          ctx.strokeStyle = shrine?.id === 'eclipse_shrine' && !cleared
-            ? '#c084fc'
-            : shrine?.id === 'grove_shrine' && !cleared
-              ? '#2dd4bf'
-              : shrine?.id === 'desert_shrine' && !cleared
-                ? '#fde047'
-                : shrine?.id === 'marsh_shrine' && !cleared
-                  ? '#a78bfa'
-                  : shrine?.id === 'sanctum_shrine' && !cleared
-                    ? '#38bdf8'
-                    : shrine?.id === 'canyon_shrine' && !cleared
-                      ? '#38bdf8'
-                      : shrine?.id === 'reef_shrine' && !cleared
-                        ? '#f472b6'
-                        : shrine?.id === 'ruins_shrine' && !cleared
-                          ? '#67e8f9'
-                          : shrine?.id === 'rift_shrine' && !cleared
-                            ? '#fde047'
-                            : shrine?.id === 'faeveldt_shrine' && !cleared
-                              ? '#a7f3d0'
-                              : shrine?.id === 'atoll_shrine' && !cleared
-                                ? '#fef08a'
-                                : shrine?.id === 'highlands_shrine' && !cleared
-                                  ? '#60a5fa'
-                                  : shrine?.id === 'crater_shrine' && !cleared
-                                    ? '#f472b6'
-                                    : '#fef08a';
+          ctx.strokeStyle = '#fef08a';
           ctx.lineWidth = 1.5;
           ctx.beginPath();
           ctx.arc(sx + 16, sy + 9 + bob, 9, 0, Math.PI * 2);
           ctx.stroke();
+          ctx.restore();
+        } else if (aura) {
+          ctx.save();
+          ctx.globalAlpha = aura.isWarning
+            ? 0.48 + 0.34 * auraPulse
+            : 0.34 + 0.22 * auraPulse;
+          ctx.strokeStyle = aura.ring;
+          ctx.lineWidth = readinessTier === 'danger' ? 1.9 : aura.isWarning ? 1.6 : 1.4;
+          ctx.beginPath();
+          ctx.arc(
+            sx + 16,
+            sy + 9 + bob,
+            readinessTier === 'danger' ? 9.2 + auraPulse * 1.4 : aura.isWarning ? 9.1 + auraPulse * 0.9 : 9,
+            0,
+            Math.PI * 2,
+          );
+          ctx.stroke();
+          if (readinessTier === 'danger') {
+            ctx.globalAlpha = 0.24 + 0.22 * auraPulse;
+            ctx.strokeStyle = aura.glow;
+            ctx.lineWidth = 1.1;
+            ctx.beginPath();
+            ctx.arc(sx + 16, sy + 9 + bob, 11.4 + auraPulse * 1.2, 0, Math.PI * 2);
+            ctx.stroke();
+          }
           ctx.restore();
         }
         ctx.beginPath();
@@ -3562,6 +3834,32 @@ export class OverworldEngine {
             ? '#312e81'
             : '#ffffff';
         ctx.fillRect(sx + 14, sy + 7 + bob, 2, 2);
+
+        // Crisp upper-right readiness beacon pip on uncleared Shrines
+        if (aura) {
+          const pipX = sx + 25.5;
+          const pipY = sy + 5.5 + Math.round(bob * 0.5);
+          ctx.save();
+          ctx.globalAlpha = aura.isWarning ? 0.38 + 0.32 * auraPulse : 0.28 + 0.18 * auraPulse;
+          ctx.fillStyle = aura.ring;
+          ctx.beginPath();
+          ctx.arc(pipX, pipY, aura.isWarning ? 3.8 : 3.2, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.globalAlpha = 0.95;
+          if (aura.isWarning) {
+            ctx.fillStyle = '#0f172a';
+            ctx.beginPath();
+            ctx.arc(pipX, pipY, 2.7, 0, Math.PI * 2);
+            ctx.fill();
+          }
+          ctx.fillStyle = aura.dot;
+          ctx.beginPath();
+          ctx.arc(pipX, pipY, 2.1, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.fillStyle = aura.dotCore;
+          ctx.fillRect(pipX - 0.5, pipY - 0.5, 1, 1);
+          ctx.restore();
+        }
         break;
       }
 
@@ -5144,21 +5442,43 @@ export class OverworldEngine {
   drawRival(ctx, sx, sy, rival, nowMs, profile) {
     const palette = rival.palette || {};
     const defeated = Boolean(profile?.rivalsDefeated?.includes(rival.id));
+    const readinessTier = this.getRivalReadinessTier(rival, profile);
+    const aura = READINESS_AURA_STYLES[readinessTier] || READINESS_AURA_STYLES.balanced;
+    const auraPulse = 0.5 + 0.5 * Math.sin(nowMs * aura.pulseSpeed + sx * 0.08);
     const bob = Math.sin(nowMs * 0.005 + sx * 0.1) * 0.9;
 
-    // Ground aura ring + shadow
+    // Ground readiness aura ring + shadow
     ctx.save();
-    ctx.globalAlpha = defeated ? 0.25 : 0.4 + 0.16 * Math.sin(nowMs * 0.006);
-    ctx.strokeStyle = palette.accent || '#f97316';
-    ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    ctx.ellipse(sx + 16, sy + 28, 11, 5, 0, 0, Math.PI * 2);
-    ctx.stroke();
+    if (!defeated) {
+      ctx.globalAlpha = aura.isWarning
+        ? 0.46 + 0.32 * auraPulse
+        : 0.34 + 0.18 * auraPulse;
+      ctx.strokeStyle = aura.ring;
+      ctx.lineWidth = readinessTier === 'danger' ? 2.0 : aura.isWarning ? 1.75 : 1.5;
+      ctx.beginPath();
+      this._traceEllipse(ctx, sx + 16, sy + 28, 11.5, 5.2);
+      ctx.stroke();
+      if (readinessTier === 'danger') {
+        ctx.globalAlpha = 0.24 + 0.26 * auraPulse;
+        ctx.strokeStyle = aura.glow;
+        ctx.lineWidth = 1.25;
+        ctx.beginPath();
+        this._traceEllipse(ctx, sx + 16, sy + 28, 13.8 + auraPulse * 1.6, 6.2 + auraPulse * 0.7);
+        ctx.stroke();
+      }
+    } else {
+      ctx.globalAlpha = aura.isWarning ? 0.32 + 0.16 * auraPulse : 0.24;
+      ctx.strokeStyle = aura.isWarning ? aura.ring : (palette.accent || '#67e8f9');
+      ctx.lineWidth = 1.4;
+      ctx.beginPath();
+      this._traceEllipse(ctx, sx + 16, sy + 28, 11, 5);
+      ctx.stroke();
+    }
     ctx.restore();
 
     ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
     ctx.beginPath();
-    ctx.ellipse(sx + 16, sy + 28, 9, 4, 0, 0, Math.PI * 2);
+    this._traceEllipse(ctx, sx + 16, sy + 28, 9, 4);
     ctx.fill();
 
     const y = Math.round(sy - bob);
@@ -5201,19 +5521,43 @@ export class OverworldEngine {
     ctx.fillStyle = '#ffffff';
     ctx.fillRect(sx + 15, y + 3, 2, 2);
 
-    // Floating battle (⚔️) or rematchable (✨) indicator
+    // Floating battle (⚔️) or rematchable (✨) indicator tinted by readiness
     const floatY = Math.round(y - 11 + Math.sin(nowMs * 0.0075) * 2);
     ctx.save();
-    ctx.fillStyle = defeated ? 'rgba(14, 116, 144, 0.92)' : 'rgba(153, 27, 27, 0.94)';
+    ctx.fillStyle = defeated ? 'rgba(14, 116, 144, 0.92)' : aura.badgeBg;
     ctx.fillRect(sx + 9, floatY, 14, 11);
-    ctx.strokeStyle = defeated ? '#67e8f9' : '#facc15';
-    ctx.lineWidth = 1;
+    ctx.strokeStyle = defeated ? '#67e8f9' : aura.badgeBorder;
+    ctx.lineWidth = !defeated && aura.isWarning ? 1.3 : 1;
     ctx.strokeRect(sx + 9, floatY, 14, 11);
     ctx.fillStyle = '#ffffff';
     ctx.font = '8px sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText(defeated ? '✨' : '⚔️', sx + 16, floatY + 6);
+
+    // Readiness beacon pip on uncleared Rivals (and high-threat rematches)
+    if (!defeated || aura.isWarning) {
+      const pipX = sx + 23.5;
+      const pipY = floatY + 0.5;
+      ctx.globalAlpha = aura.isWarning ? 0.36 + 0.32 * auraPulse : 0.25 + 0.18 * auraPulse;
+      ctx.fillStyle = aura.ring;
+      ctx.beginPath();
+      ctx.arc(pipX, pipY, aura.isWarning ? 3.5 : 2.9, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.globalAlpha = 0.96;
+      if (aura.isWarning) {
+        ctx.fillStyle = '#0f172a';
+        ctx.beginPath();
+        ctx.arc(pipX, pipY, 2.5, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.fillStyle = aura.dot;
+      ctx.beginPath();
+      ctx.arc(pipX, pipY, 1.9, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = aura.dotCore;
+      ctx.fillRect(pipX - 0.5, pipY - 0.5, 1, 1);
+    }
     ctx.restore();
   }
 

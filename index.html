@@ -318,6 +318,31 @@
       </div>
     </div>
 
+    <!-- Pre-Encounter Tactical Readiness Briefing Modal -->
+    <div id="encounter-briefing-modal" class="modal-backdrop encounter-briefing-backdrop" role="dialog" aria-modal="true" aria-labelledby="briefing-title" hidden>
+      <div class="modal-card encounter-briefing-card" tabindex="-1">
+        <div class="modal-header encounter-briefing-header">
+          <h2 id="briefing-title" class="modal-title">⛩️ Encounter Briefing</h2>
+          <button id="briefing-close-btn" type="button" class="close-btn" aria-label="Close briefing">✕</button>
+        </div>
+        <div class="modal-body encounter-briefing-body">
+          <div class="briefing-readiness-row">
+            <span id="briefing-readiness-pill" class="briefing-readiness-pill" data-tier="balanced">⚖️ Even Match</span>
+          </div>
+          <div class="briefing-info-grid">
+            <div id="briefing-opponent-meta" class="briefing-opponent-meta"></div>
+            <div id="briefing-team-meta" class="briefing-team-meta"></div>
+          </div>
+          <p id="briefing-tip" class="briefing-tip"></p>
+          <div id="briefing-actions" class="briefing-actions">
+            <button id="briefing-battle-btn" type="button" class="briefing-btn briefing-battle-btn">⚔️ Battle Now!</button>
+            <button id="briefing-pivot-btn" type="button" class="briefing-btn briefing-pivot-btn" hidden>🏡 Safe Zone</button>
+            <button id="briefing-cancel-btn" type="button" class="briefing-btn briefing-cancel-btn">↩️ Step Back</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- Settings & Parent Reset Modal -->
     <div id="settings-modal" class="modal-backdrop" role="dialog" aria-modal="true" aria-label="Game Settings" hidden>
       <div class="modal-card modal-settings">
