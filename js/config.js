@@ -2403,7 +2403,20 @@ export function getSpriteUrls(id, back = false, shiny = false) {
 }
 
 function hasPositiveCatchCount(count) {
-  return count === true || Number(count) > 0;
+  if (count === true) return true;
+  if (count === null || count === undefined || count === '' || typeof count === 'boolean' || typeof count === 'object') {
+    return false;
+  }
+  const num = Number(count);
+  return Number.isFinite(num) && num > 0;
+}
+
+function safeBadgeStat(val) {
+  if (val === null || val === undefined || val === '' || typeof val === 'boolean' || typeof val === 'object') {
+    return 0;
+  }
+  const num = Number(val);
+  return Number.isFinite(num) ? Math.max(0, Math.floor(num)) : 0;
 }
 
 function getCaughtEntries(profile) {
@@ -2457,7 +2470,7 @@ export const BADGES = [
     icon: '⚡',
     description: 'Befriend Pikachu in Whispering Forest or win 6 battles.',
     check(profile) {
-      return hasPositiveCatchCount(profile?.pokedex?.caught?.[25]) || (profile?.stats?.battlesWon || 0) >= 6;
+      return hasPositiveCatchCount(profile?.pokedex?.caught?.[25]) || safeBadgeStat(profile?.stats?.battlesWon) >= 6;
     },
   },
   {
@@ -2558,7 +2571,7 @@ export const BADGES = [
     icon: '🌠',
     description: 'Power up a Pokémon with Star Shards or perform 3 evolutions.',
     check(profile) {
-      return (profile?.stats?.upgrades || 0) >= 1 || (profile?.stats?.evolutions || 0) >= 3;
+      return safeBadgeStat(profile?.stats?.upgrades) >= 1 || safeBadgeStat(profile?.stats?.evolutions) >= 3;
     },
   },
   {
@@ -2586,7 +2599,7 @@ export const BADGES = [
         ...(Array.isArray(profile?.team) ? profile.team : []),
         ...(Array.isArray(profile?.box) ? profile.box : []),
       ];
-      if (mons.some((m) => (Number(m?.bond) || 0) >= 60)) return true;
+      if (mons.some((m) => safeBadgeStat(m?.bond) >= 60)) return true;
       return getCaughtEntries(profile).length >= 35;
     },
   },
@@ -2639,7 +2652,7 @@ export const BADGES = [
     icon: '🏆',
     description: 'Catch 60+ unique Pokémon species or perform 6+ evolutions!',
     check(profile) {
-      if ((profile?.stats?.evolutions || 0) >= 6) return true;
+      if (safeBadgeStat(profile?.stats?.evolutions) >= 6) return true;
       return getCaughtEntries(profile).length >= 60;
     },
   },
@@ -2706,7 +2719,7 @@ export const BADGES = [
     icon: '🧬',
     description: 'Perform 15+ evolutions or catch 150+ unique Pokémon species!',
     check(profile) {
-      if ((profile?.stats?.evolutions || 0) >= 15) return true;
+      if (safeBadgeStat(profile?.stats?.evolutions) >= 15) return true;
       return getCaughtEntries(profile).length >= 150;
     },
   },
@@ -2717,7 +2730,10 @@ export const BADGES = [
     icon: '👑',
     description: 'Register 300+ unique Pokémon species or clear all 16 Island Shrines!',
     check(profile) {
-      if (new Set(Array.isArray(profile?.shrinesCleared) ? profile.shrinesCleared : []).size >= 16) return true;
+      const shrines = Array.isArray(profile?.shrinesCleared)
+        ? profile.shrinesCleared.filter((s) => typeof s === 'string' && s.trim().length > 0)
+        : [];
+      if (new Set(shrines).size >= 16) return true;
       return getCaughtEntries(profile).length >= 300;
     },
   },

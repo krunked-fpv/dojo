@@ -389,6 +389,7 @@ function isInvalidNumericInput(rawVal) {
     rawVal === null
     || rawVal === undefined
     || rawVal === ''
+    || (typeof rawVal === 'string' && rawVal.trim() === '')
     || typeof rawVal === 'boolean'
     || typeof rawVal === 'object'
     || typeof rawVal === 'symbol'
@@ -402,7 +403,7 @@ function toNonNegInt(rawVal, fallback = 0) {
   }
   if (rawVal === -Infinity) return 0;
   const num = Number(rawVal);
-  return Number.isFinite(num) ? Math.max(0, Math.floor(num)) : fallback;
+  return Number.isFinite(num) ? Math.min(Number.MAX_SAFE_INTEGER, Math.max(0, Math.floor(num))) : fallback;
 }
 
 function clampCheerCharges(rawVal, fallback = 0) {
@@ -523,7 +524,14 @@ function hydrateRecentEncounters(rawList) {
       valid.push(id);
     }
   }
-  return valid.slice(-8);
+  return valid.slice(-20);
+}
+
+function hydrateRecentWarpBiomes(rawList) {
+  const biomesMap = Config.BIOMES || BIOMES;
+  return hydrateUniqueStrings(rawList)
+    .filter((id) => Boolean(biomesMap[id]) && id !== 'village')
+    .slice(-3);
 }
 
 function getCaughtSpeciesCount(profile) {
@@ -588,6 +596,7 @@ function createFreshProfile(trainerId) {
     rivalRematchCounts: {},
     shrineTrialCounts: {},
     recentEncounters: [],
+    recentWarpBiomes: [],
     cheerStepProgress: 0,
     arcade: hydrateArcade(null, { allowLegacyPlayUnlock: false }),
     bag: {
@@ -684,6 +693,16 @@ function deduplicateTeamAndBoxUids(profile, report = null) {
 
 function repairProfileParty(profile) {
   if (!profile) return profile;
+  if (!Array.isArray(profile.team)) {
+    profile.team = [];
+  } else {
+    profile.team = profile.team.map((m) => (m instanceof Pokemon ? m : safeHydrateMon(m))).filter(Boolean);
+  }
+  if (!Array.isArray(profile.box)) {
+    profile.box = [];
+  } else {
+    profile.box = profile.box.map((m) => (m instanceof Pokemon ? m : safeHydrateMon(m))).filter(Boolean);
+  }
   if (profile.team.length === 0 && profile.box.length > 0) {
     profile.team.push(profile.box.shift());
   }
@@ -691,8 +710,8 @@ function repairProfileParty(profile) {
     const fallbackId = SPECIES[profile.starterId] ? profile.starterId : 1;
     profile.team.push(createStarterPokemon(fallbackId));
   }
-  if (profile.team.length > 0 && profile.team.every((mon) => mon.isFainted)) {
-    profile.team[0].healFull();
+  if (profile.team.length > 0 && profile.team.every((mon) => mon?.isFainted)) {
+    profile.team[0]?.healFull?.();
   }
   return profile;
 }
@@ -771,6 +790,7 @@ export function validateAndRepairProfile(raw, trainerIdFallback = null, report =
     rivalRematchCounts: hydrateCountMap(raw.rivalRematchCounts),
     shrineTrialCounts: hydrateCountMap(raw.shrineTrialCounts),
     recentEncounters: hydrateRecentEncounters(raw.recentEncounters),
+    recentWarpBiomes: hydrateRecentWarpBiomes(raw.recentWarpBiomes),
     cheerStepProgress: clampCheerStepProgress(raw.cheerStepProgress, 0),
     bag: hydrateProfileBag(raw.bag),
     stats: hydrateProfileStats(raw.stats),
@@ -1092,6 +1112,7 @@ export class StorageManager {
       rivalRematchCounts: hydrateCountMap(src.rivalRematchCounts),
       shrineTrialCounts: hydrateCountMap(src.shrineTrialCounts),
       recentEncounters: hydrateRecentEncounters(src.recentEncounters),
+      recentWarpBiomes: hydrateRecentWarpBiomes(src.recentWarpBiomes),
       cheerStepProgress: clampCheerStepProgress(src.cheerStepProgress, 0),
       arcade: hydrateArcade(src.arcade, { allowLegacyPlayUnlock: false }),
       bag: cleanBag,
@@ -1342,7 +1363,9 @@ export class StorageManager {
     const profile = this.getActiveProfile();
     if (!profile || !pokemonInstance) return { destination: 'team', newBadges: [] };
 
-    const numId = resolveSpeciesId(pokemonInstance.speciesId);
+    const mon = pokemonInstance instanceof Pokemon ? pokemonInstance : safeHydrateMon(pokemonInstance);
+    if (!mon) return { destination: 'team', newBadges: [] };
+    const numId = resolveSpeciesId(mon.speciesId);
     if (!numId || !SPECIES[numId]) return { destination: 'team', newBadges: [] };
 
     if (!isPlainObject(profile.pokedex) || !isPlainObject(profile.pokedex.caught)) {
@@ -1357,23 +1380,25 @@ export class StorageManager {
     const usedUids = new Set(
       [...profile.team, ...profile.box].map((m) => (typeof m?.uid === 'string' ? m.uid.trim() : '')).filter(Boolean),
     );
-    const monUid = typeof pokemonInstance.uid === 'string' ? pokemonInstance.uid.trim() : '';
+    const monUid = typeof mon.uid === 'string' ? mon.uid.trim() : '';
     if (!monUid || usedUids.has(monUid)) {
-      pokemonInstance.uid = generateUniqueUid(usedUids);
+      mon.uid = generateUniqueUid(usedUids);
     }
 
     this.recordSeen(numId, false);
-    profile.pokedex.caught[numId] = toNonNegInt(profile.pokedex.caught[numId], 0) + 1;
+    const prevCaughtVal = profile.pokedex.caught[numId];
+    const prevCount = prevCaughtVal === true ? 1 : toNonNegInt(prevCaughtVal, 0);
+    profile.pokedex.caught[numId] = prevCount + 1;
     profile.stats.totalCaught = toNonNegInt(profile.stats.totalCaught, 0) + 1;
-    if (pokemonInstance.isShiny) {
+    if (mon.isShiny) {
       profile.stats.shiniesFound = toNonNegInt(profile.stats.shiniesFound, 0) + 1;
     }
 
     let destination = 'team';
     if (profile.team.length < 6) {
-      profile.team.push(pokemonInstance);
+      profile.team.push(mon);
     } else {
-      profile.box.push(pokemonInstance);
+      profile.box.push(mon);
       destination = 'box';
     }
 
@@ -1386,12 +1411,48 @@ export class StorageManager {
 
   swapTeamWithBox(teamIdx, boxIdx) {
     const profile = this.getActiveProfile();
-    if (!profile) return false;
+    if (!profile || !Array.isArray(profile.team) || !Array.isArray(profile.box)) return false;
+    if (!Number.isInteger(teamIdx) || !Number.isInteger(boxIdx)) return false;
     if (teamIdx < 0 || teamIdx >= profile.team.length) return false;
     if (boxIdx < 0 || boxIdx >= profile.box.length) return false;
+    if (!profile.team[teamIdx] || !profile.box[boxIdx]) return false;
     const temp = profile.team[teamIdx];
     profile.team[teamIdx] = profile.box[boxIdx];
     profile.box[boxIdx] = temp;
+    deduplicateTeamAndBoxUids(profile);
+    syncProfilePokedex(profile);
+    this.save();
+    return true;
+  }
+
+  depositToBox(teamIdx) {
+    const profile = this.getActiveProfile();
+    if (!profile || !Array.isArray(profile.team) || !Array.isArray(profile.box)) return false;
+    if (profile.team.length <= 1) return false;
+    if (!Number.isInteger(teamIdx) || teamIdx < 0 || teamIdx >= profile.team.length) return false;
+    const mon = profile.team[teamIdx];
+    if (!mon) return false;
+    if (!mon.isFainted && !profile.team.some((m, idx) => idx !== teamIdx && m && !m.isFainted)) {
+      return false;
+    }
+    profile.team.splice(teamIdx, 1);
+    profile.box.push(mon);
+    deduplicateTeamAndBoxUids(profile);
+    syncProfilePokedex(profile);
+    this.save();
+    return true;
+  }
+
+  withdrawFromBox(boxIdx) {
+    const profile = this.getActiveProfile();
+    if (!profile || !Array.isArray(profile.team) || !Array.isArray(profile.box)) return false;
+    if (profile.team.length >= 6) return false;
+    if (!Number.isInteger(boxIdx) || boxIdx < 0 || boxIdx >= profile.box.length) return false;
+    const mon = profile.box[boxIdx];
+    if (!mon) return false;
+    profile.box.splice(boxIdx, 1);
+    profile.team.push(mon);
+    deduplicateTeamAndBoxUids(profile);
     syncProfilePokedex(profile);
     this.save();
     return true;
@@ -1399,7 +1460,16 @@ export class StorageManager {
 
   setLeadPokemon(teamIdx) {
     const profile = this.getActiveProfile();
-    if (!profile || teamIdx <= 0 || teamIdx >= profile.team.length) return false;
+    if (
+      !profile
+      || !Array.isArray(profile.team)
+      || !Number.isInteger(teamIdx)
+      || teamIdx <= 0
+      || teamIdx >= profile.team.length
+      || !profile.team[teamIdx]
+    ) {
+      return false;
+    }
     const [picked] = profile.team.splice(teamIdx, 1);
     profile.team.unshift(picked);
     syncProfilePokedex(profile);
@@ -1410,16 +1480,17 @@ export class StorageManager {
   healTeam(refillMinPotions = false) {
     const profile = this.getActiveProfile();
     if (!profile) return;
+    if (!Array.isArray(profile.team)) {
+      profile.team = [];
+    }
     for (const mon of profile.team) {
-      mon.healFull();
+      mon?.healFull?.();
     }
     if (!isPlainObject(profile.bag)) {
       profile.bag = createEmptyBag();
     }
     const safePotions = toNonNegInt(profile.bag.potions, 0);
-    if (refillMinPotions && safePotions < 5) {
-      profile.bag.potions = 5;
-    }
+    profile.bag.potions = refillMinPotions && safePotions < 5 ? 5 : safePotions;
     this.save();
   }
 
@@ -1835,6 +1906,7 @@ export class StorageManager {
     if (!isPlainObject(profile.stats)) profile.stats = hydrateProfileStats(null);
     profile.stats.evolutions = toNonNegInt(profile.stats.evolutions, 0) + 1;
     syncProfilePokedex(profile);
+    syncProfilePlayerProgression(profile);
 
     const newBadges = this.evaluateBadges(false);
     this.save();
@@ -1868,6 +1940,10 @@ export class StorageManager {
       : null;
     if (validBiomeId) {
       this.recordBiomeVisited(validBiomeId, false);
+      if (validBiomeId !== 'village') {
+        const prevWarps = hydrateRecentWarpBiomes(profile.recentWarpBiomes);
+        profile.recentWarpBiomes = [...prevWarps.filter((b) => b !== validBiomeId), validBiomeId].slice(-3);
+      }
     }
     const newBadges = this.evaluateBadges(false) || [];
     this.save();

@@ -14,13 +14,15 @@ import {
 } from './config.js';
 
 export const MAX_UPGRADE_TIER = 5;
-const MAX_RECENT_ENCOUNTERS = 8;
+export const MAX_RECENT_ENCOUNTERS = 20;
 const VALID_ENCOUNTER_TRAITS = new Set(['curious', 'treasure', 'spirited', 'apex']);
 
 let recentWildEncounters = [];
+let recentWildLevels = {};
 
 export function resetEncounterHistory() {
   recentWildEncounters = [];
+  recentWildLevels = {};
 }
 
 function normalizeEncounterTrait(raw) {
@@ -174,6 +176,7 @@ function isInvalidNumericInput(raw) {
     raw === null
     || raw === undefined
     || raw === ''
+    || (typeof raw === 'string' && raw.trim() === '')
     || typeof raw === 'boolean'
     || typeof raw === 'object'
     || typeof raw === 'symbol'
@@ -329,7 +332,7 @@ export class Pokemon {
     encounterTrait = null,
     abilityId = null,
   }) {
-    const parsedSpeciesId = Number(speciesId);
+    const parsedSpeciesId = isInvalidNumericInput(speciesId) ? NaN : Number(speciesId);
     const species = Number.isInteger(parsedSpeciesId) ? SPECIES[parsedSpeciesId] : null;
     if (!species) {
       throw new Error(`Unknown Pokémon speciesId: ${speciesId}`);
@@ -380,7 +383,8 @@ export class Pokemon {
   }
 
   getStageMultiplier(stat) {
-    const stage = Number(this.battleStages?.[stat]) || 0;
+    const rawStage = Number(this.battleStages?.[stat]);
+    const stage = Number.isFinite(rawStage) ? Math.max(-4, Math.min(4, Math.round(rawStage))) : 0;
     if (stage === 0) return 1.0;
     if (stage > 0) return 1 + stage * 0.25;
     return 1 / (1 - stage * 0.25);
@@ -409,11 +413,11 @@ export class Pokemon {
   }
 
   get name() {
-    return this.species.name;
+    return this.species?.name || 'Mystery';
   }
 
   get displayName() {
-    return this.nickname || this.species.name;
+    return this.nickname || this.name;
   }
 
   setNickname(raw) {
@@ -430,11 +434,11 @@ export class Pokemon {
   }
 
   get type() {
-    return this.species.type;
+    return this.species?.type || 'normal';
   }
 
   get typeInfo() {
-    return TYPES[this.type];
+    return TYPES[this.type] || TYPES.normal;
   }
 
   get abilityId() {
@@ -566,8 +570,8 @@ export class Pokemon {
       this.level += 1;
       this.recalculateStats();
       const bonus = Math.max(2, this.maxHp - oldMax + 3);
-      if (this.hp > 0) {
-        this.hp = Math.min(this.maxHp, this.hp + bonus);
+      if (Number.isFinite(Number(this.hp)) && Number(this.hp) > 0) {
+        this.hp = Math.min(this.maxHp, Number(this.hp) + bonus);
       }
     }
     return {
@@ -579,13 +583,30 @@ export class Pokemon {
   }
 
   getMoveObjects() {
-    return this.species.movePool.map((moveId) => MOVES[moveId]).filter(Boolean);
+    const instancePool = Array.isArray(this.moves) && this.moves.length > 0
+      ? this.moves
+          .map((item) => (typeof item === 'string' ? MOVES[item] : (item?.id ? MOVES[item.id] : null)))
+          .filter(Boolean)
+      : [];
+    if (instancePool.length > 0) {
+      return instancePool;
+    }
+    const speciesPool = Array.isArray(this.species?.movePool)
+      ? this.species.movePool.map((moveId) => MOVES[moveId]).filter(Boolean)
+      : [];
+    if (speciesPool.length > 0) {
+      return speciesPool;
+    }
+    const fallbackMove = MOVES.tackle || Object.values(MOVES || {})[0] || null;
+    return fallbackMove ? [fallbackMove] : [];
   }
 
   getMovePp(moveId) {
     const max = MOVES[moveId]?.pp || 20;
     const raw = this.movePp?.[moveId];
-    const current = Number.isFinite(Number(raw)) ? Math.max(0, Math.min(max, Math.round(Number(raw)))) : max;
+    const current = !isInvalidNumericInput(raw) && Number.isFinite(Number(raw))
+      ? Math.max(0, Math.min(max, Math.round(Number(raw))))
+      : max;
     return { current, max };
   }
 
@@ -598,13 +619,13 @@ export class Pokemon {
 
   restoreAllPp() {
     if (!this.movePp) this.movePp = {};
-    for (const moveId of this.species.movePool) {
-      this.movePp[moveId] = MOVES[moveId]?.pp || 20;
+    for (const move of this.getMoveObjects()) {
+      this.movePp[move.id] = move.pp || 20;
     }
   }
 
   hasAnyMovePp() {
-    return this.species.movePool.some((moveId) => this.getMovePp(moveId).current > 0);
+    return this.getMoveObjects().some((move) => this.getMovePp(move.id).current > 0);
   }
 
   getPendingLevelEvolution() {
@@ -648,8 +669,8 @@ export class Pokemon {
   }
 
   evolve(toId) {
-    const targetId = Number(toId);
-    const targetSpecies = SPECIES[targetId];
+    const targetId = isInvalidNumericInput(toId) ? NaN : Number(toId);
+    const targetSpecies = Number.isInteger(targetId) ? SPECIES[targetId] : null;
     if (!targetSpecies) {
       throw new Error(`Unknown evolution target speciesId: ${toId}`);
     }
@@ -657,15 +678,15 @@ export class Pokemon {
     const oldSpeciesId = this.speciesId;
     const oldName = this.name;
     const oldMax = this.maxHp;
-    const oldPoolSet = new Set(this.species.movePool);
+    const oldPoolSet = new Set(Array.isArray(this.species?.movePool) ? this.species.movePool : []);
     const prevPp = this.movePp || {};
 
     this.speciesId = targetId;
     this._abilityId = null;
     this.recalculateStats();
 
-    if (this.hp > 0) {
-      this.hp = Math.min(this.maxHp, this.hp + Math.max(4, this.maxHp - oldMax));
+    if (Number.isFinite(Number(this.hp)) && Number(this.hp) > 0) {
+      this.hp = Math.min(this.maxHp, Number(this.hp) + Math.max(4, this.maxHp - oldMax));
     }
 
     const nextMovePp = {};
@@ -1188,7 +1209,7 @@ function fallbackResolveFarmingBiomeForLevel(playerLevel, profile = null, scaled
     pool = nativeMatches;
   }
 
-  const sorted = [...pool].sort((a, b) => {
+  const sortEvalPool = (list) => [...list].sort((a, b) => {
     if (Math.abs(a.score - b.score) > 1e-6) return a.score - b.score;
     if (hasShrinesCleared) {
       const rankA = hasUnclearedShrineInBiome(a.biomeId, clearedSet) ? 0 : 1;
@@ -1198,7 +1219,29 @@ function fallbackResolveFarmingBiomeForLevel(playerLevel, profile = null, scaled
     return farmingOrder.indexOf(a.biomeId) - farmingOrder.indexOf(b.biomeId);
   });
 
-  const picked = sorted[0];
+  const sorted = sortEvalPool(pool);
+  let picked = sorted[0];
+
+  const recentWarpBiomes = Array.isArray(profile?.recentWarpBiomes)
+    ? profile.recentWarpBiomes.filter((id) => typeof id === 'string' && id !== 'village')
+    : [];
+  if (recentWarpBiomes.length > 0 && picked) {
+    const recentSet = new Set(recentWarpBiomes);
+    const bestScore = picked.score;
+    const searchPool = playerLevel >= 28
+      ? sortEvalPool(evals.filter((e) => e.safeThreat && e.safeCap && e.inActual && e.scaled.threatTone === 'balanced'))
+      : sorted;
+    const rotated = searchPool.find((e) => (
+      !recentSet.has(e.biomeId)
+      && e.safeThreat
+      && e.safeCap
+      && e.scaled.threatTone === 'balanced'
+      && (playerLevel >= 28 || Math.abs(e.score - bestScore) <= 4.5)
+    ));
+    if (rotated) {
+      picked = rotated;
+    }
+  }
   const pickedBiome = picked?.biome || BIOMES.forest;
   const clamped = playerLevel < 2 ? 'low' : (playerLevel > 36 ? 'high' : null);
   const warp = typeof Config.getBiomeWarpPoint === 'function'
@@ -1338,6 +1381,24 @@ export function getBiomeScaledRange(biomeId, profile = null) {
   };
 }
 
+function isSeenInProfile(profile, speciesId) {
+  if (!profile || typeof profile !== 'object') return false;
+  if (isCaughtInProfile(profile, speciesId)) return true;
+  const seenList = profile.pokedex?.seen;
+  if (!seenList) return false;
+  if (Array.isArray(seenList)) {
+    return seenList.some((id) => Number(id) === speciesId);
+  }
+  if (seenList instanceof Set) {
+    return seenList.has(speciesId);
+  }
+  if (typeof seenList === 'object') {
+    const val = seenList[speciesId];
+    return val === true || (!isInvalidNumericInput(val) && Number.isFinite(Number(val)) && Number(val) > 0);
+  }
+  return false;
+}
+
 function isCaughtInProfile(profile, speciesId) {
   if (!profile || typeof profile !== 'object') return false;
   const caughtMap = profile.pokedex?.caught;
@@ -1468,23 +1529,33 @@ export function rollWildPokemon(biomeId, avgTeamLevelOrProfile = 5, options = {}
     }
   }
 
+  const isMysteryCry = options?.nodeKind === 'mystery_cry';
   for (const entry of weightedPool) {
-    if (isProfile && !isCaughtInProfile(profile, entry.id)) {
-      entry.weight *= 1.35;
+    if (isProfile) {
+      const caught = isCaughtInProfile(profile, entry.id);
+      const seen = caught || isSeenInProfile(profile, entry.id);
+      if (isMysteryCry) {
+        if (!seen) entry.weight *= 3.0;
+        if (!caught) entry.weight *= 1.8;
+      } else if (!caught) {
+        entry.weight *= 1.35;
+      }
     }
     entry.baseWeight = entry.weight;
   }
 
   const distinctSpeciesCount = new Set(weightedPool.map((entry) => entry.id)).size;
   const prevSpeciesId = recentHistory.length > 0 ? recentHistory[recentHistory.length - 1] : null;
-  const priorRecentSet = new Set(recentHistory.slice(-4, -1));
+  const priorRecentSet = new Set(
+    recentHistory.slice(-Math.min(12, Math.max(1, distinctSpeciesCount - 2)), -1),
+  );
 
   if (!disableAntiRepeat && distinctSpeciesCount > 1) {
     for (const entry of weightedPool) {
       if (prevSpeciesId !== null && entry.id === prevSpeciesId) {
         entry.weight = 0;
       } else if (priorRecentSet.has(entry.id)) {
-        entry.weight *= 0.15;
+        entry.weight *= 0.08;
       }
     }
 
@@ -1575,13 +1646,70 @@ export function rollWildPokemon(biomeId, avgTeamLevelOrProfile = 5, options = {}
 
   const rareBoost = isRarePatch ? 1 + Math.floor(Math.random() * 2) : 0;
   const eliteBoost = isElite ? 1 : 0;
-  const levelBonus = Number.isFinite(Number(options?.levelBonus)) ? Math.round(Number(options.levelBonus)) : 0;
+  const levelBonus = !isInvalidNumericInput(options?.levelBonus) && Number.isFinite(Number(options?.levelBonus))
+    ? Math.round(Number(options.levelBonus))
+    : 0;
   const maxAllowed = Math.min(50, maxLv + rareBoost + eliteBoost + Math.max(0, levelBonus));
-  const baseSpan = Math.max(
-    minLv,
-    Math.min(maxAllowed, targetCenter + Math.floor(Math.random() * 3) - 1 + rareBoost + eliteBoost + levelBonus),
+  const effectiveMin = Math.max(1, Math.min(50, Math.round(minLv)));
+  const effectiveMax = Math.max(effectiveMin, Math.min(50, Math.round(maxAllowed)));
+  const rawCenter = targetCenter + rareBoost + eliteBoost + levelBonus;
+  const clampedCenter = Math.max(effectiveMin, Math.min(effectiveMax, rawCenter));
+  const biomeLevelHistory = Array.isArray(recentWildLevels[biomeId]) ? recentWildLevels[biomeId] : [];
+  const prevWildLevel = biomeLevelHistory.length > 0 ? biomeLevelHistory[biomeLevelHistory.length - 1] : null;
+
+  const buildLevelWindow = (radius) => {
+    const out = [];
+    for (let d = -radius; d <= radius; d += 1) {
+      const lv = Math.max(effectiveMin, Math.min(effectiveMax, clampedCenter + d));
+      if (!out.includes(lv)) out.push(lv);
+    }
+    return out;
+  };
+
+  let baseSpan = Math.max(
+    effectiveMin,
+    Math.min(effectiveMax, rawCenter + Math.floor(Math.random() * 3) - 1),
   );
+  const predictsFinal = (lv) => Math.max(1, Math.min(50, lv + depthBoost));
+
+  if (!disableAntiRepeat && effectiveMax > effectiveMin) {
+    const recentLvSet = new Set(biomeLevelHistory.slice(-3));
+    const window1 = buildLevelWindow(1);
+    const window2 = buildLevelWindow(2);
+    const fullRange = [];
+    for (let lv = effectiveMin; lv <= effectiveMax; lv += 1) {
+      fullRange.push(lv);
+    }
+
+    const notInRecent1 = window1.filter((lv) => {
+      const res = predictsFinal(lv);
+      return res !== prevWildLevel && !recentLvSet.has(res);
+    });
+    const notInRecent2 = window2.filter((lv) => {
+      const res = predictsFinal(lv);
+      return res !== prevWildLevel && !recentLvSet.has(res);
+    });
+    const nonPrev1 = window1.filter((lv) => predictsFinal(lv) !== prevWildLevel);
+    const nonPrevAll = fullRange.filter((lv) => predictsFinal(lv) !== prevWildLevel);
+
+    let levelPool = null;
+    if (notInRecent1.length > 0) {
+      levelPool = notInRecent1;
+    } else if (notInRecent2.length > 0) {
+      levelPool = notInRecent2;
+    } else if (nonPrev1.length > 0) {
+      levelPool = nonPrev1;
+    } else if (nonPrevAll.length > 0) {
+      levelPool = nonPrevAll;
+    }
+
+    if (levelPool && levelPool.length > 0) {
+      baseSpan = levelPool[Math.floor(Math.random() * levelPool.length)];
+    }
+  }
+
   const finalLevel = Math.max(1, Math.min(50, baseSpan + depthBoost));
+  recentWildLevels[biomeId] = [...biomeLevelHistory, finalLevel].slice(-3);
 
   const shinyChance = isRarePatch ? 1 / 6 : 0.05;
   const isShiny = options?.forceShiny !== undefined ? Boolean(options.forceShiny) : Math.random() < shinyChance;
@@ -1675,9 +1803,12 @@ export function getScaledShrineTrial(shrine, profile = null) {
   }
   const pool = [...poolSet];
 
-  const trialCount = Math.max(0, Math.floor(Number(profile?.shrineTrialCounts?.[shrine?.id]) || 0));
+  const trialCount = toSafeNonNegInt(profile?.shrineTrialCounts?.[shrine?.id]);
   const guardianId = pool[(trialCount + 1) % pool.length];
-  const shrineBaseLv = Math.max(1, Math.min(50, Number(shrine?.level) || 10));
+  const rawShrineLv = shrine?.level;
+  const shrineBaseLv = !isInvalidNumericInput(rawShrineLv) && Number.isFinite(Number(rawShrineLv))
+    ? Math.max(1, Math.min(50, Math.round(Number(rawShrineLv))))
+    : 10;
   const power = profile ? Math.round(getTrainerPowerLevel(profile)) : shrineBaseLv;
   const level = Math.min(50, Math.max(shrineBaseLv + 3, power + 3 + Math.min(5, trialCount)));
   const upgradeTier = Math.min(MAX_UPGRADE_TIER, Math.max(2, Math.floor(level / 10)));
@@ -1713,9 +1844,7 @@ export function getScaledRivalParty(rival, profile = null) {
     : [{ speciesId: 25, level: 6 }];
 
   const isRematch = Boolean(profile?.rivalsDefeated?.includes(rival?.id));
-  const rematchCount = isRematch
-    ? Math.max(0, Math.floor(Number(profile?.rivalRematchCounts?.[rival?.id]) || 0))
-    : 0;
+  const rematchCount = isRematch ? toSafeNonNegInt(profile?.rivalRematchCounts?.[rival?.id]) : 0;
   const rematchBoost = isRematch ? 2 + Math.min(6, rematchCount * 2) : 0;
   const power = profile ? getTrainerPowerLevel(profile) : 5;
   const badgesCount = Array.isArray(profile?.badges) ? profile.badges.length : 0;
@@ -1725,66 +1854,108 @@ export function getScaledRivalParty(rival, profile = null) {
     : [];
 
   if (isRematch && validRematchPool.length >= 3) {
-    const desiredSize = rawParty.length <= 2
-      ? (rawParty.length === 2 && rematchCount === 0 ? 2 : Math.min(4, rematchCount >= 2 ? 4 : 3))
-      : Math.min(4, rematchCount >= 1 ? 4 : 3);
-    const maxRotatedSize = validRematchPool.length <= 3 ? 3 : 4;
-    const partySize = Math.max(2, Math.min(desiredSize, maxRotatedSize));
-
     const aceEntry = rawParty[rawParty.length - 1];
     const aceBaseId = Number(aceEntry?.speciesId ?? aceEntry?.id);
-    const aceBaseLv = Math.max(1, Math.min(50, Number(aceEntry?.level) || 6));
-    const aceTargetLv = Math.round(power + rematchBoost + 1);
-    const aceLevel = Math.min(50, Math.max(Math.min(50, aceBaseLv + rematchBoost), Math.min(50, aceTargetLv)));
-    const aceSpeciesId = SPECIES[aceBaseId] ? evolveSpeciesForLevel(aceBaseId, aceLevel) : validRematchPool[0];
-
+    const aceBaseLv = !isInvalidNumericInput(aceEntry?.level) && Number.isFinite(Number(aceEntry?.level))
+      ? Math.max(1, Math.min(50, Math.round(Number(aceEntry.level))))
+      : 6;
     const firstRawId = Number(rawParty[0]?.speciesId ?? rawParty[0]?.id);
-    const supportCount = partySize - 1;
-    const avgSupportLv = Math.min(50, Math.max(1, Math.round(power + rematchBoost - 1)));
-    const eligiblePool = [];
-    const seenEligibleEvolved = new Set([aceSpeciesId]);
-    for (const candBaseId of validRematchPool) {
-      const approxEvolved = evolveSpeciesForLevel(candBaseId, avgSupportLv);
-      if (seenEligibleEvolved.has(approxEvolved)) continue;
-      seenEligibleEvolved.add(approxEvolved);
-      eligiblePool.push(candBaseId);
-    }
-    const rotationPool = eligiblePool.length >= supportCount ? eligiblePool : validRematchPool;
-    const shift = rematchCount % rotationPool.length;
-    const picked = [];
-    const usedSpecies = new Set([aceSpeciesId]);
+    const maxRotatedSize = validRematchPool.length <= 3 ? 3 : 4;
 
-    for (let pass = 0; pass < 2 && picked.length < supportCount; pass += 1) {
-      for (let k = 0; k < rotationPool.length && picked.length < supportCount; k += 1) {
-        const candBaseId = rotationPool[(shift + k) % rotationPool.length];
-        const slotIdx = picked.length;
-        const rawSlot = rawParty[Math.min(slotIdx, rawParty.length - 1)];
-        const baseLv = Math.max(1, Math.min(50, Number(rawSlot?.level) || Math.max(1, aceBaseLv - (partySize - 1 - slotIdx))));
-        const slotOffset = -(partySize - 1 - slotIdx);
-        const targetLv = Math.round(power + rematchBoost + slotOffset);
-        const level = Math.min(50, Math.max(Math.min(50, baseLv + rematchBoost), Math.min(50, targetLv)));
-        const evolvedId = evolveSpeciesForLevel(candBaseId, level);
+    const buildPartyForCount = (rcVal, prevParty = null) => {
+      const rBoost = 2 + Math.min(6, rcVal * 2);
+      const desiredSize = rawParty.length <= 2
+        ? (rawParty.length === 2 && rcVal === 0 ? 2 : Math.min(4, rcVal >= 2 ? 4 : 3))
+        : Math.min(4, rcVal >= 1 ? 4 : 3);
+      const partySize = Math.max(2, Math.min(desiredSize, maxRotatedSize));
 
-        if (usedSpecies.has(evolvedId)) continue;
-        if (pass === 0 && slotIdx === 0 && rematchCount === 0 && evolvedId === firstRawId && rotationPool.length > supportCount) continue;
+      const aceTargetLv = Math.round(power + rBoost + 1);
+      const aceLevel = Math.min(50, Math.max(Math.min(50, aceBaseLv + rBoost), Math.min(50, aceTargetLv)));
+      const aceSpeciesId = SPECIES[aceBaseId] ? evolveSpeciesForLevel(aceBaseId, aceLevel) : validRematchPool[0];
 
-        usedSpecies.add(evolvedId);
-        const delta = Math.max(0, level - baseLv);
-        const upgradeTier = Math.min(
-          MAX_UPGRADE_TIER,
-          Math.max(delta >= 2 ? 1 : 0, Math.floor(delta / 6) + Math.floor(badgesCount / 5) + (rematchCount >= 2 ? 1 : 0)),
-        );
-        picked.push({ speciesId: evolvedId, level, upgradeTier });
+      const supportCount = partySize - 1;
+      const rawLeadLv = rawParty[0]?.level;
+      const minBaseSupportLv = !isInvalidNumericInput(rawLeadLv) && Number.isFinite(Number(rawLeadLv))
+        ? Math.max(1, Math.min(50, Math.round(Number(rawLeadLv))))
+        : Math.max(1, aceBaseLv - (partySize - 1));
+      const avgSupportLv = Math.min(
+        50,
+        Math.max(minBaseSupportLv + rBoost, Math.round(power + rBoost - 1)),
+      );
+      const eligiblePool = [];
+      const seenEligibleEvolved = new Set([aceSpeciesId]);
+      for (const candBaseId of validRematchPool) {
+        const approxEvolved = evolveSpeciesForLevel(candBaseId, avgSupportLv);
+        if (seenEligibleEvolved.has(approxEvolved)) continue;
+        seenEligibleEvolved.add(approxEvolved);
+        eligiblePool.push(candBaseId);
       }
-    }
+      const rotationPool = eligiblePool.length >= supportCount ? eligiblePool : validRematchPool;
+      const baseShift = rcVal % rotationPool.length;
 
-    const aceDelta = Math.max(0, aceLevel - aceBaseLv);
-    const aceTier = Math.min(
-      MAX_UPGRADE_TIER,
-      Math.max(aceDelta >= 2 ? 1 : 0, Math.floor(aceDelta / 6) + Math.floor(badgesCount / 5) + (rematchCount >= 2 ? 1 : 0)),
-    );
-    picked.push({ speciesId: aceSpeciesId, level: aceLevel, upgradeTier: aceTier });
-    return picked;
+      const buildAttempt = (shiftOffset) => {
+        const shift = (baseShift + shiftOffset) % rotationPool.length;
+        const picked = [];
+        const usedSpecies = new Set([aceSpeciesId]);
+
+        for (let pass = 0; pass < 2 && picked.length < supportCount; pass += 1) {
+          for (let k = 0; k < rotationPool.length && picked.length < supportCount; k += 1) {
+            const candBaseId = rotationPool[(shift + k) % rotationPool.length];
+            const slotIdx = picked.length;
+            const rawSlot = rawParty[Math.min(slotIdx, rawParty.length - 1)];
+            const rawSlotLv = rawSlot?.level;
+            const baseLv = !isInvalidNumericInput(rawSlotLv) && Number.isFinite(Number(rawSlotLv))
+              ? Math.max(1, Math.min(50, Math.round(Number(rawSlotLv))))
+              : Math.max(1, aceBaseLv - (partySize - 1 - slotIdx));
+            const slotOffset = -(partySize - 1 - slotIdx);
+            const targetLv = Math.round(power + rBoost + slotOffset);
+            const level = Math.min(50, Math.max(Math.min(50, baseLv + rBoost), Math.min(50, targetLv)));
+            const evolvedId = evolveSpeciesForLevel(candBaseId, level);
+
+            if (usedSpecies.has(evolvedId)) continue;
+            if (pass === 0 && slotIdx === 0 && rcVal === 0 && evolvedId === firstRawId && rotationPool.length > supportCount) continue;
+
+            usedSpecies.add(evolvedId);
+            const delta = Math.max(0, level - baseLv);
+            const upgradeTier = Math.min(
+              MAX_UPGRADE_TIER,
+              Math.max(delta >= 2 ? 1 : 0, Math.floor(delta / 6) + Math.floor(badgesCount / 5) + (rcVal >= 2 ? 1 : 0)),
+            );
+            picked.push({ speciesId: evolvedId, level, upgradeTier });
+          }
+        }
+
+        const aceDelta = Math.max(0, aceLevel - aceBaseLv);
+        const aceTier = Math.min(
+          MAX_UPGRADE_TIER,
+          Math.max(aceDelta >= 2 ? 1 : 0, Math.floor(aceDelta / 6) + Math.floor(badgesCount / 5) + (rcVal >= 2 ? 1 : 0)),
+        );
+        picked.push({ speciesId: aceSpeciesId, level: aceLevel, upgradeTier: aceTier });
+        return picked;
+      };
+
+      let best = buildAttempt(0);
+      if (prevParty) {
+        const prevLead = prevParty[0]?.speciesId;
+        const prevSig = prevParty.map((m) => m.speciesId).join(',');
+        for (let offset = 0; offset < rotationPool.length; offset += 1) {
+          const cand = buildAttempt(offset);
+          const candSig = cand.map((m) => m.speciesId).join(',');
+          if (cand[0]?.speciesId !== prevLead && candSig !== prevSig) {
+            best = cand;
+            break;
+          }
+        }
+      }
+      return best;
+    };
+
+    const startRc = Math.max(0, rematchCount - 12);
+    let currentParty = null;
+    for (let r = startRc; r <= rematchCount; r += 1) {
+      currentParty = buildPartyForCount(r, currentParty);
+    }
+    return currentParty;
   }
 
   return rawParty
@@ -2037,7 +2208,7 @@ export function evaluateDefensiveAbility(defender, move, effectiveness = 1) {
 }
 
 export function calculateDamage(attacker, defender, move, options = {}) {
-  const rawMaxHp = Number(attacker?.maxHp);
+  const rawMaxHp = isInvalidNumericInput(attacker?.maxHp) ? NaN : Number(attacker.maxHp);
   const safeMaxHp = Number.isFinite(rawMaxHp) && rawMaxHp > 0 ? rawMaxHp : 20;
 
   if (move?.category === 'heal') {
@@ -2055,10 +2226,13 @@ export function calculateDamage(attacker, defender, move, options = {}) {
   }
 
   if (move?.category === 'buff') {
+    const buffStages = !isInvalidNumericInput(move.buffStages) && Number.isFinite(Number(move.buffStages))
+      ? Number(move.buffStages)
+      : 1;
     return {
       category: 'buff',
-      buffStat: move.buffStat || 'atk',
-      buffStages: Number.isFinite(Number(move.buffStages)) ? Number(move.buffStages) : 1,
+      buffStat: ['atk', 'def', 'spd'].includes(move.buffStat) ? move.buffStat : 'atk',
+      buffStages,
       grantShield: false,
       heal: 0,
       damage: 0,
@@ -2071,10 +2245,13 @@ export function calculateDamage(attacker, defender, move, options = {}) {
   }
 
   if (move?.category === 'shield') {
+    const buffStages = !isInvalidNumericInput(move.buffStages) && Number.isFinite(Number(move.buffStages))
+      ? Number(move.buffStages)
+      : 1;
     return {
       category: 'shield',
-      buffStat: move.buffStat || 'def',
-      buffStages: Number.isFinite(Number(move.buffStages)) ? Number(move.buffStages) : 1,
+      buffStat: ['atk', 'def', 'spd'].includes(move.buffStat) ? move.buffStat : 'def',
+      buffStages,
       grantShield: true,
       heal: Math.max(4, Math.round(safeMaxHp * 0.12)),
       damage: 0,
@@ -2086,7 +2263,9 @@ export function calculateDamage(attacker, defender, move, options = {}) {
     };
   }
 
-  const accuracy = Number.isFinite(Number(move?.accuracy)) ? Number(move.accuracy) : 100;
+  const accuracy = !isInvalidNumericInput(move?.accuracy) && Number.isFinite(Number(move.accuracy))
+    ? Math.max(0, Math.min(100, Number(move.accuracy)))
+    : 100;
   const hitRoll = options.forceHit === true ? 0 : options.forceHit === false ? 999 : Math.random() * 100;
   if (hitRoll > accuracy) {
     return {
@@ -2105,29 +2284,42 @@ export function calculateDamage(attacker, defender, move, options = {}) {
   let attackerAbilityTrigger = applyAbilities ? evaluateOffensiveAbility(attacker, move) : null;
 
   const stab = attacker?.type && move?.type && attacker.type === move.type ? 1.25 : 1;
-  const effectiveness = getTypeEffectiveness(move?.type, defender?.type);
-  const abilityCritBonus = Number(attackerAbilityTrigger?.critBonus) || 0;
+  const rawEff = getTypeEffectiveness(move?.type, defender?.type);
+  const effectiveness = Number.isFinite(Number(rawEff)) && Number(rawEff) >= 0 ? Number(rawEff) : 1;
+  const abilityCritBonus = Number.isFinite(Number(attackerAbilityTrigger?.critBonus))
+    ? Number(attackerAbilityTrigger.critBonus)
+    : 0;
   const critChance = 0.08 + getBondTier(attacker?.bond).critBonus + abilityCritBonus;
   const isCrit = options.forceCrit !== undefined ? Boolean(options.forceCrit) : Math.random() < critChance;
   const critMult = isCrit ? 1.5 : 1;
-  const variance = Number.isFinite(Number(options.fixedVariance))
+  const variance = !isInvalidNumericInput(options.fixedVariance)
+    && Number.isFinite(Number(options.fixedVariance))
+    && Number(options.fixedVariance) > 0
     ? Number(options.fixedVariance)
     : 0.9 + Math.random() * 0.2;
 
   const rawAtk = typeof attacker?.getEffectiveAtk === 'function' ? attacker.getEffectiveAtk() : attacker?.atk;
   const rawDef = typeof defender?.getEffectiveDef === 'function' ? defender.getEffectiveDef() : defender?.def;
 
-  const safeLv = Number.isFinite(Number(attacker?.level)) ? Math.max(1, Number(attacker.level)) : 1;
-  const safeAtk = Number.isFinite(Number(rawAtk)) ? Math.max(1, Number(rawAtk)) : 1;
-  const safeDef = Number.isFinite(Number(rawDef)) ? Math.max(1, Number(rawDef)) : 1;
-  const safePower = Number.isFinite(Number(move?.power)) ? Math.max(0, Number(move.power)) : 0;
+  const safeLv = !isInvalidNumericInput(attacker?.level) && Number.isFinite(Number(attacker.level))
+    ? Math.max(1, Number(attacker.level))
+    : 1;
+  const safeAtk = !isInvalidNumericInput(rawAtk) && Number.isFinite(Number(rawAtk))
+    ? Math.max(1, Number(rawAtk))
+    : 1;
+  const safeDef = !isInvalidNumericInput(rawDef) && Number.isFinite(Number(rawDef))
+    ? Math.max(1, Number(rawDef))
+    : 1;
+  const safePower = !isInvalidNumericInput(move?.power) && Number.isFinite(Number(move.power))
+    ? Math.max(0, Number(move.power))
+    : 0;
 
   const basePower = (((2 * safeLv) / 5 + 2) * safePower * (safeAtk / safeDef)) / 18 + 2;
   const shieldMult = (Number(defender?.shieldTurns) || 0) > 0 ? 0.65 : 1;
 
   const defenderAbilityTrigger = applyAbilities ? evaluateDefensiveAbility(defender, move, effectiveness) : null;
-  const attackerAbMult = attackerAbilityTrigger ? attackerAbilityTrigger.mult : 1;
-  const defenderAbMult = defenderAbilityTrigger ? defenderAbilityTrigger.mult : 1;
+  const attackerAbMult = Number.isFinite(Number(attackerAbilityTrigger?.mult)) ? Number(attackerAbilityTrigger.mult) : 1;
+  const defenderAbMult = Number.isFinite(Number(defenderAbilityTrigger?.mult)) ? Number(defenderAbilityTrigger.mult) : 1;
   const traitId = options?.encounterTrait ?? (options?.applyEncounterTraits === true ? attacker?.encounterTrait : null);
   const traitDmgMult = traitId && ENCOUNTER_TRAITS?.[traitId]?.dmgMult ? ENCOUNTER_TRAITS[traitId].dmgMult : 1;
 
@@ -2157,15 +2349,17 @@ export function calculateDamage(attacker, defender, move, options = {}) {
 }
 
 export function calculateCatchAttempt(wildPokemon, ballBonus = 1.0, options = {}) {
-  const rawMaxHp = Number(wildPokemon?.maxHp);
+  const rawMaxHp = isInvalidNumericInput(wildPokemon?.maxHp) ? NaN : Number(wildPokemon.maxHp);
   const safeMaxHp = Number.isFinite(rawMaxHp) && rawMaxHp > 0 ? rawMaxHp : 1;
-  const rawHp = Number(wildPokemon?.hp);
+  const rawHp = isInvalidNumericInput(wildPokemon?.hp) ? NaN : Number(wildPokemon.hp);
   const clampedHp = Number.isFinite(rawHp) ? Math.max(0, Math.min(safeMaxHp, rawHp)) : safeMaxHp;
   const hpRatio = clampedHp / safeMaxHp;
 
-  const rawFactor = Number(wildPokemon?.species?.catchFactor);
+  const rawFactor = isInvalidNumericInput(wildPokemon?.species?.catchFactor)
+    ? NaN
+    : Number(wildPokemon.species.catchFactor);
   const factor = Number.isFinite(rawFactor) && rawFactor > 0 ? rawFactor : 0.78;
-  const rawBonus = Number(ballBonus);
+  const rawBonus = isInvalidNumericInput(ballBonus) ? NaN : Number(ballBonus);
   const safeBonus = Number.isFinite(rawBonus) && rawBonus > 0 ? rawBonus : 1.0;
   const traitId = options?.encounterTrait ?? wildPokemon?.encounterTrait ?? null;
   const traitCatchMult = traitId && ENCOUNTER_TRAITS?.[traitId]?.catchMult ? ENCOUNTER_TRAITS[traitId].catchMult : 1.0;
