@@ -103,61 +103,61 @@ export const BIOMES = {
     icon: '🌲',
     levelRange: [2, 7],
     encounters: [
-      { id: 10, weight: 22 },
-      { id: 16, weight: 20 },
-      { id: 43, weight: 18 },
+      { id: 10, weight: 24 },
+      { id: 16, weight: 22 },
+      { id: 43, weight: 20 },
       { id: 133, weight: 18 },
       { id: 25, weight: 14 },
-      { id: 11, weight: 8 },
-      { id: 39, weight: 14 },
-      { id: 179, weight: 14 },
-      { id: 143, weight: 6 },
-      { id: 280, weight: 12 },
-      { id: 403, weight: 14 },
+      { id: 11, weight: 10 },
+      { id: 39, weight: 16 },
+      { id: 179, weight: 16 },
+      { id: 143, weight: 2 },
+      { id: 280, weight: 14 },
+      { id: 403, weight: 15 },
       { id: 152, weight: 14 },
       { id: 387, weight: 14 },
       { id: 495, weight: 14 },
-      { id: 123, weight: 10 },
-      { id: 214, weight: 8 },
-      { id: 396, weight: 16 },
-      { id: 13, weight: 15 },
-      { id: 19, weight: 15 },
-      { id: 29, weight: 15 },
-      { id: 32, weight: 15 },
-      { id: 52, weight: 15 },
-      { id: 69, weight: 15 },
-      { id: 83, weight: 12 },
-      { id: 114, weight: 12 },
-      { id: 127, weight: 8 },
-      { id: 161, weight: 15 },
-      { id: 163, weight: 15 },
-      { id: 165, weight: 15 },
-      { id: 172, weight: 15 },
-      { id: 190, weight: 15 },
-      { id: 204, weight: 15 },
-      { id: 216, weight: 15 },
-      { id: 234, weight: 12 },
-      { id: 261, weight: 15 },
-      { id: 263, weight: 15 },
-      { id: 265, weight: 15 },
-      { id: 273, weight: 15 },
-      { id: 276, weight: 15 },
-      { id: 287, weight: 15 },
-      { id: 290, weight: 15 },
-      { id: 352, weight: 12 },
-      { id: 399, weight: 15 },
-      { id: 401, weight: 15 },
-      { id: 412, weight: 15 },
-      { id: 415, weight: 15 },
-      { id: 417, weight: 15 },
-      { id: 438, weight: 15 },
-      { id: 446, weight: 12 },
-      { id: 504, weight: 15 },
-      { id: 506, weight: 15 },
-      { id: 509, weight: 15 },
-      { id: 519, weight: 15 },
-      { id: 540, weight: 15 },
-      { id: 588, weight: 15 },
+      { id: 123, weight: 3 },
+      { id: 214, weight: 2 },
+      { id: 396, weight: 18 },
+      { id: 13, weight: 20 },
+      { id: 19, weight: 18 },
+      { id: 29, weight: 22 },
+      { id: 32, weight: 18 },
+      { id: 52, weight: 14 },
+      { id: 69, weight: 16 },
+      { id: 83, weight: 4 },
+      { id: 114, weight: 3 },
+      { id: 127, weight: 2 },
+      { id: 161, weight: 20 },
+      { id: 163, weight: 18 },
+      { id: 165, weight: 18 },
+      { id: 172, weight: 18 },
+      { id: 190, weight: 8 },
+      { id: 204, weight: 12 },
+      { id: 216, weight: 10 },
+      { id: 234, weight: 3 },
+      { id: 261, weight: 17 },
+      { id: 263, weight: 20 },
+      { id: 265, weight: 20 },
+      { id: 273, weight: 18 },
+      { id: 276, weight: 14 },
+      { id: 287, weight: 14 },
+      { id: 290, weight: 22 },
+      { id: 352, weight: 4 },
+      { id: 399, weight: 20 },
+      { id: 401, weight: 20 },
+      { id: 412, weight: 18 },
+      { id: 415, weight: 18 },
+      { id: 417, weight: 8 },
+      { id: 438, weight: 10 },
+      { id: 446, weight: 3 },
+      { id: 504, weight: 18 },
+      { id: 506, weight: 18 },
+      { id: 509, weight: 17 },
+      { id: 519, weight: 18 },
+      { id: 540, weight: 18 },
+      { id: 588, weight: 12 },
     ],
   },
   cave: {
@@ -963,7 +963,7 @@ export const SHRINES = {
     name: 'Forest Shrine',
     biome: 'forest',
     guardianId: 25,
-    level: 7,
+    level: 6,
     badgeId: 'meadow',
     intro: 'The Forest Guardian Pikachu crackles with emerald light! Defeat it to claim the Meadow Badge!',
     clearedText: 'The Forest Shrine hums peacefully! Your Meadow Badge glows warmly.',
@@ -2888,10 +2888,19 @@ export function getTileDepthInfo(x, y) {
   }
   const maxD = maxDistByBiome[biome.id] || 1;
   const proximity = 1 - minD / maxD;
+  // Keep the southern Whispering Forest entrance corridor as Outskirts (depthTier 0)
+  // so newly arrived trainers stepping north from Starlight Village aren't pushed into Heartland.
+  const isSouthernForestOutskirts = (
+    biome.id === 'forest'
+    && cy >= 6
+    && cx >= 5
+    && cx <= 13
+    && minD > 4.5
+  );
   let depthTier = 0;
-  if (minD <= 4.5 || proximity >= 0.67) {
+  if (minD <= 4.5 || (!isSouthernForestOutskirts && proximity >= 0.67)) {
     depthTier = 2;
-  } else if (proximity >= 0.34) {
+  } else if (!isSouthernForestOutskirts && proximity >= 0.34) {
     depthTier = 1;
   }
   return {
@@ -3012,9 +3021,15 @@ export function getCompassGuidance(profile, speciesMap = null) {
   const biomeStats = getBiomeDiscoveryStats(profile, currentBiome.id, speciesMap);
 
   const npcsTalked = new Set(profile?.npcsTalked || []);
+  const chestsOpened = new Set(profile?.chestsOpened || []);
+  const questsCompleted = new Set(profile?.questsCompleted || []);
   const shrinesCleared = new Set(profile?.shrinesCleared || []);
+  const badges = new Set(profile?.badges || []);
   const caughtCount = countTotalCaught(profile);
+  const hasParty = Array.isArray(profile?.team);
+  const partyCount = hasParty ? profile.team.length : 0;
   const totalSpecies = speciesMap ? Object.keys(speciesMap).length : 1025;
+  const inEarlyForestOnboarding = shrinesCleared.size === 0 && badges.size === 0;
 
   let goal = null;
 
@@ -3024,6 +3039,44 @@ export function getCompassGuidance(profile, speciesMap = null) {
       icon: '👩‍🔬',
       title: 'Talk to Professor Willow',
       targetBiomeId: 'village',
+      targetX: pos.x,
+      targetY: pos.y,
+    };
+  } else if (
+    inEarlyForestOnboarding
+    && !npcsTalked.has('npc_fern')
+    && !questsCompleted.has('quest_forest_friends')
+    && caughtCount < 5
+  ) {
+    const pos = findEntryCoords(NPCS, (n) => n.id === 'npc_fern');
+    goal = {
+      icon: '🌿',
+      title: 'Meet Ranger Fern (North)',
+      targetBiomeId: 'forest',
+      targetX: pos.x,
+      targetY: pos.y,
+    };
+  } else if (
+    inEarlyForestOnboarding
+    && (caughtCount < 3 || (hasParty && partyCount < 2))
+  ) {
+    goal = {
+      icon: '🐾',
+      title: 'Catch Forest Friends',
+      targetBiomeId: 'forest',
+      targetX: 8,
+      targetY: 6,
+    };
+  } else if (
+    inEarlyForestOnboarding
+    && !chestsOpened.has('forest_chest')
+    && caughtCount < 5
+  ) {
+    const pos = findEntryCoords(CHESTS, (c) => c.id === 'forest_chest');
+    goal = {
+      icon: '🎒',
+      title: 'Claim Ranger Supplies',
+      targetBiomeId: 'forest',
       targetX: pos.x,
       targetY: pos.y,
     };
