@@ -3888,16 +3888,27 @@ export class AudioEngine {
     });
   }
 
+  _normalizeWarpPhase(options = {}) {
+    const rawPhase = options && typeof options === 'object' ? options.phase : undefined;
+    const normPhase = typeof rawPhase === 'string' ? rawPhase.trim().toLowerCase() : '';
+    return normPhase === 'depart' || normPhase === 'arrive' || normPhase === 'full'
+      ? normPhase
+      : 'full';
+  }
+
   /**
    * Procedural Starlight Warp Teleport cue (`'depart' | 'arrive' | 'full'`).
+   * Delegates to `playSafeRecall` when `options.mode === 'safe'`.
    * Schedules purely via Web Audio (`triggerVoice` + `playNoise`) with zero timers or leaked nodes.
    */
   playWarpTeleport(options = {}) {
-    const rawPhase = options && typeof options === 'object' ? options.phase : undefined;
-    const normPhase = typeof rawPhase === 'string' ? rawPhase.trim().toLowerCase() : '';
-    const phase = normPhase === 'depart' || normPhase === 'arrive' || normPhase === 'full'
-      ? normPhase
-      : 'full';
+    const rawMode = options && typeof options === 'object' ? options.mode : undefined;
+    const normMode = typeof rawMode === 'string' ? rawMode.trim().toLowerCase() : '';
+    if (normMode === 'safe') {
+      return this.playSafeRecall(options);
+    }
+
+    const phase = this._normalizeWarpPhase(options);
 
     if (this.muted) {
       return { played: false, muted: true, phase };
@@ -3981,6 +3992,99 @@ export class AudioEngine {
       played: Boolean(firstVoice),
       muted: false,
       phase,
+    };
+  }
+
+  /**
+   * Procedural Starlight Village Safe-Zone Recall cue (`'depart' | 'arrive' | 'full'`).
+   * Warm descending-homeward chime + airy breeze resolving into a cozy Cmaj9 hearth chord.
+   * Schedules purely via Web Audio (`triggerVoice` + `playNoise`) with zero timers or leaked nodes.
+   */
+  playSafeRecall(options = {}) {
+    const phase = this._normalizeWarpPhase(options);
+
+    if (this.muted) {
+      return { played: false, muted: true, phase, mode: 'safe' };
+    }
+
+    let firstVoice = null;
+    const captureFirst = (voice) => {
+      if (!firstVoice && voice) {
+        firstVoice = voice;
+      }
+    };
+
+    if (phase === 'depart' || phase === 'full') {
+      // Gentle descending-homeward chime (G5, E5, D5, B4, G4) + soft airy bandpass breeze
+      const departChime = [G5, E5, D5, B4, G4];
+      departChime.forEach((freq, i) => {
+        const isSine = i % 2 === 0;
+        captureFirst(this.triggerVoice({
+          freq,
+          wave: isSine ? 'sine' : 'triangle',
+          duration: 0.12 + i * 0.012,
+          attack: 0.005,
+          decay: 0.04,
+          sustain: 0.48,
+          gain: isSine ? 0.072 : 0.068,
+          delay: i * 0.028,
+        }));
+      });
+
+      captureFirst(this.playNoise({
+        duration: 0.18,
+        gain: 0.065,
+        filterType: 'bandpass',
+        startFreq: 900,
+        endFreq: 320,
+        q: 1.2,
+        attack: 0.014,
+        delay: 0,
+      }));
+    }
+
+    if (phase === 'arrive' || phase === 'full') {
+      // Warm resolving C-major-9th hearth chord + soft G5 bell sparkle
+      const arriveDelay = phase === 'full' ? 0.16 : 0;
+      const arriveChord = [
+        { freq: C4, wave: 'triangle', duration: 0.34, gain: 0.082, offset: 0 },
+        { freq: E4, wave: 'sine', duration: 0.34, gain: 0.072, offset: 0.016 },
+        { freq: G4, wave: 'triangle', duration: 0.34, gain: 0.068, offset: 0.032 },
+        { freq: B4, wave: 'sine', duration: 0.36, gain: 0.062, offset: 0.048 },
+        { freq: C5, wave: 'sine', duration: 0.38, gain: 0.076, offset: 0.064 },
+      ];
+      arriveChord.forEach(({ freq, wave, duration, gain, offset }) => {
+        captureFirst(this.triggerVoice({
+          freq,
+          wave,
+          duration,
+          attack: 0.008,
+          decay: 0.075,
+          sustain: 0.56,
+          gain,
+          delay: arriveDelay + offset,
+        }));
+      });
+
+      // Soft G5 bell sparkle
+      captureFirst(this.triggerVoice({
+        freq: G5,
+        endFreq: G5 * 1.005,
+        wave: 'sine',
+        duration: 0.28,
+        attack: 0.006,
+        decay: 0.065,
+        sustain: 0.44,
+        gain: 0.048,
+        delay: arriveDelay + 0.084,
+      }));
+    }
+
+    return {
+      played: Boolean(firstVoice),
+      muted: false,
+      phase,
+      mode: 'safe',
     };
   }
 
