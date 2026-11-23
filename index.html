@@ -85,7 +85,10 @@
         <div class="hud-left">
           <canvas id="hud-portrait" width="40" height="40" class="hud-portrait" role="button" tabindex="0" title="Customize Trainer Style" aria-label="Customize Trainer Style"></canvas>
           <div class="hud-trainer-meta">
-            <span id="hud-trainer-name" class="hud-trainer-name">Violet</span>
+            <div class="hud-trainer-name-row">
+              <span id="hud-trainer-name" class="hud-trainer-name">Violet</span>
+              <span id="hud-player-level" class="hud-player-level" title="Player Level">Lv.1</span>
+            </div>
             <span id="hud-lead-label" class="hud-lead-label">Lv.5 Bulbasaur</span>
           </div>
           <div class="hud-mini-hp-wrap" title="Lead Pokémon HP">
@@ -119,18 +122,16 @@
 
         <div id="biome-banner" class="biome-banner" hidden>🌲 Whispering Forest</div>
 
-        <aside id="minimap-hud" class="minimap-hud" aria-label="Starlight Universe Minimap" hidden>
-          <div class="minimap-header">
-            <span id="minimap-zone-label" class="minimap-zone-label">🏡 Starlight Village</span>
-          </div>
-          <div id="minimap-canvas-wrap" class="minimap-canvas-wrap" role="button" tabindex="0" title="Tap to open Island Guide" aria-label="Open Starlight Island Guide">
-            <canvas id="minimap-canvas" width="200" height="168" class="minimap-canvas"></canvas>
-          </div>
-          <button id="warp-zone-btn" type="button" class="warp-zone-btn" title="Warp to current-level farming zone (T)">
-            <span class="warp-zone-icon" aria-hidden="true">✨</span>
-            <span id="warp-zone-label" class="warp-zone-label">Warp • Lv.2–7</span>
+        <div id="warp-dock" class="warp-dock" role="group" aria-label="Starlight Warp Controls" hidden>
+          <button id="warp-zone-btn" type="button" class="warp-dock-btn warp-zone-btn" title="Warp to Player-Level farming zone (T)">
+            <span class="warp-btn-icon" aria-hidden="true">✨</span>
+            <span id="warp-zone-label" class="warp-btn-label">Farm • Lv.2–7</span>
           </button>
-        </aside>
+          <button id="warp-safe-btn" type="button" class="warp-dock-btn warp-safe-btn" title="Return safely to Starlight Village (H)">
+            <span class="warp-btn-icon" aria-hidden="true">🏡</span>
+            <span id="warp-safe-label" class="warp-btn-label">Safe Zone</span>
+          </button>
+        </div>
 
         <button id="interact-pill" type="button" class="interact-pill" hidden>💬 Read Sign</button>
 

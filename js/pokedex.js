@@ -91,23 +91,24 @@ const FALLBACK_AURAS = {
 };
 
 const FALLBACK_BIOME_OFFSETS = {
+  village: -2,
   forest: -1,
   cave: 0,
   water: 0,
-  volcano: 1,
-  peak: 2,
-  grove: 2,
-  desert: 1,
-  marsh: 2,
-  sanctum: 3,
-  canyon: 2,
-  reef: 3,
-  ruins: 3,
-  rift: 4,
-  faeveldt: 2,
-  atoll: 3,
-  highlands: 3,
-  crater: 4,
+  volcano: 0,
+  desert: 0,
+  peak: 1,
+  grove: 1,
+  marsh: 1,
+  faeveldt: 1,
+  canyon: 1,
+  sanctum: 1,
+  atoll: 1,
+  reef: 1,
+  highlands: 1,
+  ruins: 1,
+  crater: 1,
+  rift: 1,
 };
 
 const FALLBACK_GEM_INFO = {
@@ -244,6 +245,149 @@ export function getTrainerAppearanceOptions() {
   return { stylesMap, accMap, aurasMap };
 }
 
+function isValidFiniteNumber(raw) {
+  return raw !== null && raw !== undefined && raw !== '' && typeof raw !== 'boolean' && !Array.isArray(raw) && Number.isFinite(Number(raw));
+}
+
+function getFallbackPlayerLevelXpRequired(level) {
+  const lv = Math.max(1, Math.floor(Number(level) || 1));
+  return lv >= 50 ? 0 : 30 + (lv - 1) * 10;
+}
+
+function getFallbackCumulativeXpForPlayerLevel(level) {
+  const target = Math.max(1, Math.min(50, Math.round(Number(level) || 1)));
+  let total = 0;
+  for (let lv = 1; lv < target; lv++) {
+    total += getFallbackPlayerLevelXpRequired(lv);
+  }
+  return total;
+}
+
+function getFallbackPlayerLevelFromXp(xp) {
+  const safeXp = Math.max(0, Math.floor(Number.isFinite(Number(xp)) ? Number(xp) : 0));
+  let remaining = safeXp;
+  let level = 1;
+  while (level < 50) {
+    const req = getFallbackPlayerLevelXpRequired(level);
+    if (remaining < req) break;
+    remaining -= req;
+    level += 1;
+  }
+  const isMaxLevel = level >= 50;
+  const xpToNext = isMaxLevel ? 0 : getFallbackPlayerLevelXpRequired(level);
+  const xpIntoLevel = isMaxLevel ? 0 : remaining;
+  const progressPct = isMaxLevel
+    ? 100
+    : Math.min(100, Math.max(0, Math.round((xpIntoLevel / Math.max(1, xpToNext)) * 100)));
+  return { level, xp: safeXp, xpIntoLevel, xpToNext, progressPct, isMaxLevel };
+}
+
+function computeFallbackMilestoneTrainerXp(profile) {
+  if (!profile || typeof profile !== 'object') return 0;
+  const countUniqueStrings = (list) => new Set(
+    (Array.isArray(list) ? list : []).filter((v) => typeof v === 'string' && v.trim() !== ''),
+  ).size;
+  const sumMapCounts = (mapObj) => {
+    if (!mapObj || typeof mapObj !== 'object' || Array.isArray(mapObj)) return 0;
+    let sum = 0;
+    for (const val of Object.values(mapObj)) {
+      sum += toNonNegIntSafe(val);
+    }
+    return sum;
+  };
+  let caughtCount = 0;
+  const rawCaught = profile.pokedex?.caught;
+  if (Array.isArray(rawCaught)) {
+    const uniqueIds = new Set();
+    for (const item of rawCaught) {
+      const id = resolveDexSpeciesId(item);
+      if (id !== null) uniqueIds.add(id);
+    }
+    caughtCount = uniqueIds.size;
+  } else if (rawCaught && typeof rawCaught === 'object') {
+    const uniqueIds = new Set();
+    for (const [k, v] of Object.entries(rawCaught)) {
+      const id = resolveDexSpeciesId(k);
+      if (id === null) continue;
+      if (v === true || (isValidFiniteNumber(v) && Number(v) > 0)) {
+        uniqueIds.add(id);
+      }
+    }
+    caughtCount = uniqueIds.size;
+  }
+
+  return (
+    toNonNegIntSafe(profile.stats?.battlesWon) * 14 +
+    countUniqueStrings(profile.badges) * 60 +
+    countUniqueStrings(profile.shrinesCleared) * 85 +
+    countUniqueStrings(profile.rivalsDefeated) * 50 +
+    sumMapCounts(profile.rivalRematchCounts) * 30 +
+    sumMapCounts(profile.shrineTrialCounts) * 40 +
+    countUniqueStrings(profile.questsCompleted) * 45 +
+    Math.max(0, caughtCount - 1) * 4
+  );
+}
+
+export function getPlayerProgressionSafe(profileOrLevel = null, storage = null) {
+  const isProfileObj = Boolean(
+    profileOrLevel
+    && typeof profileOrLevel === 'object'
+    && !Array.isArray(profileOrLevel),
+  );
+  if (isProfileObj && typeof storage?.getPlayerProgression === 'function') {
+    const res = storage.getPlayerProgression(profileOrLevel);
+    if (res && Number.isFinite(res.level)) {
+      return res;
+    }
+  }
+  if (typeof PokemonMod.getPlayerProgression === 'function') {
+    const res = PokemonMod.getPlayerProgression(profileOrLevel);
+    if (res && Number.isFinite(res.level)) {
+      return res;
+    }
+  }
+  if (typeof Config.getPlayerProgression === 'function') {
+    const res = Config.getPlayerProgression(profileOrLevel);
+    if (res && Number.isFinite(res.level)) {
+      return res;
+    }
+  }
+
+  if (profileOrLevel === -Infinity) return getFallbackPlayerLevelFromXp(0);
+  if (profileOrLevel === Infinity) return getFallbackPlayerLevelFromXp(getFallbackCumulativeXpForPlayerLevel(50));
+  if (typeof profileOrLevel === 'number') {
+    if (!Number.isFinite(profileOrLevel)) return getFallbackPlayerLevelFromXp(0);
+    const lv = Math.max(1, Math.min(50, Math.round(profileOrLevel)));
+    return getFallbackPlayerLevelFromXp(getFallbackCumulativeXpForPlayerLevel(lv));
+  }
+  if (typeof profileOrLevel === 'string') {
+    const trimmed = profileOrLevel.trim();
+    if (!trimmed) return getFallbackPlayerLevelFromXp(0);
+    if (trimmed === '-Infinity') return getFallbackPlayerLevelFromXp(0);
+    if (trimmed === 'Infinity') return getFallbackPlayerLevelFromXp(getFallbackCumulativeXpForPlayerLevel(50));
+    const parsed = Number(trimmed);
+    if (!Number.isFinite(parsed)) return getFallbackPlayerLevelFromXp(0);
+    const lv = Math.max(1, Math.min(50, Math.round(parsed)));
+    return getFallbackPlayerLevelFromXp(getFallbackCumulativeXpForPlayerLevel(lv));
+  }
+
+  if (isProfileObj) {
+    const milestoneXp = computeFallbackMilestoneTrainerXp(profileOrLevel);
+    const persistedXp = isValidFiniteNumber(profileOrLevel.trainerXp) && Number(profileOrLevel.trainerXp) >= 0
+      ? Math.floor(Number(profileOrLevel.trainerXp))
+      : 0;
+    const rawExplicitLv = isValidFiniteNumber(profileOrLevel.playerLevel) ? Math.round(Number(profileOrLevel.playerLevel)) : null;
+    const explicitLv = rawExplicitLv !== null && rawExplicitLv >= 1 && rawExplicitLv <= 50 ? rawExplicitLv : null;
+    const explicitFloorXp = (persistedXp === 0 && explicitLv !== null)
+      ? getFallbackCumulativeXpForPlayerLevel(explicitLv)
+      : 0;
+    const effectiveXp = Math.max(persistedXp, milestoneXp, explicitFloorXp);
+    return getFallbackPlayerLevelFromXp(effectiveXp);
+  }
+
+  return getFallbackPlayerLevelFromXp(0);
+}
+
 export function getTrainerPowerSafe(profile) {
   if (typeof PokemonMod.getTrainerPowerLevel === 'function') {
     const val = Number(PokemonMod.getTrainerPowerLevel(profile));
@@ -255,8 +399,8 @@ export function getTrainerPowerSafe(profile) {
   if (levels.length === 0) return 5;
   const top1 = levels[0];
   const top2 = levels[1] ?? top1;
-  const badgeBonus = (profile?.badges?.length || 0) * 0.45;
-  return Math.max(1, Math.min(50, Math.round(top1 * 0.68 + top2 * 0.32 + badgeBonus)));
+  const badgeBonus = Math.min(3, (profile?.badges?.length || 0) * 0.25);
+  return Math.max(1, Math.min(50, Number((top1 * 0.68 + top2 * 0.32 + badgeBonus).toFixed(2))));
 }
 
 export function getBiomeScaledInfo(biome, profile) {
@@ -273,7 +417,9 @@ export function getBiomeScaledInfo(biome, profile) {
     };
   }
 
-  const [baseMin, baseMax] = biome.levelRange;
+  const [rawMin, rawMax] = biome.levelRange;
+  const baseMin = Math.max(1, Math.min(50, Math.round(rawMin)));
+  const baseMax = Math.max(baseMin, Math.min(50, Math.round(rawMax)));
   if (typeof PokemonMod.getBiomeScaledRange === 'function') {
     const res = PokemonMod.getBiomeScaledRange(biome.id, profile);
     if (res && Number.isFinite(res.minLv) && Number.isFinite(res.maxLv)) {
@@ -291,29 +437,52 @@ export function getBiomeScaledInfo(biome, profile) {
     }
   }
 
-  const power = getTrainerPowerSafe(profile);
-  const badgesCount = profile?.badges?.length || 0;
-  if (badgesCount === 0 && power <= baseMax) {
-    return {
-      isSafe: false,
-      minLv: baseMin,
-      maxLv: baseMax,
-      baseMin,
-      baseMax,
-      threatLabel: 'Balanced',
-      threatTone: 'balanced',
-      isScaled: false,
-    };
+  const tierOffset = Config.BIOME_SCALING_OFFSETS?.[biome.id]
+    ?? PokemonMod.BIOME_SCALING_OFFSETS?.[biome.id]
+    ?? FALLBACK_BIOME_OFFSETS[biome.id]
+    ?? 0;
+  const isProfileObj = Boolean(profile && typeof profile === 'object' && !Array.isArray(profile));
+  const hasExplicitProgression = isProfileObj && (
+    isValidFiniteNumber(profile.playerLevel)
+    || isValidFiniteNumber(profile.trainerXp)
+    || (profile.stats && typeof profile.stats === 'object')
+    || Array.isArray(profile.shrinesCleared)
+    || Array.isArray(profile.questsCompleted)
+  );
+  const playerLevel = getPlayerProgressionSafe(profile).level;
+  const power = isProfileObj ? getTrainerPowerSafe(profile) : playerLevel;
+  const badgesCount = Array.isArray(profile?.badges) ? profile.badges.length : 0;
+  const anchor = isProfileObj
+    ? (hasExplicitProgression || badgesCount === 0 ? playerLevel : power)
+    : playerLevel;
+  const shouldScale = (profile !== null && profile !== undefined)
+    && !(badgesCount === 0 && anchor <= baseMax);
+
+  let minLv = baseMin;
+  let maxLv = baseMax;
+  if (shouldScale) {
+    const center = Math.round(anchor) + tierOffset;
+    const scaledMax = Math.max(baseMax, Math.min(50, center + 2));
+    const scaledMin = Math.max(baseMin, Math.min(scaledMax - 2, center - 3));
+    minLv = Math.max(1, scaledMin);
+    maxLv = Math.max(minLv, scaledMax);
   }
 
-  const offset = FALLBACK_BIOME_OFFSETS[biome.id] ?? 0;
-  const center = Math.max(baseMin, Math.min(50, power + offset));
-  const minLv = Math.max(baseMin, Math.min(48, center - 2));
-  const maxLv = Math.min(50, Math.max(minLv + 2, center + 2));
+  const isScaled = minLv !== baseMin || maxLv !== baseMax;
+  const threatRef = (biome.id === 'forest' && !isScaled) ? Math.max(anchor, 5) : anchor;
+  const delta = maxLv - threatRef;
   let threatLabel = 'Balanced';
-  if (maxLv >= 28) threatLabel = 'Apex';
-  else if (maxLv >= 18) threatLabel = 'Veteran';
-  else if (maxLv > baseMax || offset > 0) threatLabel = 'Challenging';
+  let threatTone = 'balanced';
+  if (delta > 10.5) {
+    threatLabel = 'Apex';
+    threatTone = 'apex';
+  } else if (delta > 6) {
+    threatLabel = 'Veteran';
+    threatTone = 'veteran';
+  } else if (delta > 3.5) {
+    threatLabel = 'Challenging';
+    threatTone = 'challenging';
+  }
 
   return {
     isSafe: false,
@@ -322,8 +491,8 @@ export function getBiomeScaledInfo(biome, profile) {
     baseMin,
     baseMax,
     threatLabel,
-    threatTone: threatLabel.toLowerCase(),
-    isScaled: minLv !== baseMin || maxLv !== baseMax,
+    threatTone,
+    isScaled,
   };
 }
 
@@ -368,36 +537,10 @@ const FALLBACK_BIOME_WARP_POINTS = {
   crater: { x: 88, y: 46, dir: 'down' },
 };
 
-function computePartyFarmingLevelFallback(profileOrLevel = null) {
-  if (typeof profileOrLevel === 'number') {
-    if (profileOrLevel === -Infinity) return 1;
-    if (profileOrLevel === Infinity) return 50;
-    if (!Number.isFinite(profileOrLevel)) return 5;
-    return Math.max(1, Math.min(50, Math.round(profileOrLevel)));
-  }
-  const team = Array.isArray(profileOrLevel)
-    ? profileOrLevel
-    : Array.isArray(profileOrLevel?.team)
-      ? profileOrLevel.team
-      : [];
-  const validMons = team.filter(Boolean);
-  if (validMons.length === 0) return 5;
-  const healthy = validMons.filter((m) => Number(m.hp) > 0 && !m.isFainted);
-  const pool = healthy.length > 0 ? healthy : validMons;
-  const levels = pool
-    .map((m) => {
-      const lv = Number(m?.level);
-      return Number.isFinite(lv) ? Math.max(1, Math.min(50, Math.round(lv))) : 5;
-    })
-    .sort((a, b) => b - a);
-  if (levels.length === 0) return 5;
-  if (levels.length === 1) return levels[0];
-  return Math.max(1, Math.min(50, Math.round(0.68 * levels[0] + 0.32 * levels[1])));
-}
-
 export function getRecommendedFarmingZoneSafe(profileOrLevel = null) {
   const isProfile = Boolean(profileOrLevel && typeof profileOrLevel === 'object' && !Array.isArray(profileOrLevel));
   const profile = isProfile ? profileOrLevel : null;
+  const fallbackPlayerLevel = getPlayerProgressionSafe(profileOrLevel).level;
 
   if (typeof PokemonMod.resolveRecommendedFarmingZone === 'function') {
     const rec = PokemonMod.resolveRecommendedFarmingZone(profileOrLevel);
@@ -406,11 +549,15 @@ export function getRecommendedFarmingZoneSafe(profileOrLevel = null) {
       const fallbackPt = Config.getBiomeWarpPoint?.(biome.id)
         || FALLBACK_BIOME_WARP_POINTS[biome.id]
         || { x: 4, y: 5, dir: 'up' };
+      const playerLevel = Number.isFinite(rec.playerLevel)
+        ? rec.playerLevel
+        : (Number.isFinite(rec.partyLevel) ? rec.partyLevel : fallbackPlayerLevel);
       return {
         ...rec,
         biomeId: biome.id,
         biome,
-        partyLevel: Number.isFinite(rec.partyLevel) ? rec.partyLevel : computePartyFarmingLevelFallback(profileOrLevel),
+        playerLevel,
+        partyLevel: playerLevel,
         minLv: Number.isFinite(rec.minLv) ? rec.minLv : (biome.levelRange?.[0] ?? 2),
         maxLv: Number.isFinite(rec.maxLv) ? rec.maxLv : (biome.levelRange?.[1] ?? 7),
         x: Number.isFinite(rec.x) ? rec.x : fallbackPt.x,
@@ -420,16 +567,19 @@ export function getRecommendedFarmingZoneSafe(profileOrLevel = null) {
     }
   }
 
-  const partyLevel = computePartyFarmingLevelFallback(profileOrLevel);
+  const playerLevel = fallbackPlayerLevel;
+  const clamped = playerLevel < 2 ? 'low' : (playerLevel > 36 ? 'high' : null);
   let biome = null;
-  let clamped = null;
+  let resolvedScaled = null;
   let warp = null;
 
   if (typeof Config.resolveFarmingBiomeForLevel === 'function') {
-    const resolved = Config.resolveFarmingBiomeForLevel(partyLevel, profile);
+    const resolved = Config.resolveFarmingBiomeForLevel(playerLevel, profile, {
+      getScaledRange: (id, target) => getBiomeScaledInfo(BIOMES[id], profile ?? target),
+    });
     if (resolved && resolved.biomeId) {
       biome = resolved.biome || BIOMES[resolved.biomeId] || BIOMES.forest;
-      clamped = resolved.clamped ?? null;
+      resolvedScaled = getBiomeScaledInfo(biome, profile ?? playerLevel);
       warp = {
         x: resolved.x,
         y: resolved.y,
@@ -439,39 +589,65 @@ export function getRecommendedFarmingZoneSafe(profileOrLevel = null) {
   }
 
   if (!biome) {
-    const order = Array.isArray(Config.FARMING_BIOME_ORDER) && Config.FARMING_BIOME_ORDER.length > 0
+    const rawOrder = Array.isArray(Config.FARMING_BIOME_ORDER) && Config.FARMING_BIOME_ORDER.length > 0
       ? Config.FARMING_BIOME_ORDER
       : FALLBACK_FARMING_BIOME_ORDER;
-    if (partyLevel < 2) {
-      biome = BIOMES.forest;
-      clamped = 'low';
-    } else if (partyLevel > 36) {
-      biome = BIOMES.rift;
-      clamped = 'high';
-    } else {
-      const shrinesCleared = Array.isArray(profile?.shrinesCleared) ? new Set(profile.shrinesCleared) : null;
-      const hasUnclearedShrine = (bId) => {
-        if (!shrinesCleared) return false;
-        return Object.values(SHRINES || {}).some((s) => s.biome === bId && !shrinesCleared.has(s.id));
-      };
-      const candidates = order
-        .map((id, idx) => ({ biome: BIOMES[id], idx }))
-        .filter((entry) => entry.biome && Array.isArray(entry.biome.levelRange)
-          && entry.biome.levelRange[0] <= partyLevel && partyLevel <= entry.biome.levelRange[1]);
-      candidates.sort((a, b) => {
-        const midA = (a.biome.levelRange[0] + a.biome.levelRange[1]) / 2;
-        const midB = (b.biome.levelRange[0] + b.biome.levelRange[1]) / 2;
-        const diff = Math.abs(partyLevel - midA) - Math.abs(partyLevel - midB);
-        if (Math.abs(diff) > 1e-9) return diff;
-        if (shrinesCleared) {
-          const uncA = hasUnclearedShrine(a.biome.id) ? 0 : 1;
-          const uncB = hasUnclearedShrine(b.biome.id) ? 0 : 1;
-          if (uncA !== uncB) return uncA - uncB;
-        }
-        return a.idx - b.idx;
-      });
-      biome = candidates[0]?.biome || BIOMES.forest;
+    const order = rawOrder.filter((id) => id !== 'village');
+    const evaluated = order
+      .map((id, idx) => {
+        const b = BIOMES[id];
+        if (!b || !Array.isArray(b.levelRange)) return null;
+        const sc = getBiomeScaledInfo(b, profile ?? playerLevel);
+        const safeThreat = sc.threatTone !== 'veteran' && sc.threatTone !== 'apex';
+        const safeCap = sc.maxLv <= Math.max(7, playerLevel + 4) && sc.minLv <= Math.max(2, playerLevel + 1);
+        const inActual = sc.minLv <= playerLevel && playerLevel <= sc.maxLv;
+        const inBase = sc.baseMin <= playerLevel && playerLevel <= sc.baseMax;
+        return { biome: b, idx, scaled: sc, safeThreat, safeCap, inActual, inBase };
+      })
+      .filter(Boolean);
+
+    const tier1 = evaluated.filter((e) => e.safeThreat && e.safeCap && e.inActual);
+    const tier2 = evaluated.filter((e) => e.safeThreat && e.safeCap);
+    const tier3 = evaluated.filter((e) => e.safeThreat);
+    let pool = tier1.length > 0 ? tier1 : (tier2.length > 0 ? tier2 : (tier3.length > 0 ? tier3 : evaluated));
+    const nativeMatches = pool.filter((e) => e.inBase);
+    if (nativeMatches.length > 0) {
+      pool = nativeMatches;
     }
+
+    const hasShrinesCleared = Boolean(
+      profile && (Array.isArray(profile.shrinesCleared) || profile.shrinesCleared instanceof Set),
+    );
+    const clearedSet = hasShrinesCleared ? new Set(profile.shrinesCleared) : null;
+    const hasUnclearedShrine = (bId) => Boolean(
+      clearedSet && Object.values(SHRINES || {}).some((s) => s.biome === bId && !clearedSet.has(s.id)),
+    );
+
+    const sorted = [...pool].sort((a, b) => {
+      const actualMidA = (a.scaled.minLv + a.scaled.maxLv) / 2;
+      const baseMidA = (a.scaled.baseMin + a.scaled.baseMax) / 2;
+      const scoreA = Math.abs(playerLevel - actualMidA) * 1.2
+        + Math.abs(playerLevel - baseMidA) * 0.8
+        + (a.scaled.threatTone === 'balanced' ? 0 : 0.6);
+
+      const actualMidB = (b.scaled.minLv + b.scaled.maxLv) / 2;
+      const baseMidB = (b.scaled.baseMin + b.scaled.baseMax) / 2;
+      const scoreB = Math.abs(playerLevel - actualMidB) * 1.2
+        + Math.abs(playerLevel - baseMidB) * 0.8
+        + (b.scaled.threatTone === 'balanced' ? 0 : 0.6);
+
+      if (Math.abs(scoreA - scoreB) > 1e-6) return scoreA - scoreB;
+      if (hasShrinesCleared) {
+        const uncA = hasUnclearedShrine(a.biome.id) ? 0 : 1;
+        const uncB = hasUnclearedShrine(b.biome.id) ? 0 : 1;
+        if (uncA !== uncB) return uncA - uncB;
+      }
+      return a.idx - b.idx;
+    });
+
+    const chosen = sorted[0];
+    biome = chosen?.biome || BIOMES.forest;
+    resolvedScaled = chosen?.scaled || getBiomeScaledInfo(biome, profile ?? playerLevel);
   }
 
   const fallbackPt = Config.getBiomeWarpPoint?.(biome.id)
@@ -481,12 +657,13 @@ export function getRecommendedFarmingZoneSafe(profileOrLevel = null) {
   const safePt = typeof Config.findNearestSafePosition === 'function'
     ? Config.findNearestSafePosition(rawPt.x, rawPt.y, rawPt.dir || fallbackPt.dir || 'down')
     : { x: rawPt.x, y: rawPt.y, dir: rawPt.dir || 'down' };
-  const scaled = getBiomeScaledInfo(biome, profile);
+  const scaled = resolvedScaled || getBiomeScaledInfo(biome, profile ?? playerLevel);
 
   return {
     biomeId: biome.id,
     biome,
-    partyLevel,
+    playerLevel,
+    partyLevel: playerLevel,
     baseMin: scaled.baseMin ?? biome.levelRange?.[0] ?? 2,
     baseMax: scaled.baseMax ?? biome.levelRange?.[1] ?? 7,
     minLv: scaled.minLv ?? biome.levelRange?.[0] ?? 2,
@@ -675,7 +852,7 @@ function formatCompassArrow(guidance, profile) {
 }
 
 export class PokedexUI {
-  constructor({ storage, audio, onTeamChanged, onBadgesUnlocked, onAppearanceChanged, onCelebrate, onOpenArcade, onWarpToLevelZone, onClose }) {
+  constructor({ storage, audio, onTeamChanged, onBadgesUnlocked, onAppearanceChanged, onCelebrate, onOpenArcade, onWarpToLevelZone, onWarpToSafeZone, onClose }) {
     this.storage = storage;
     this.audio = audio;
     this.onTeamChanged = onTeamChanged;
@@ -684,6 +861,7 @@ export class PokedexUI {
     this.onCelebrate = onCelebrate;
     this.onOpenArcade = onOpenArcade;
     this.onWarpToLevelZone = onWarpToLevelZone;
+    this.onWarpToSafeZone = onWarpToSafeZone;
     this.onClose = onClose;
 
     this.modalEl = document.getElementById('pokedex-modal');
@@ -2267,10 +2445,12 @@ export class PokedexUI {
     const guidance = typeof getCompassGuidance === 'function' ? getCompassGuidance(profile, SPECIES) : null;
     const dirText = formatCompassArrow(guidance, profile);
     const targetBiome = guidance?.targetBiomeId ? BIOMES[guidance.targetBiomeId] : null;
+    const prog = getPlayerProgressionSafe(profile, this.storage);
     const powerLevel = getTrainerPowerSafe(profile);
     const starShards = toNonNegIntSafe(profile.bag?.starShards);
     const cheerState = getCheerStateSafe(this.storage, profile);
     const recZone = getRecommendedFarmingZoneSafe(profile);
+    const recPlayerLevel = recZone.playerLevel ?? recZone.partyLevel ?? prog.level;
 
     const compassCard = document.createElement('div');
     compassCard.className = 'guide-compass-card';
@@ -2282,6 +2462,7 @@ export class PokedexUI {
       <h3 class="guide-compass-title">${guidance?.title || `Explore Starlight Island & Discover All ${Object.keys(BIOMES || {}).length || 18} Biomes!`}</h3>
       <div class="guide-compass-stats">
         ${targetBiome ? `<span>📍 Destination: <strong>${targetBiome.icon} ${targetBiome.name}</strong></span>` : ''}
+        <span>🧭 Player Level: <strong>Lv.${prog.level}</strong></span>
         <span>⚡ Trainer Power: <strong>Lv.${powerLevel}</strong></span>
         <span>✨ Star Shards: <strong>${starShards}</strong></span>
         <span>💖 Cheer Hearts: <strong>${cheerState.charges}/${cheerState.maxCharges}</strong></span>
@@ -2295,7 +2476,9 @@ export class PokedexUI {
     warpBar.className = 'guide-warp-bar';
     const recPill = document.createElement('span');
     recPill.className = 'guide-recommended-pill';
-    recPill.textContent = `🌟 Recommended for Lv.${recZone.partyLevel}: ${recZone.biome.icon} ${recZone.biome.name}`;
+    recPill.textContent = `🌟 Recommended for Player Lv.${recPlayerLevel}: ${recZone.biome.icon} ${recZone.biome.name}`;
+    const warpActions = document.createElement('div');
+    warpActions.className = 'guide-warp-actions';
     const guideWarpBtn = document.createElement('button');
     guideWarpBtn.id = 'guide-warp-zone-btn';
     guideWarpBtn.type = 'button';
@@ -2306,8 +2489,20 @@ export class PokedexUI {
       this.audio?.playMenuBlip?.(780);
       this.onWarpToLevelZone?.(recZone);
     });
+    const guideSafeBtn = document.createElement('button');
+    guideSafeBtn.id = 'guide-warp-safe-btn';
+    guideSafeBtn.type = 'button';
+    guideSafeBtn.className = 'mini-btn guide-safe-btn';
+    guideSafeBtn.textContent = '🏡 Safe Zone';
+    guideSafeBtn.title = 'Return safely to Starlight Village (H)';
+    guideSafeBtn.addEventListener('click', () => {
+      this.audio?.playMenuBlip?.(680);
+      this.onWarpToSafeZone?.();
+    });
+    warpActions.appendChild(guideWarpBtn);
+    warpActions.appendChild(guideSafeBtn);
     warpBar.appendChild(recPill);
-    warpBar.appendChild(guideWarpBtn);
+    warpBar.appendChild(warpActions);
     compassCard.appendChild(warpBar);
     wrap.appendChild(compassCard);
 
@@ -2770,6 +2965,11 @@ export class PokedexUI {
     const rivalsDefeated = (profile.rivalsDefeated || []).length;
 
     const cheerState = getCheerStateSafe(this.storage, profile);
+    const prog = getPlayerProgressionSafe(profile, this.storage);
+    const xpProgress = prog.isMaxLevel ? 'MAX' : `${prog.xpIntoLevel}/${prog.xpToNext}`;
+    const xpTitle = prog.isMaxLevel
+      ? `Max Player Level (${prog.xp} total XP)`
+      : `${prog.xp} total XP • ${prog.xpToNext - prog.xpIntoLevel} XP to Lv.${prog.level + 1}`;
     const statsHeading = document.createElement('h3');
     statsHeading.className = 'section-heading';
     statsHeading.textContent = 'Trainer Adventure Stats';
@@ -2778,6 +2978,8 @@ export class PokedexUI {
     const statsCard = document.createElement('div');
     statsCard.className = 'trainer-stats-grid';
     statsCard.innerHTML = `
+      <div class="trainer-stat-card"><span>🧭 Player Level</span><strong>Lv.${prog.level}</strong></div>
+      <div class="trainer-stat-card" title="${escapeHtml(xpTitle)}"><span>⭐ Trainer XP</span><strong>${prog.xp} XP (${xpProgress})</strong></div>
       <div class="trainer-stat-card"><span>👣 Steps</span><strong>${toNonNegIntSafe(profile.stats?.steps)}</strong></div>
       <div class="trainer-stat-card"><span>🏆 Wins</span><strong>${toNonNegIntSafe(profile.stats?.battlesWon)}</strong></div>
       <div class="trainer-stat-card"><span>📖 Dex</span><strong>${caughtCount}/${allSpecies.length}</strong></div>
