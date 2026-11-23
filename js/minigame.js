@@ -269,17 +269,220 @@ export const WAVE_TEMPLATES = [
       { delay: 2.1, kind: 'star', yFrac: 0.68 },
     ],
   },
+  {
+    id: 'starlight_spiral',
+    name: 'Starlight Spiral',
+    items: [
+      { delay: 0.0, kind: 'star', yFrac: 0.5 },
+      { delay: 0.28, kind: 'star', yFrac: 0.34 },
+      { delay: 0.32, kind: 'cloud', yFrac: 0.64 },
+      { delay: 0.56, kind: 'star', yFrac: 0.22 },
+      { delay: 0.84, kind: 'bigstar', yFrac: 0.36 },
+      { delay: 0.92, kind: 'cloud', yFrac: 0.18 },
+      { delay: 1.12, kind: 'star', yFrac: 0.54 },
+      { delay: 1.24, kind: 'storm_orb', yFrac: 0.42 },
+      { delay: 1.4, kind: 'star', yFrac: 0.72 },
+      { delay: 1.68, kind: 'comet', yFrac: 0.8, speedMult: 1.2 },
+      { delay: 1.8, kind: 'cloud', yFrac: 0.48 },
+    ],
+  },
+  {
+    id: 'prism_slalom',
+    name: 'Prism Slalom',
+    items: [
+      { delay: 0.0, kind: 'cloud', yFrac: 0.24 },
+      { delay: 0.05, kind: 'star', yFrac: 0.46 },
+      { delay: 0.35, kind: 'star', yFrac: 0.62 },
+      { delay: 0.5, kind: 'cloud', yFrac: 0.8 },
+      { delay: 0.7, kind: 'bigstar', yFrac: 0.52 },
+      { delay: 0.9, kind: 'cloud', yFrac: 0.24 },
+      { delay: 1.05, kind: 'star', yFrac: 0.44 },
+      { delay: 1.28, kind: 'storm_orb', yFrac: 0.68 },
+      { delay: 1.4, kind: 'star', yFrac: 0.3 },
+      { delay: 1.65, kind: 'comet', yFrac: 0.24, speedMult: 1.22 },
+      { delay: 1.85, kind: 'cloud', yFrac: 0.58 },
+    ],
+  },
+  {
+    id: 'meteor_weave',
+    name: 'Starlight Weave',
+    items: [
+      { delay: 0.0, kind: 'star', yFrac: 0.32 },
+      { delay: 0.0, kind: 'star', yFrac: 0.68 },
+      { delay: 0.35, kind: 'cloud', yFrac: 0.5 },
+      { delay: 0.5, kind: 'comet', yFrac: 0.26, speedMult: 1.2 },
+      { delay: 0.82, kind: 'star', yFrac: 0.72 },
+      { delay: 1.05, kind: 'void_meteor', yFrac: 0.46 },
+      { delay: 1.15, kind: 'bigstar', yFrac: 0.24 },
+      { delay: 1.45, kind: 'cloud', yFrac: 0.78 },
+      { delay: 1.6, kind: 'star', yFrac: 0.56 },
+      { delay: 1.88, kind: 'star', yFrac: 0.38 },
+    ],
+  },
+  {
+    id: 'eclipse_gate',
+    name: 'Eclipse Twin Gate',
+    items: [
+      { delay: 0.0, kind: 'cloud', yFrac: 0.22 },
+      { delay: 0.0, kind: 'star', yFrac: 0.5 },
+      { delay: 0.0, kind: 'cloud', yFrac: 0.78 },
+      { delay: 0.42, kind: 'star', yFrac: 0.36 },
+      { delay: 0.42, kind: 'star', yFrac: 0.64 },
+      { delay: 0.85, kind: 'bigstar', yFrac: 0.5 },
+      { delay: 0.9, kind: 'storm_orb', yFrac: 0.24 },
+      { delay: 1.25, kind: 'cloud', yFrac: 0.5 },
+      { delay: 1.55, kind: 'comet', yFrac: 0.28, speedMult: 1.25 },
+      { delay: 1.55, kind: 'star', yFrac: 0.72 },
+    ],
+  },
+  {
+    id: 'shooting_gallery',
+    name: 'Shooting Star Cascade',
+    items: [
+      { delay: 0.0, kind: 'comet', yFrac: 0.22, speedMult: 1.26 },
+      { delay: 0.32, kind: 'comet', yFrac: 0.44, speedMult: 1.26 },
+      { delay: 0.4, kind: 'cloud', yFrac: 0.72 },
+      { delay: 0.68, kind: 'comet', yFrac: 0.66, speedMult: 1.26 },
+      { delay: 0.95, kind: 'cloud', yFrac: 0.26 },
+      { delay: 1.12, kind: 'bigstar', yFrac: 0.48 },
+      { delay: 1.35, kind: 'storm_orb', yFrac: 0.74 },
+      { delay: 1.55, kind: 'star', yFrac: 0.32 },
+      { delay: 1.85, kind: 'star', yFrac: 0.52 },
+    ],
+  },
+  {
+    id: 'crescent_moon',
+    name: 'Crescent Moon Arc',
+    items: [
+      { delay: 0.0, kind: 'star', yFrac: 0.2 },
+      { delay: 0.28, kind: 'star', yFrac: 0.34 },
+      { delay: 0.32, kind: 'cloud', yFrac: 0.62 },
+      { delay: 0.56, kind: 'bigstar', yFrac: 0.5 },
+      { delay: 0.84, kind: 'star', yFrac: 0.66 },
+      { delay: 0.96, kind: 'cloud', yFrac: 0.3 },
+      { delay: 1.12, kind: 'star', yFrac: 0.8 },
+      { delay: 1.38, kind: 'storm_orb', yFrac: 0.52 },
+      { delay: 1.55, kind: 'star', yFrac: 0.36 },
+      { delay: 1.85, kind: 'comet', yFrac: 0.22, speedMult: 1.22 },
+    ],
+  },
+  {
+    id: 'thunder_steppe',
+    name: 'Thundersteppe Hop',
+    items: [
+      { delay: 0.0, kind: 'star', yFrac: 0.72 },
+      { delay: 0.25, kind: 'storm_orb', yFrac: 0.38 },
+      { delay: 0.42, kind: 'star', yFrac: 0.72 },
+      { delay: 0.72, kind: 'cloud', yFrac: 0.76 },
+      { delay: 0.84, kind: 'bigstar', yFrac: 0.3 },
+      { delay: 1.12, kind: 'star', yFrac: 0.24 },
+      { delay: 1.25, kind: 'cloud', yFrac: 0.54 },
+      { delay: 1.5, kind: 'comet', yFrac: 0.34, speedMult: 1.24 },
+      { delay: 1.78, kind: 'void_meteor', yFrac: 0.66 },
+      { delay: 1.9, kind: 'star', yFrac: 0.26 },
+    ],
+  },
+  {
+    id: 'nebula_tunnel',
+    name: 'Nebula Sky Tunnel',
+    items: [
+      { delay: 0.0, kind: 'cloud', yFrac: 0.2 },
+      { delay: 0.0, kind: 'cloud', yFrac: 0.8 },
+      { delay: 0.15, kind: 'star', yFrac: 0.5 },
+      { delay: 0.48, kind: 'star', yFrac: 0.5 },
+      { delay: 0.78, kind: 'cloud', yFrac: 0.24 },
+      { delay: 0.78, kind: 'cloud', yFrac: 0.76 },
+      { delay: 0.84, kind: 'bigstar', yFrac: 0.5 },
+      { delay: 1.22, kind: 'storm_orb', yFrac: 0.54 },
+      { delay: 1.45, kind: 'star', yFrac: 0.3 },
+      { delay: 1.75, kind: 'comet', yFrac: 0.68, speedMult: 1.22 },
+    ],
+  },
+  {
+    id: 'zenith_stair',
+    name: 'Zenith Sky Stairs',
+    items: [
+      { delay: 0.0, kind: 'star', yFrac: 0.78 },
+      { delay: 0.26, kind: 'star', yFrac: 0.64 },
+      { delay: 0.36, kind: 'cloud', yFrac: 0.34 },
+      { delay: 0.54, kind: 'star', yFrac: 0.5 },
+      { delay: 0.82, kind: 'star', yFrac: 0.36 },
+      { delay: 0.92, kind: 'cloud', yFrac: 0.74 },
+      { delay: 1.1, kind: 'bigstar', yFrac: 0.24 },
+      { delay: 1.38, kind: 'storm_orb', yFrac: 0.48 },
+      { delay: 1.56, kind: 'star', yFrac: 0.62 },
+      { delay: 1.85, kind: 'comet', yFrac: 0.76, speedMult: 1.2 },
+    ],
+  },
+  {
+    id: 'aurora_zigzag',
+    name: 'Aurora Sky Pulse',
+    items: [
+      { delay: 0.0, kind: 'star', yFrac: 0.26 },
+      { delay: 0.26, kind: 'cloud', yFrac: 0.48 },
+      { delay: 0.42, kind: 'star', yFrac: 0.74 },
+      { delay: 0.68, kind: 'void_meteor', yFrac: 0.32 },
+      { delay: 0.82, kind: 'bigstar', yFrac: 0.7 },
+      { delay: 1.08, kind: 'cloud', yFrac: 0.52 },
+      { delay: 1.22, kind: 'star', yFrac: 0.26 },
+      { delay: 1.48, kind: 'storm_orb', yFrac: 0.68 },
+      { delay: 1.65, kind: 'comet', yFrac: 0.28, speedMult: 1.24 },
+      { delay: 1.9, kind: 'star', yFrac: 0.48 },
+    ],
+  },
+  {
+    id: 'supernova_ring',
+    name: 'Supernova Star Ring',
+    items: [
+      { delay: 0.0, kind: 'star', yFrac: 0.5 },
+      { delay: 0.28, kind: 'star', yFrac: 0.28 },
+      { delay: 0.28, kind: 'star', yFrac: 0.72 },
+      { delay: 0.56, kind: 'cloud', yFrac: 0.5 },
+      { delay: 0.65, kind: 'bigstar', yFrac: 0.22 },
+      { delay: 0.65, kind: 'bigstar', yFrac: 0.78 },
+      { delay: 1.0, kind: 'storm_orb', yFrac: 0.5 },
+      { delay: 1.32, kind: 'star', yFrac: 0.34 },
+      { delay: 1.32, kind: 'star', yFrac: 0.66 },
+      { delay: 1.68, kind: 'cloud', yFrac: 0.24 },
+      { delay: 1.68, kind: 'cloud', yFrac: 0.76 },
+    ],
+  },
+  {
+    id: 'astral_crosswind',
+    name: 'Astral Jetstream',
+    items: [
+      { delay: 0.0, kind: 'comet', yFrac: 0.5, speedMult: 1.28 },
+      { delay: 0.3, kind: 'cloud', yFrac: 0.28 },
+      { delay: 0.42, kind: 'star', yFrac: 0.64 },
+      { delay: 0.7, kind: 'star', yFrac: 0.76 },
+      { delay: 0.88, kind: 'void_meteor', yFrac: 0.44 },
+      { delay: 1.05, kind: 'bigstar', yFrac: 0.24 },
+      { delay: 1.32, kind: 'cloud', yFrac: 0.72 },
+      { delay: 1.48, kind: 'storm_orb', yFrac: 0.48 },
+      { delay: 1.72, kind: 'comet', yFrac: 0.28, speedMult: 1.24 },
+      { delay: 1.95, kind: 'star', yFrac: 0.62 },
+    ],
+  },
 ];
 
 const SKY_PALETTES = [
   { name: 'Starlight Village Dusk', top: '#0f172a', mid: '#312e81', bottom: '#4c1d95', accent: '#c084fc' },
   { name: 'Whispering Canopy', top: '#064e3b', mid: '#0f766e', bottom: '#1e3a8a', accent: '#4ade80' },
+  { name: 'Crystal Cavern Glow', top: '#1e1b4b', mid: '#6d28d9', bottom: '#0f172a', accent: '#e879f9' },
   { name: 'Sapphire Horizon', top: '#0c4a6e', mid: '#0284c7', bottom: '#1e1b4b', accent: '#38bdf8' },
   { name: 'Ember Sunset', top: '#431407', mid: '#c2410c', bottom: '#7c2d12', accent: '#fb923c' },
   { name: 'Starfall Aurora', top: '#1e1b4b', mid: '#0f766e', bottom: '#3b0764', accent: '#67e8f9' },
   { name: 'Celestial Blossom', top: '#500724', mid: '#9d174d', bottom: '#312e81', accent: '#f9a8d4' },
   { name: 'Sunstone Mirage', top: '#451a03', mid: '#b45309', bottom: '#1e293b', accent: '#fde047' },
+  { name: 'Glowspore Twilight', top: '#022c22', mid: '#115e59', bottom: '#312e81', accent: '#2dd4bf' },
   { name: 'Astral Citadel', top: '#090d1a', mid: '#4338ca', bottom: '#0f172a', accent: '#a78bfa' },
+  { name: 'Thundersteppe Storm', top: '#1e293b', mid: '#854d0e', bottom: '#0f172a', accent: '#facc15' },
+  { name: 'Abyssal Pearl Sky', top: '#082f49', mid: '#0e7490', bottom: '#1e1b4b', accent: '#7dd3fc' },
+  { name: 'Chrono Relic Sunset', top: '#2e1065', mid: '#b45309', bottom: '#172554', accent: '#fbbf24' },
+  { name: 'Mythic Rift Nebula', top: '#3b0764', mid: '#a21caf', bottom: '#0f172a', accent: '#f0abfc' },
+  { name: 'Faeveldt Rose Dawn', top: '#4c0519', mid: '#db2777', bottom: '#312e81', accent: '#fbcfe8' },
+  { name: 'Sunburst Alola Horizon', top: '#7c2d12', mid: '#ea580c', bottom: '#0e7490', accent: '#fed7aa' },
+  { name: 'Iron Crown Summit', top: '#0f172a', mid: '#334155', bottom: '#1e3a8a', accent: '#93c5fd' },
   { name: 'Terastal Prism', top: '#1e1b4b', mid: '#0369a1', bottom: '#831843', accent: '#f472b6' },
 ];
 
@@ -317,6 +520,10 @@ export class StarlightMinigame {
 
     this.waveDeck = [];
     this.lastWaveId = null;
+    this.lastOpeningWaveId = null;
+    this.recentWaveIds = [];
+    this.runSkyOffset = 0;
+    this.lastRunSkyOffset = null;
     this.currentWave = null;
     this.pendingSpawns = [];
     this.waveElapsed = 0;
@@ -433,7 +640,7 @@ export class StarlightMinigame {
         } catch {
           // Ignore capture failure on synthetic events
         }
-        this._spawnTrailParticles(PLAYER_X, this.playerY, 4);
+        this._spawnTrailParticles(PLAYER_X, this.playerY, 8, true);
       });
 
       this.canvas.addEventListener('pointermove', (e) => {
@@ -515,23 +722,50 @@ export class StarlightMinigame {
     return Boolean(this._open && (!this.modalEl || !this.modalEl.hidden));
   }
 
-  _refillWaveDeck() {
+  _refillWaveDeck(extraAvoidIds = []) {
     const deck = WAVE_TEMPLATES.map((tpl) => ({ ...tpl }));
     for (let i = deck.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
       [deck[i], deck[j]] = [deck[j], deck[i]];
     }
-    if (this.lastWaveId && deck.length > 1 && deck[deck.length - 1].id === this.lastWaveId) {
-      const swapIdx = Math.floor(Math.random() * (deck.length - 1));
-      const lastIdx = deck.length - 1;
-      [deck[lastIdx], deck[swapIdx]] = [deck[swapIdx], deck[lastIdx]];
+    const recentAvoid = new Set([
+      this.lastWaveId,
+      ...this.recentWaveIds.slice(-4),
+      ...extraAvoidIds,
+    ].filter(Boolean));
+    if (deck.length > 1) {
+      const checkTailCount = Math.min(4, deck.length - 1);
+      for (let offset = 0; offset < checkTailCount; offset++) {
+        const tailIdx = deck.length - 1 - offset;
+        if (!recentAvoid.has(deck[tailIdx].id)) continue;
+        const swapIdx = deck.findIndex((item, idx) => idx < tailIdx && !recentAvoid.has(item.id));
+        if (swapIdx !== -1) {
+          [deck[tailIdx], deck[swapIdx]] = [deck[swapIdx], deck[tailIdx]];
+        }
+      }
+      if (this.lastWaveId && deck[deck.length - 1].id === this.lastWaveId) {
+        const altIdx = deck.findIndex((item) => item.id !== this.lastWaveId);
+        if (altIdx !== -1) {
+          const lastIdx = deck.length - 1;
+          [deck[lastIdx], deck[altIdx]] = [deck[altIdx], deck[lastIdx]];
+        }
+      }
     }
     this.waveDeck = deck;
   }
 
-  drawNextWave() {
+  drawNextWave(isOpening = false) {
+    const extraAvoid = isOpening && this.lastOpeningWaveId ? [this.lastOpeningWaveId] : [];
     if (!Array.isArray(this.waveDeck) || this.waveDeck.length === 0) {
-      this._refillWaveDeck();
+      this._refillWaveDeck(extraAvoid);
+    }
+    const immediateAvoid = new Set([this.lastWaveId, ...extraAvoid].filter(Boolean));
+    if (this.waveDeck.length > 1 && immediateAvoid.has(this.waveDeck[this.waveDeck.length - 1]?.id)) {
+      const swapIdx = this.waveDeck.findIndex((w) => !immediateAvoid.has(w.id));
+      if (swapIdx !== -1) {
+        const lastIdx = this.waveDeck.length - 1;
+        [this.waveDeck[lastIdx], this.waveDeck[swapIdx]] = [this.waveDeck[swapIdx], this.waveDeck[lastIdx]];
+      }
     }
     let next = this.waveDeck.pop();
     if (this.lastWaveId && next?.id === this.lastWaveId && this.waveDeck.length > 0) {
@@ -540,11 +774,18 @@ export class StarlightMinigame {
       next = alt;
     }
     this.lastWaveId = next?.id || null;
+    if (isOpening && this.lastWaveId) {
+      this.lastOpeningWaveId = this.lastWaveId;
+    }
+    if (this.lastWaveId) {
+      this.recentWaveIds = [...this.recentWaveIds.filter((id) => id !== this.lastWaveId), this.lastWaveId].slice(-8);
+    }
     return next;
   }
 
   getSkyTheme(wave = this.wave) {
-    const idx = Math.floor(Math.max(0, (Number(wave) || 1) - 1) / 2) % SKY_PALETTES.length;
+    const waveIdx = Math.max(0, (Number(wave) || 1) - 1);
+    const idx = ((Number(this.runSkyOffset) || 0) + waveIdx) % SKY_PALETTES.length;
     return SKY_PALETTES[idx];
   }
 
@@ -741,6 +982,15 @@ export class StarlightMinigame {
 
     this.entities = [];
     this.particles = [];
+    let skyStart = Math.floor(Math.random() * SKY_PALETTES.length);
+    if (SKY_PALETTES.length > 1 && skyStart === this.lastRunSkyOffset) {
+      skyStart = (skyStart + 1 + Math.floor(Math.random() * (SKY_PALETTES.length - 1))) % SKY_PALETTES.length;
+    }
+    this.runSkyOffset = skyStart;
+    this.lastRunSkyOffset = skyStart;
+    if (typeof document !== 'undefined' && (document.activeElement === this.replayBtn || document.activeElement === this.doneBtn)) {
+      document.activeElement.blur();
+    }
     if (this.replayBtn) {
       this.replayBtn.disabled = false;
       this.replayBtn.removeAttribute('aria-disabled');
@@ -791,9 +1041,10 @@ export class StarlightMinigame {
 
   _beginWave(waveNum) {
     this.wave = waveNum;
-    this.currentWave = this.drawNextWave();
+    this.currentWave = this.drawNextWave(waveNum === 1);
     this.waveElapsed = 0;
     this.waveBannerTimer = 1.8;
+    this._spawnWaveFanfareParticles(waveNum);
 
     const baseItems = Array.isArray(this.currentWave?.items) ? this.currentWave.items : [];
     const flip = waveNum % 2 === 0;
@@ -901,7 +1152,19 @@ export class StarlightMinigame {
     this.dashCooldown = 4.6;
     this.magnetTimer = Math.max(this.magnetTimer, 1.15);
     this.audio?.playArcadeBoost?.();
-    this._spawnTrailParticles(PLAYER_X, this.playerY, 18, true);
+    this._spawnTrailParticles(PLAYER_X, this.playerY, 36, true);
+    this.particles.push({
+      x: PLAYER_X,
+      y: this.playerY,
+      vx: 0,
+      vy: 0,
+      life: 0,
+      maxLife: 0.48,
+      size: 26,
+      maxSize: 82,
+      color: '#fde047',
+      shape: 'ring',
+    });
     this.syncHud();
     return true;
   }
@@ -979,23 +1242,77 @@ export class StarlightMinigame {
   _spawnTrailParticles(x, y, count = 2, burst = false) {
     const baseColor = this.leadTypeInfo?.color || '#38bdf8';
     const colors = this.dashTimer > 0 || this.leadMon?.isShiny
-      ? [baseColor, '#fde047', '#f472b6', '#ffffff']
-      : [baseColor, '#bae6fd', '#fde047'];
+      ? [baseColor, '#fde047', '#f472b6', '#ffffff', '#67e8f9']
+      : [baseColor, '#bae6fd', '#fde047', '#ffffff'];
+    const shapes = burst ? ['star', 'spark', 'dot'] : ['dot', 'spark'];
 
     for (let i = 0; i < count; i++) {
-      const angle = burst ? (Math.PI * 2 * i) / Math.max(1, count) : Math.PI + (Math.random() - 0.5) * 0.9;
-      const speed = burst ? 90 + Math.random() * 140 : 60 + Math.random() * 80;
+      const angle = burst ? (Math.PI * 2 * i) / Math.max(1, count) + (Math.random() - 0.5) * 0.25 : Math.PI + (Math.random() - 0.5) * 0.9;
+      const speed = burst ? 90 + Math.random() * 165 : 65 + Math.random() * 85;
       this.particles.push({
         x: x - (burst ? 0 : 18),
         y: y + (Math.random() - 0.5) * 14,
         vx: Math.cos(angle) * speed,
         vy: Math.sin(angle) * speed,
         life: 0,
-        maxLife: burst ? 0.55 : 0.42,
-        size: burst ? 4.5 : 3.2,
+        maxLife: burst ? 0.58 + Math.random() * 0.18 : 0.44,
+        size: burst ? 4.8 + (i % 3) * 0.9 : 3.2,
         color: colors[i % colors.length],
+        shape: shapes[i % shapes.length],
       });
     }
+  }
+
+  _spawnWaveFanfareParticles(waveNum = 1) {
+    const sky = this.getSkyTheme(waveNum);
+    const colors = [sky.accent || '#38bdf8', '#fde047', '#f472b6', '#ffffff', '#67e8f9'];
+    const count = waveNum > 1 ? 28 : 16;
+    for (let i = 0; i < count; i++) {
+      const y = 26 + ((CANVAS_H - 52) * i) / Math.max(1, count - 1) + (Math.random() - 0.5) * 18;
+      this.particles.push({
+        x: waveNum > 1 ? CANVAS_W - 24 - (i % 4) * 32 : PLAYER_X + (Math.random() - 0.3) * 80,
+        y,
+        vx: waveNum > 1 ? -(180 + Math.random() * 160) : 70 + Math.random() * 120,
+        vy: (Math.random() - 0.5) * 60,
+        life: 0,
+        maxLife: 0.72 + Math.random() * 0.22,
+        size: 4.5 + (i % 3) * 1.2,
+        color: colors[i % colors.length],
+        shape: i % 2 === 0 ? 'star' : 'spark',
+      });
+    }
+  }
+
+  _spawnVictoryBurstParticles() {
+    const sky = this.getSkyTheme(this.wave);
+    const colors = ['#fde047', '#f472b6', '#38bdf8', sky.accent || '#a78bfa', '#ffffff'];
+    for (let i = 0; i < 44; i++) {
+      const angle = (Math.PI * 2 * i) / 44;
+      const speed = 110 + (i % 5) * 48;
+      this.particles.push({
+        x: PLAYER_X + ((i % 3) - 1) * 24,
+        y: this.playerY,
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed,
+        life: 0,
+        maxLife: 0.85,
+        size: 5 + (i % 3) * 1.2,
+        color: colors[i % colors.length],
+        shape: i % 3 === 0 ? 'star' : 'spark',
+      });
+    }
+    this.particles.push({
+      x: PLAYER_X,
+      y: this.playerY,
+      vx: 0,
+      vy: 0,
+      life: 0,
+      maxLife: 0.65,
+      size: 24,
+      maxSize: 120,
+      color: '#fde047',
+      shape: 'ring',
+    });
   }
 
   update(dt) {
@@ -1043,8 +1360,8 @@ export class StarlightMinigame {
     this.playerY = Math.max(PLAYER_MIN_Y, Math.min(PLAYER_MAX_Y, this.playerY));
 
     // Ambient starlight trail behind Lead Pokémon
-    if (Math.random() < (this.dashTimer > 0 ? 0.95 : 0.45)) {
-      this._spawnTrailParticles(PLAYER_X, this.playerY, this.dashTimer > 0 ? 2 : 1, false);
+    if (Math.random() < (this.dashTimer > 0 ? 0.98 : 0.6)) {
+      this._spawnTrailParticles(PLAYER_X, this.playerY, this.dashTimer > 0 ? 4 : 2, false);
     }
 
     // Background twinkling stars scroll
@@ -1121,7 +1438,8 @@ export class StarlightMinigame {
             this.hitInvulnTimer = 0.55;
             this.shakeTimer = 0.22;
             this.audio?.playArcadeBump?.();
-            this._spawnTrailParticles(ent.x, ent.y, 14, true);
+            this._spawnTrailParticles(ent.x, ent.y, 28, true);
+            this.particles.push({ x: ent.x, y: ent.y, vx: 0, vy: 0, life: 0, maxLife: 0.42, size: 18, maxSize: 74, color: '#f87171', shape: 'ring' });
             this.entities.splice(i, 1);
           } else if (this.hitInvulnTimer <= 0) {
             this.hearts = Math.max(0, this.hearts - 1);
@@ -1130,7 +1448,7 @@ export class StarlightMinigame {
             this.hitInvulnTimer = 1.0;
             this.shakeTimer = 0.28;
             this.audio?.playArcadeBump?.();
-            this._spawnTrailParticles(PLAYER_X, this.playerY, 12, true);
+            this._spawnTrailParticles(PLAYER_X, this.playerY, 24, true);
             this.entities.splice(i, 1);
             if (this.hearts <= 0) {
               this.endRun();
@@ -1144,7 +1462,7 @@ export class StarlightMinigame {
           if (this.dashTimer > 0) {
             this.score += ent.kind === 'storm_orb' ? 8 : 5;
             this.audio?.playArcadeStar?.(this.combo);
-            this._spawnTrailParticles(ent.x, ent.y, 10, true);
+            this._spawnTrailParticles(ent.x, ent.y, 20, true);
             this.entities.splice(i, 1);
           } else if (this.hitInvulnTimer <= 0) {
             this.hearts = Math.max(0, this.hearts - 1);
@@ -1153,7 +1471,7 @@ export class StarlightMinigame {
             this.hitInvulnTimer = 1.0;
             this.shakeTimer = 0.28;
             this.audio?.playArcadeBump?.();
-            this._spawnTrailParticles(PLAYER_X, this.playerY, 12, true);
+            this._spawnTrailParticles(PLAYER_X, this.playerY, 24, true);
             this.entities.splice(i, 1);
             if (this.hearts <= 0) {
               this.endRun();
@@ -1167,7 +1485,8 @@ export class StarlightMinigame {
           this.hearts = Math.min(MAX_HEARTS, this.hearts + 1);
           this.score += 15;
           this.audio?.playHealChime?.();
-          this._spawnTrailParticles(ent.x, ent.y, 10, true);
+          this._spawnTrailParticles(ent.x, ent.y, 20, true);
+          this.particles.push({ x: ent.x, y: ent.y, vx: 0, vy: 0, life: 0, maxLife: 0.45, size: 16, maxSize: 64, color: '#f472b6', shape: 'ring' });
           this.entities.splice(i, 1);
           continue;
         }
@@ -1182,7 +1501,10 @@ export class StarlightMinigame {
           this.magnetTimer = Math.max(this.magnetTimer, 0.85);
         }
         this.audio?.playArcadeStar?.(this.combo);
-        this._spawnTrailParticles(ent.x, ent.y, ent.kind === 'bigstar' ? 12 : 6, true);
+        this._spawnTrailParticles(ent.x, ent.y, ent.kind === 'bigstar' ? 24 : 12, true);
+        if (ent.kind === 'bigstar') {
+          this.particles.push({ x: ent.x, y: ent.y, vx: 0, vy: 0, life: 0, maxLife: 0.4, size: 14, maxSize: 58, color: '#fde047', shape: 'ring' });
+        }
         this.entities.splice(i, 1);
         continue;
       }
@@ -1323,6 +1645,10 @@ export class StarlightMinigame {
     if (this.runEnded) return null;
     this.runEnded = true;
     this.paused = false;
+    this.keysHeld.clear();
+    this.pointerActive = false;
+    this.activePointerId = null;
+    this.pointerTargetY = null;
     this._stopLoop();
     if (typeof document !== 'undefined' && (document.activeElement === this.pauseBtn || document.activeElement === this.dashBtn)) {
       document.activeElement.blur();
@@ -1415,6 +1741,8 @@ export class StarlightMinigame {
     }
 
     if (hasRewards) {
+      this._spawnVictoryBurstParticles();
+      this.render(typeof performance !== 'undefined' ? performance.now() : Date.now());
       this.audio?.playArcadeUnlockFanfare?.();
     } else {
       this.audio?.playMenuBlip?.(380);
@@ -1508,14 +1836,37 @@ export class StarlightMinigame {
     ctx.closePath();
     ctx.fill();
 
-    // Particles (starlight trail & bursts)
+    // Particles (starlight trail, stars, sparks & shockwave rings)
     for (const p of this.particles) {
-      const alpha = Math.max(0, 1 - p.life / p.maxLife);
+      const progress = Math.min(1, Math.max(0, p.life / Math.max(0.001, p.maxLife)));
+      const alpha = Math.max(0, 1 - progress);
+      ctx.save();
       ctx.globalAlpha = alpha;
-      ctx.fillStyle = p.color;
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, p.size * (1 - p.life / (p.maxLife * 1.4)), 0, Math.PI * 2);
-      ctx.fill();
+      if (p.shape === 'ring') {
+        const radius = p.size + ((p.maxSize || 70) - p.size) * progress;
+        ctx.strokeStyle = p.color;
+        ctx.lineWidth = Math.max(1, 3 * (1 - progress));
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, radius, 0, Math.PI * 2);
+        ctx.stroke();
+      } else if (p.shape === 'star') {
+        const r = Math.max(1.5, p.size * (1 - progress * 0.45));
+        ctx.fillStyle = p.color;
+        this._drawStarPath(ctx, p.x, p.y, r * 1.4, r * 0.65, 4);
+        ctx.fill();
+      } else if (p.shape === 'spark') {
+        ctx.translate(p.x, p.y);
+        ctx.rotate(Math.atan2(p.vy, p.vx));
+        ctx.fillStyle = p.color;
+        const len = Math.max(3, p.size * 2.2 * (1 - progress * 0.5));
+        ctx.fillRect(-len * 0.5, -1.2, len, 2.4);
+      } else {
+        ctx.fillStyle = p.color;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, Math.max(1, p.size * (1 - progress * 0.65)), 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.restore();
     }
     ctx.globalAlpha = 1;
 
@@ -1820,7 +2171,11 @@ export class StarlightMinigame {
       charges: arcadeState.charges,
       rafActive: this.rafId !== null,
       waveDeckRemaining: this.waveDeck.length,
+      waveTemplateCount: WAVE_TEMPLATES.length,
+      skyPaletteCount: SKY_PALETTES.length,
       lastWaveId: this.lastWaveId,
+      lastOpeningWaveId: this.lastOpeningWaveId,
+      recentWaveCount: this.recentWaveIds.length,
       score: this.score,
       wave: this.wave,
       hearts: this.hearts,

@@ -163,6 +163,7 @@ class GameApp {
     this.resetStatusEl = document.getElementById('reset-status-msg');
 
     this.dialogueOpen = false;
+    this._dialogueOpenedAtMs = 0;
     this._wasInBattle = false;
     this._wasModalOpen = false;
     this._lastCompassHidden = null;
@@ -177,6 +178,7 @@ class GameApp {
     this._pendingShrineData = null;
     this._preBattleShrineTrialCount = null;
     this.resetRedirectTimer = null;
+    this._resetHoldCancels = [];
     this.encounterTransitioning = false;
     this.encounterTimer = null;
     this.encounterToken = 0;
@@ -590,6 +592,7 @@ class GameApp {
       this.dialogueOpen &&
       !this.battle.active &&
       !this.encounterTransitioning &&
+      !this.warpTransitioning &&
       !this.pokedex.isOpen() &&
       !this.minigame?.isOpen() &&
       !this.isSettingsOpen(),
@@ -616,7 +619,9 @@ class GameApp {
     });
 
     this.overworldCanvasEl?.addEventListener('click', () => {
-      if (performance.now() - lastCanvasPointerUpMs < 140) return;
+      const now = performance.now();
+      if (now - lastCanvasPointerUpMs < 140) return;
+      if (now - (this._dialogueOpenedAtMs || 0) < 180) return;
       if (canCanvasDismissDialogue()) {
         this.closeDialogue();
       }
@@ -680,10 +685,11 @@ class GameApp {
         this.resetStatusEl.textContent = 'Hold steady for 3 full seconds to confirm reset.';
       }
     };
+    this._resetHoldCancels.push(() => cancelHold(false));
 
     const tick = (now) => {
-      if (!holding) {
-        rafId = null;
+      if (!holding || !this.isSettingsOpen()) {
+        cancelHold(false);
         return;
       }
       const elapsed = now - startTime;
@@ -856,15 +862,26 @@ class GameApp {
     };
     const colors = palettes[tone] || palettes.gold;
 
-    for (let i = 0; i < 26; i++) {
+    const halo = document.createElement('div');
+    halo.className = 'celebration-halo';
+    halo.setAttribute('aria-hidden', 'true');
+    layer.appendChild(halo);
+
+    const confettiCount = 56;
+    const shapes = ['', 'is-star', 'is-diamond', 'is-spark'];
+    for (let i = 0; i < confettiCount; i++) {
       const conf = document.createElement('span');
-      conf.className = `celebration-confetti${i % 3 === 0 ? ' is-star' : ''}`;
-      const angle = (Math.PI * 2 * i) / 26 + ((i % 2) * 0.14);
-      const dist = 70 + (i % 5) * 34;
+      const shapeCls = shapes[i % shapes.length];
+      conf.className = `celebration-confetti${shapeCls ? ` ${shapeCls}` : ''}`;
+      const isOuter = i >= 28;
+      const ringIndex = isOuter ? i - 28 : i;
+      const ringTotal = 28;
+      const angle = (Math.PI * 2 * ringIndex) / ringTotal + (isOuter ? 0.11 : 0) + ((i % 3) * 0.08);
+      const dist = isOuter ? 128 + (i % 6) * 26 : 64 + (i % 5) * 24;
       conf.style.setProperty('--dx', `${Math.round(Math.cos(angle) * dist)}px`);
-      conf.style.setProperty('--dy', `${Math.round(Math.sin(angle) * dist - 28)}px`);
-      conf.style.setProperty('--rot', `${160 + (i * 37) % 240}deg`);
-      conf.style.setProperty('--confetti-delay', `${(i % 6) * 28}ms`);
+      conf.style.setProperty('--dy', `${Math.round(Math.sin(angle) * dist - (isOuter ? 42 : 24))}px`);
+      conf.style.setProperty('--rot', `${160 + (i * 43) % 320}deg`);
+      conf.style.setProperty('--confetti-delay', `${(isOuter ? 50 : 0) + (i % 7) * 24}ms`);
       conf.style.setProperty('--confetti-color', colors[i % colors.length]);
       layer.appendChild(conf);
     }
@@ -899,6 +916,17 @@ class GameApp {
   }
 
   showBootScreen() {
+    if (this.resetRedirectTimer) {
+      clearTimeout(this.resetRedirectTimer);
+      this.resetRedirectTimer = null;
+    }
+    for (const cancel of this._resetHoldCancels) cancel();
+    if (this.biomeBannerTimer) {
+      clearTimeout(this.biomeBannerTimer);
+      this.biomeBannerTimer = null;
+    }
+    if (this.biomeBannerEl) this.biomeBannerEl.hidden = true;
+    if (this.interactPillEl) this.interactPillEl.hidden = true;
     this.cancelEncounterTransition();
     this.cancelWarpTransition();
     this.clearCelebration();
@@ -947,6 +975,10 @@ class GameApp {
   }
 
   selectTrainer(trainerId) {
+    if (this.resetRedirectTimer) {
+      clearTimeout(this.resetRedirectTimer);
+      this.resetRedirectTimer = null;
+    }
     this.cancelWarpTransition();
     this._starterFallbackStyle = null;
     this._starterFallbackAcc = null;
@@ -1660,6 +1692,7 @@ class GameApp {
       this.gameShellEl?.hidden ||
       this.battle?.active ||
       this.encounterTransitioning ||
+      this.warpTransitioning ||
       this.dialogueOpen ||
       this.pokedex?.isOpen() ||
       this.minigame?.isOpen() ||
@@ -1751,6 +1784,7 @@ class GameApp {
     const profile = storage.getActiveProfile();
     const trainerName = TRAINERS[profile?.trainerId]?.name || 'Trainer';
     const text = message.replaceAll('{trainer}', trainerName);
+    this._dialogueOpenedAtMs = typeof performance !== 'undefined' ? performance.now() : Date.now();
     this.worldDialogueTextEl.textContent = text;
     this.worldDialogueEl.hidden = false;
     this.dialogueOpen = true;
@@ -1899,9 +1933,96 @@ class GameApp {
   }
 
   handleDiscoveryNode(node = {}) {
-    if (this.battle?.active || this.encounterTransitioning) return;
+    if (
+      this.battle?.active ||
+      this.encounterTransitioning ||
+      this.warpTransitioning ||
+      this.pokedex?.isOpen() ||
+      this.minigame?.isOpen() ||
+      this.isSettingsOpen()
+    ) {
+      return;
+    }
     const profile = storage.getActiveProfile();
     if (!profile) return;
+
+    const tx = Number.isFinite(Number(node?.x)) ? Number(node.x) : profile.pos.x;
+    const ty = Number.isFinite(Number(node?.y)) ? Number(node.y) : profile.pos.y;
+    const kind = node?.kind === 'shimmer' || node?.kind === 'mystery_cry' ? node.kind : 'starfall';
+
+    if (kind === 'shimmer') {
+      storage.addRewards({ starShards: 2, cheerCharges: 1 });
+      if (typeof audio.playDiscoveryChime === 'function') {
+        audio.playDiscoveryChime('shimmer');
+      } else if (typeof audio.playShinySparkle === 'function') {
+        audio.playShinySparkle();
+      } else {
+        audio.playLevelUp?.();
+      }
+      this.overworld?.triggerCelebrationBurst?.(tx, ty, 'gold');
+      this.triggerCelebration({
+        icon: '✨',
+        title: 'SHIMMER DEW FOUND!',
+        subtitle: '+2 ✨ Star Shards & +1 💖 Cheer Heart!',
+        tone: 'gold',
+      });
+      this.refreshHud();
+      this.openDialogue('✨ Radiant Shimmer Dew sparkled on the trail! You gathered +2 ✨ Star Shards & +1 💖 Cheer Heart!');
+      return;
+    }
+
+    if (kind === 'mystery_cry') {
+      const biomeId = (node?.biomeId && BIOMES[node.biomeId])
+        ? node.biomeId
+        : (getBiomeAt(tx, ty)?.id || 'forest');
+      const seenIds = new Set();
+      const rawSeen = profile.pokedex?.seen;
+      if (Array.isArray(rawSeen)) {
+        for (const s of rawSeen) {
+          const num = resolveValidSpeciesId(s);
+          if (num !== null) seenIds.add(num);
+        }
+      } else if (rawSeen && typeof rawSeen === 'object') {
+        for (const [k, v] of Object.entries(rawSeen)) {
+          if (!v) continue;
+          const num = resolveValidSpeciesId(k);
+          if (num !== null) seenIds.add(num);
+        }
+      }
+      const biomeEncounters = (BIOMES[biomeId]?.encounters || [])
+        .map((e) => resolveValidSpeciesId(e?.id ?? e?.speciesId ?? e))
+        .filter((id) => id !== null);
+      const unseenBiome = biomeEncounters.filter((id) => !seenIds.has(id));
+      const pool = unseenBiome.length > 0 ? unseenBiome : biomeEncounters;
+      const speciesId = pool.length > 0
+        ? pool[Math.floor(Math.random() * pool.length)]
+        : 25;
+      const speciesName = SPECIES[speciesId]?.name || 'Pikachu';
+
+      storage.recordSeen?.(speciesId);
+      if (typeof storage.addStarShards === 'function') {
+        storage.addStarShards(2);
+      } else {
+        storage.addRewards({ starShards: 2 });
+      }
+      if (typeof audio.playPokemonCry === 'function') {
+        audio.playPokemonCry(speciesId);
+      } else if (typeof audio.playDiscoveryChime === 'function') {
+        audio.playDiscoveryChime('mystery_cry');
+      } else {
+        audio.playArcadeStar?.(3);
+      }
+      this.overworld?.triggerCelebrationBurst?.(tx, ty, 'starlight');
+      this.triggerCelebration({
+        icon: '🎵',
+        title: 'MYSTERY POKÉMON ECHO!',
+        subtitle: `Heard ${speciesName} nearby • +2 ✨ Star Shards!`,
+        tone: 'starlight',
+      });
+      this.refreshHud();
+      this.openDialogue(`🎵 A mysterious Pokémon echo rang out nearby! You spotted ${speciesName}'s tracks and collected +2 ✨ Star Shards!`);
+      return;
+    }
 
     if (typeof storage.addStarShards === 'function') {
       storage.addStarShards(2);
@@ -1909,7 +2030,9 @@ class GameApp {
       storage.addRewards({ starShards: 2 });
     }
 
-    if (typeof audio.playArcadeStar === 'function') {
+    if (typeof audio.playDiscoveryChime === 'function') {
+      audio.playDiscoveryChime('starfall');
+    } else if (typeof audio.playArcadeStar === 'function') {
       audio.playArcadeStar(3);
     } else if (typeof audio.playChestFanfare === 'function') {
       audio.playChestFanfare();
@@ -1917,8 +2040,6 @@ class GameApp {
       audio.playLevelUp?.();
     }
 
-    const tx = Number.isFinite(Number(node?.x)) ? Number(node.x) : profile.pos.x;
-    const ty = Number.isFinite(Number(node?.y)) ? Number(node.y) : profile.pos.y;
     this.overworld?.triggerCelebrationBurst?.(tx, ty, 'starlight');
     this.triggerCelebration({
       icon: '☄️',
@@ -1931,9 +2052,21 @@ class GameApp {
   }
 
   handleWorldInteract(target) {
-    if (!target) return;
-    audio.playMenuBlip(700);
+    if (
+      !target ||
+      this.gameShellEl?.hidden ||
+      this.battle?.active ||
+      this.encounterTransitioning ||
+      this.warpTransitioning ||
+      this.pokedex?.isOpen() ||
+      this.minigame?.isOpen() ||
+      this.isSettingsOpen()
+    ) {
+      return;
+    }
     const profile = storage.getActiveProfile();
+    if (!profile) return;
+    audio.playMenuBlip(700);
     const { tx, ty } = this._resolveTargetCoords(target, profile);
 
     if (target.type === 'sign') {
@@ -1949,6 +2082,10 @@ class GameApp {
           audio.playLevelUp?.();
         }
         storage.addRewards(chest.rewards);
+        const newBadges = storage.evaluateBadges?.(true) || [];
+        if (newBadges.length > 0) {
+          this.showBadgeToast(newBadges);
+        }
         this.overworld.refreshInteractHint();
         this.refreshHud();
         this.overworld?.triggerCelebrationBurst?.(tx, ty, 'gold');
@@ -2019,6 +2156,17 @@ class GameApp {
   }
 
   handleHealSpot(explicitInteract = false) {
+    if (
+      this.gameShellEl?.hidden ||
+      this.battle?.active ||
+      this.encounterTransitioning ||
+      this.warpTransitioning ||
+      this.pokedex?.isOpen() ||
+      this.minigame?.isOpen() ||
+      this.isSettingsOpen()
+    ) {
+      return;
+    }
     const profile = storage.getActiveProfile();
     if (!profile) return;
     const anyLowPp = profile.team.some((m) => {
@@ -2062,8 +2210,6 @@ class GameApp {
     this.overworld?.clearTouchNavigation?.();
     this.syncControlVisibility();
     this.syncOverworldPause();
-    audio.stopBGM();
-    audio.playEncounterAlert();
 
     const mode = ['wild', 'rare', 'rival', 'shrine'].includes(meta?.mode)
       ? meta.mode
@@ -2080,12 +2226,18 @@ class GameApp {
       rival: '⚔️ RIVAL DUEL!',
       shrine: '⛩️ SHRINE GUARDIAN!',
     };
+    const customCallout = typeof meta?.calloutText === 'string' && meta.calloutText.trim()
+      ? meta.calloutText.trim()
+      : '';
+
+    audio.stopBGM();
+    audio.playEncounterAlert(mode);
 
     try {
       if (this.encounterFlashEl) {
         this.encounterFlashEl.dataset.mode = mode;
         if (this.encounterCalloutEl) {
-          this.encounterCalloutEl.textContent = modeLabels[mode] || modeLabels.wild;
+          this.encounterCalloutEl.textContent = customCallout || modeLabels[mode] || modeLabels.wild;
         }
         this.encounterFlashEl.hidden = false;
         void this.encounterFlashEl.offsetWidth;
@@ -2123,18 +2275,32 @@ class GameApp {
   }
 
   async startWildEncounter(biomeId, encounterMeta = {}) {
-    if (this.battle.active || this.encounterTransitioning) return;
+    if (
+      this.battle.active ||
+      this.encounterTransitioning ||
+      this.warpTransitioning ||
+      this.pokedex?.isOpen() ||
+      this.minigame?.isOpen() ||
+      this.isSettingsOpen()
+    ) {
+      return;
+    }
     if (!storage.ensureHealthyParty()) return;
     const profile = storage.getActiveProfile();
     const avgLevel = this.getAverageTeamLevel();
     const supportsProfileRoll = typeof PokemonMod.getBiomeScaledRange === 'function'
       || typeof PokemonMod.getTrainerPowerLevel === 'function';
-    const wild = rollWildPokemon(biomeId, supportsProfileRoll ? (profile || avgLevel) : avgLevel, encounterMeta);
+    const rollMeta = encounterMeta?.nodeKind === 'mystery_cry'
+      ? { ...encounterMeta, nodeKind: 'mystery_cry' }
+      : encounterMeta;
+    const wild = rollWildPokemon(biomeId, supportsProfileRoll ? (profile || avgLevel) : avgLevel, rollMeta);
     if (!wild) return;
 
-    const mode = (wild.isShiny || wild.isElite || encounterMeta?.isRarePatch) ? 'rare' : 'wild';
+    const isMysteryCry = encounterMeta?.nodeKind === 'mystery_cry';
+    const mode = (isMysteryCry || wild.isShiny || wild.isElite || encounterMeta?.isRarePatch) ? 'rare' : 'wild';
     const ready = await this.triggerEncounterTransition('battle', {
       mode,
+      calloutText: isMysteryCry ? '🎵 MYSTERY CRY!' : undefined,
       isRarePatch: Boolean(encounterMeta?.isRarePatch),
       isShiny: Boolean(wild.isShiny),
       isElite: Boolean(wild.isElite),
@@ -2152,7 +2318,17 @@ class GameApp {
   }
 
   async startShrineEncounter(shrine, { isTrial = false } = {}) {
-    if (!shrine || this.battle.active || this.encounterTransitioning) return;
+    if (
+      !shrine ||
+      this.battle.active ||
+      this.encounterTransitioning ||
+      this.warpTransitioning ||
+      this.pokedex?.isOpen() ||
+      this.minigame?.isOpen() ||
+      this.isSettingsOpen()
+    ) {
+      return;
+    }
     if (!storage.ensureHealthyParty()) return;
     const profile = storage.getActiveProfile();
     const isAstralTrial = Boolean(isTrial || profile?.shrinesCleared?.includes(shrine.id));
@@ -2217,7 +2393,17 @@ class GameApp {
     const rival = typeof rivalInput === 'string'
       ? Object.values(RIVAL_TRAINERS || {}).find((r) => r?.id === rivalInput) || null
       : rivalInput;
-    if (!rival || this.battle.active || this.encounterTransitioning) return;
+    if (
+      !rival ||
+      this.battle.active ||
+      this.encounterTransitioning ||
+      this.warpTransitioning ||
+      this.pokedex?.isOpen() ||
+      this.minigame?.isOpen() ||
+      this.isSettingsOpen()
+    ) {
+      return;
+    }
     if (!storage.ensureHealthyParty()) return;
 
     const profile = storage.getActiveProfile();
@@ -2378,7 +2564,16 @@ class GameApp {
   }
 
   openMinigame() {
-    if (this.battle?.active || this.encounterTransitioning || this.warpTransitioning) return false;
+    if (
+      !this.bootScreenEl?.hidden ||
+      !this.starterScreenEl?.hidden ||
+      this.gameShellEl?.hidden ||
+      this.battle?.active ||
+      this.encounterTransitioning ||
+      this.warpTransitioning
+    ) {
+      return false;
+    }
     if (typeof storage.isArcadeUnlocked === 'function' && !storage.isArcadeUnlocked()) {
       return false;
     }
@@ -2393,7 +2588,23 @@ class GameApp {
   }
 
   openPokedex(tab = 'dex') {
-    if (this.battle.active || this.encounterTransitioning || this.warpTransitioning) return;
+    if (
+      !this.bootScreenEl?.hidden ||
+      !this.starterScreenEl?.hidden ||
+      this.gameShellEl?.hidden ||
+      this.battle?.active ||
+      this.encounterTransitioning ||
+      this.warpTransitioning ||
+      this.minigame?.isOpen()
+    ) {
+      return;
+    }
+    if (this.dialogueOpen) {
+      this.closeDialogue();
+    }
+    if (this.isSettingsOpen()) {
+      this.closeSettings();
+    }
     this.pokedex.open(tab);
     this.syncControlVisibility();
     this.syncOverworldPause();
@@ -2404,7 +2615,23 @@ class GameApp {
   }
 
   openSettings() {
-    if (!this.settingsModalEl || this.warpTransitioning) return;
+    if (
+      !this.settingsModalEl ||
+      !this.bootScreenEl?.hidden ||
+      !this.starterScreenEl?.hidden ||
+      this.gameShellEl?.hidden ||
+      this.encounterTransitioning ||
+      this.warpTransitioning ||
+      this.minigame?.isOpen()
+    ) {
+      return;
+    }
+    if (this.dialogueOpen) {
+      this.closeDialogue();
+    }
+    if (this.pokedex?.isOpen()) {
+      this.pokedex.close();
+    }
     if (this.resetStatusEl) this.resetStatusEl.textContent = '';
     this.settingsModalEl.hidden = false;
     this.syncControlVisibility();
@@ -2412,6 +2639,7 @@ class GameApp {
   }
 
   closeSettings() {
+    for (const cancel of this._resetHoldCancels) cancel();
     if (!this.settingsModalEl) return;
     this.settingsModalEl.hidden = true;
     this.blurFocusedControl();
