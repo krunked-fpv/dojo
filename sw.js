@@ -11,6 +11,7 @@ const CORE_SHELL_URLS = [
   './css/controls.css',
   './js/main.js',
   './js/config.js',
+  './js/balance.js',
   './js/world-data.js',
   './js/pokemon.js',
   './js/storage.js',
