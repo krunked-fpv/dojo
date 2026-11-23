@@ -587,6 +587,8 @@ export class OverworldEngine {
     this._pointerState = null;
     this._holdTimer = null;
     this._lastNodeKind = null;
+    this._nodeKindBag = [];
+    this._destroyed = false;
 
     this._renderActors = [];
     this._actorPool = [];
@@ -673,11 +675,14 @@ export class OverworldEngine {
   _placeFollowerBehind(px, py, dir = 'down') {
     const safeDir = DIR_VEC[dir] ? dir : 'down';
     const vec = DIR_VEC[safeDir];
-    let fx = px;
-    let fy = py;
+    const origin = this.isTileWalkable(px, py)
+      ? { x: px, y: py }
+      : findNearestSafePosition(px, py, safeDir);
+    let fx = origin.x;
+    let fy = origin.y;
 
-    const bx = px - vec.dx;
-    const by = py - vec.dy;
+    const bx = origin.x - vec.dx;
+    const by = origin.y - vec.dy;
     if (this.isTileWalkable(bx, by)) {
       fx = bx;
       fy = by;
@@ -689,8 +694,8 @@ export class OverworldEngine {
         [1, 0],
       ];
       for (const [dx, dy] of cardinals) {
-        const cx = px + dx;
-        const cy = py + dy;
+        const cx = origin.x + dx;
+        const cy = origin.y + dy;
         if (cx === bx && cy === by) continue;
         if (this.isTileWalkable(cx, cy)) {
           fx = cx;
@@ -734,6 +739,8 @@ export class OverworldEngine {
   syncFollower(returnState = true) {
     const profile = this.getProfile();
     if (!profile) {
+      this.followerInitialized = false;
+      this.followerTrainerId = null;
       this.followerUid = null;
       this.followerSpeciesId = null;
       this.followerShiny = false;
@@ -742,8 +749,12 @@ export class OverworldEngine {
       return returnState ? this.getFollowerState() : null;
     }
 
-    if (!this.currentBiomeId && profile.pos) {
-      this.currentBiomeId = getBiomeAt(profile.pos.x, profile.pos.y).id;
+    const px = Number.isFinite(Number(profile.pos?.x)) ? Math.trunc(Number(profile.pos.x)) : (GAME_META.spawn?.x ?? 8);
+    const py = Number.isFinite(Number(profile.pos?.y)) ? Math.trunc(Number(profile.pos.y)) : (GAME_META.spawn?.y ?? 15);
+    const pdir = DIR_VEC[profile.pos?.dir] ? profile.pos.dir : 'down';
+
+    if (!this.currentBiomeId || this.followerTrainerId !== profile.trainerId) {
+      this.currentBiomeId = getBiomeAt(px, py).id;
     }
 
     const lead = profile.team?.[0] || null;
@@ -754,13 +765,20 @@ export class OverworldEngine {
     const nextUpgradeTier = lead ? Math.max(0, Math.min(5, Number(lead.upgradeTier) || 0)) : 0;
 
     if (!this.followerInitialized || this.followerTrainerId !== profile.trainerId) {
-      this._placeFollowerBehind(profile.pos.x, profile.pos.y, profile.pos.dir);
+      this._placeFollowerBehind(px, py, pdir);
       this.followerTrainerId = profile.trainerId;
       this.followerUid = nextUid;
       this.followerSpeciesId = nextSpeciesId;
       this.followerShiny = nextShiny;
       this.followerUpgradeTier = nextUpgradeTier;
       return returnState ? this.getFollowerState() : null;
+    }
+
+    if (!this.moving) {
+      const fDist = Math.abs(this.followerX - px) + Math.abs(this.followerY - py);
+      if (!this.isTileWalkable(this.followerX, this.followerY) || fDist > 1) {
+        this._placeFollowerBehind(px, py, pdir);
+      }
     }
 
     const changed = (
@@ -816,27 +834,59 @@ export class OverworldEngine {
   }
 
   _bindCanvasPointerEvents() {
-    if (!this.canvas || typeof this.canvas.addEventListener !== 'function') return;
-    this._onPointerDown = (e) => this._handlePointerDown(e);
-    this._onPointerMove = (e) => this._handlePointerMove(e);
-    this._onPointerUp = (e) => this._handlePointerUp(e);
-    this._onPointerCancel = (e) => this._handlePointerCancel(e);
-    this._onContextMenu = (e) => {
-      if (this.active) e.preventDefault?.();
-    };
+    if (this.canvas && typeof this.canvas.addEventListener === 'function') {
+      this._onPointerDown = (e) => this._handlePointerDown(e);
+      this._onPointerMove = (e) => this._handlePointerMove(e);
+      this._onPointerUp = (e) => this._handlePointerUp(e);
+      this._onPointerCancel = (e) => this._handlePointerCancel(e);
+      this._onContextMenu = (e) => {
+        if (this.active) e.preventDefault?.();
+      };
 
-    this.canvas.addEventListener('pointerdown', this._onPointerDown);
-    this.canvas.addEventListener('pointermove', this._onPointerMove);
-    this.canvas.addEventListener('pointerup', this._onPointerUp);
-    this.canvas.addEventListener('pointercancel', this._onPointerCancel);
-    this.canvas.addEventListener('lostpointercapture', this._onPointerCancel);
-    this.canvas.addEventListener('contextmenu', this._onContextMenu);
+      this.canvas.addEventListener('pointerdown', this._onPointerDown);
+      this.canvas.addEventListener('pointermove', this._onPointerMove);
+      this.canvas.addEventListener('pointerup', this._onPointerUp);
+      this.canvas.addEventListener('pointercancel', this._onPointerCancel);
+      this.canvas.addEventListener('lostpointercapture', this._onPointerCancel);
+      this.canvas.addEventListener('contextmenu', this._onContextMenu);
+    }
+
+    const win = typeof window !== 'undefined' ? window : null;
+    const doc = this.canvas?.ownerDocument || (typeof document !== 'undefined' ? document : null);
+    if (win && typeof win.addEventListener === 'function') {
+      this._boundWindow = win;
+      this._onWindowBlur = () => this.clearTouchNavigation();
+      win.addEventListener('blur', this._onWindowBlur);
+    }
+    if (doc && typeof doc.addEventListener === 'function') {
+      this._boundDoc = doc;
+      this._onVisibilityChange = () => {
+        if (doc.hidden || (doc.visibilityState && doc.visibilityState !== 'visible')) {
+          this.clearTouchNavigation();
+        }
+      };
+      doc.addEventListener('visibilitychange', this._onVisibilityChange);
+    }
   }
 
   destroy() {
+    this._destroyed = true;
     this.clearTouchNavigation();
     this._resizeObserver?.disconnect?.();
     this._warpBeam = null;
+
+    if (this._boundWindow && this._onWindowBlur && typeof this._boundWindow.removeEventListener === 'function') {
+      this._boundWindow.removeEventListener('blur', this._onWindowBlur);
+    }
+    this._boundWindow = null;
+    this._onWindowBlur = null;
+
+    if (this._boundDoc && this._onVisibilityChange && typeof this._boundDoc.removeEventListener === 'function') {
+      this._boundDoc.removeEventListener('visibilitychange', this._onVisibilityChange);
+    }
+    this._boundDoc = null;
+    this._onVisibilityChange = null;
+
     if (!this.canvas || typeof this.canvas.removeEventListener !== 'function') return;
     if (this._onPointerDown) this.canvas.removeEventListener('pointerdown', this._onPointerDown);
     if (this._onPointerMove) this.canvas.removeEventListener('pointermove', this._onPointerMove);
@@ -857,6 +907,16 @@ export class OverworldEngine {
 
   _clearPointerSteering() {
     this._clearHoldTimer();
+    const activePointerId = this._pointerState?.pointerId;
+    if (activePointerId !== undefined) {
+      try {
+        if (this.canvas?.hasPointerCapture?.(activePointerId)) {
+          this.canvas.releasePointerCapture(activePointerId);
+        }
+      } catch {
+        // Ignore synthetic capture cleanup errors.
+      }
+    }
     this._pointerState = null;
     this.touchSteerActive = false;
     this.touchSteerDir = null;
@@ -1117,9 +1177,7 @@ export class OverworldEngine {
     if (!this.moving && interactive) {
       if (interactive.type === 'heal' && tx === px && ty === py) {
         this.refreshInteractHint();
-        if (!this.triggerInteract()) {
-          this.onHealSpot?.();
-        }
+        this._triggerSelfHeal(px, py);
         return true;
       }
       if (Math.abs(tx - px) + Math.abs(ty - py) === 1) {
@@ -1399,15 +1457,36 @@ export class OverworldEngine {
   }
 
   _pickNextDiscoveryNodeKind() {
-    let pool = DISCOVERY_NODE_KINDS.filter(
-      (k) => k !== this._lastNodeKind && !this.rarePatches.some((p) => p.kind === k),
-    );
-    if (pool.length === 0) {
-      pool = DISCOVERY_NODE_KINDS.filter((k) => k !== this._lastNodeKind);
+    if (!Array.isArray(this._nodeKindBag) || this._nodeKindBag.length === 0) {
+      const freshBag = [...DISCOVERY_NODE_KINDS];
+      for (let i = freshBag.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        const tmp = freshBag[i];
+        freshBag[i] = freshBag[j];
+        freshBag[j] = tmp;
+      }
+      if (this._lastNodeKind && freshBag[0] === this._lastNodeKind && freshBag.length > 1) {
+        const swapIdx = 1 + Math.floor(Math.random() * (freshBag.length - 1));
+        const tmp = freshBag[0];
+        freshBag[0] = freshBag[swapIdx];
+        freshBag[swapIdx] = tmp;
+      }
+      this._nodeKindBag = freshBag;
     }
-    const kind = pool[Math.floor(Math.random() * pool.length)] || DISCOVERY_NODE_KINDS[0];
-    this._lastNodeKind = kind;
-    return kind;
+
+    const activeKinds = new Set(this.rarePatches.map((p) => p.kind));
+    let pickIdx = this._nodeKindBag.findIndex((k) => k !== this._lastNodeKind && !activeKinds.has(k));
+    if (pickIdx === -1) {
+      pickIdx = this._nodeKindBag.findIndex((k) => k !== this._lastNodeKind);
+    }
+    if (pickIdx === -1) {
+      pickIdx = 0;
+    }
+
+    const [kind] = this._nodeKindBag.splice(pickIdx, 1);
+    const chosen = kind || DISCOVERY_NODE_KINDS[0];
+    this._lastNodeKind = chosen;
+    return chosen;
   }
 
   refreshRarePatches(profile, dt = 0) {
@@ -1545,12 +1624,17 @@ export class OverworldEngine {
     if (!profile) return null;
     const { x, y, dir } = profile.pos;
 
+    const vec = DIR_VEC[dir] || DIR_VEC.down;
+    const faced = this.getInteractiveAtTile(x + vec.dx, y + vec.dy);
+    if (faced && faced.type !== 'heal') {
+      return faced;
+    }
+
     if (WORLD_MAP[y]?.[x] === TILE.HEAL) {
       return { type: 'heal', key: `${x},${y}`, x, y, label: '💖 Heal Team', data: null };
     }
 
-    const vec = DIR_VEC[dir] || DIR_VEC.down;
-    return this.getInteractiveAtTile(x + vec.dx, y + vec.dy);
+    return faced;
   }
 
   refreshInteractHint() {
@@ -1572,6 +1656,21 @@ export class OverworldEngine {
     return true;
   }
 
+  _triggerSelfHeal(x, y) {
+    if (typeof this.onInteract === 'function') {
+      this.onInteract({ type: 'heal', key: `${x},${y}`, x, y, label: '💖 Heal Team', data: null });
+    } else {
+      this.onHealSpot?.();
+    }
+  }
+
+  _pushParticle(particle) {
+    if (this.particles.length >= 320) {
+      this.particles.splice(0, this.particles.length - 319);
+    }
+    this.particles.push(particle);
+  }
+
   spawnParticles(tileX, tileY, color, count = 7, upward = false) {
     const cx = tileX * this.tileSize + 16;
     const cy = tileY * this.tileSize + 20;
@@ -1580,7 +1679,7 @@ export class OverworldEngine {
         ? -Math.PI / 2 + (Math.random() - 0.5) * 1.1
         : Math.random() * Math.PI * 2;
       const speed = upward ? 26 + Math.random() * 28 : 18 + Math.random() * 34;
-      this.particles.push({
+      this._pushParticle({
         x: cx + (Math.random() - 0.5) * 14,
         y: cy + (Math.random() - 0.5) * 8,
         vx: Math.cos(angle) * speed,
@@ -1600,19 +1699,44 @@ export class OverworldEngine {
     const palette = CELEBRATION_PALETTES[preset] || CELEBRATION_PALETTES.gold;
     const cx = tx * this.tileSize + 16;
     const cy = ty * this.tileSize + 16;
-    const count = 26;
-    for (let i = 0; i < count; i++) {
-      const angle = (Math.PI * 2 * i) / count + (Math.random() - 0.5) * 0.32;
-      const speed = 26 + Math.random() * 44;
-      this.particles.push({
-        x: cx + (Math.random() - 0.5) * 10,
-        y: cy + (Math.random() - 0.5) * 8,
-        vx: Math.cos(angle) * speed,
-        vy: Math.sin(angle) * speed - 22,
+    const count = 52;
+    const haloCount = 2;
+    const confettiCount = count - haloCount;
+    const shapes = ['star', 'spark', 'diamond', 'circle'];
+
+    for (let h = 0; h < haloCount; h++) {
+      this._pushParticle({
+        x: cx,
+        y: cy + 4,
+        vx: 0,
+        vy: 0,
+        gravity: 0,
         life: 0,
-        maxLife: 0.6 + Math.random() * 0.4,
+        maxLife: 0.46 + h * 0.16,
+        color: palette[h % palette.length],
+        size: 2,
+        shape: 'ring',
+        startRadius: 4 + h * 3,
+        endRadius: 34 + h * 11,
+        lineWidth: 2.2 - h * 0.5,
+      });
+    }
+
+    for (let i = 0; i < confettiCount; i++) {
+      const angle = (Math.PI * 2 * i) / confettiCount + (Math.random() - 0.5) * 0.32;
+      const outerWave = i % 2 === 0;
+      const speed = outerWave ? (34 + Math.random() * 44) : (18 + Math.random() * 32);
+      this._pushParticle({
+        x: cx + (Math.random() - 0.5) * 12,
+        y: cy + (Math.random() - 0.5) * 10,
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed - (outerWave ? 26 : 18),
+        gravity: 42,
+        life: 0,
+        maxLife: 0.62 + Math.random() * 0.42,
         color: palette[i % palette.length],
-        size: 2.2 + Math.random() * 2.4,
+        size: 2.1 + Math.random() * 2.5,
+        shape: shapes[i % shapes.length],
       });
     }
     return count;
@@ -1638,24 +1762,63 @@ export class OverworldEngine {
     const swirlColors = tone === 'safe' ? SAFE_WARP_SWIRL_COLORS : WARP_SWIRL_COLORS;
     const cx = x * this.tileSize + 16;
     const cy = y * this.tileSize + 16;
-    const count = safePhase === 'depart' ? 16 : 22;
+    const count = safePhase === 'depart' ? 32 : 44;
+    const ringCount = 2;
+    const moteCount = safePhase === 'depart' ? 6 : 8;
+    const swirlCount = count - ringCount - moteCount;
+    const shapes = ['star', 'spark', 'diamond', 'circle'];
 
-    for (let i = 0; i < count; i++) {
-      const angle = (Math.PI * 2 * i) / count + (Math.random() - 0.5) * 0.25;
+    for (let r = 0; r < ringCount; r++) {
+      this._pushParticle({
+        x: cx,
+        y: cy + 8,
+        vx: 0,
+        vy: 0,
+        gravity: 0,
+        life: 0,
+        maxLife: (safePhase === 'depart' ? 0.32 : 0.48) + r * 0.1,
+        color: swirlColors[r % swirlColors.length],
+        size: 2,
+        shape: 'ring',
+        startRadius: safePhase === 'depart' ? 22 + r * 6 : 4 + r * 3,
+        endRadius: safePhase === 'depart' ? 3 + r * 2 : 30 + r * 9,
+        lineWidth: 2.0 - r * 0.4,
+      });
+    }
+
+    for (let m = 0; m < moteCount; m++) {
+      this._pushParticle({
+        x: cx + (Math.random() - 0.5) * 18,
+        y: cy + 10 + (Math.random() - 0.5) * 8,
+        vx: (Math.random() - 0.5) * 8,
+        vy: -(52 + Math.random() * 44),
+        gravity: 0,
+        life: 0,
+        maxLife: (safePhase === 'depart' ? 0.34 : 0.5) + Math.random() * 0.14,
+        color: swirlColors[(m + 1) % swirlColors.length],
+        size: 1.8 + Math.random() * 1.4,
+        shape: 'mote',
+      });
+    }
+
+    for (let i = 0; i < swirlCount; i++) {
+      const angle = (Math.PI * 2 * i) / swirlCount + (Math.random() - 0.5) * 0.25;
       const radius = safePhase === 'depart' ? 10 + Math.random() * 6 : 3 + Math.random() * 5;
-      const radialSpeed = safePhase === 'depart' ? -14 - Math.random() * 14 : 24 + Math.random() * 28;
-      const swirlSpeed = safePhase === 'depart' ? 32 : 24;
+      const radialSpeed = safePhase === 'depart' ? -14 - Math.random() * 14 : 24 + Math.random() * 30;
+      const swirlSpeed = safePhase === 'depart' ? 34 : 26;
       const tx = -Math.sin(angle);
       const ty = Math.cos(angle);
-      this.particles.push({
+      this._pushParticle({
         x: cx + Math.cos(angle) * radius,
         y: cy + Math.sin(angle) * radius * 0.65,
         vx: Math.cos(angle) * radialSpeed + tx * swirlSpeed,
         vy: Math.sin(angle) * radialSpeed * 0.6 + ty * swirlSpeed * 0.4 - (safePhase === 'depart' ? 36 : 24),
+        gravity: 40,
         life: 0,
         maxLife: (safePhase === 'depart' ? 0.34 : 0.48) + Math.random() * 0.16,
         color: swirlColors[i % swirlColors.length],
         size: 2 + Math.random() * 2.2,
+        shape: shapes[i % shapes.length],
       });
     }
 
@@ -1665,7 +1828,7 @@ export class OverworldEngine {
       x,
       y,
       life: 0,
-      maxLife: safePhase === 'depart' ? 0.32 : 0.52,
+      maxLife: safePhase === 'depart' ? 0.34 : 0.54,
     };
     return this._warpBeam;
   }
@@ -1706,6 +1869,7 @@ export class OverworldEngine {
 
       this._placeFollowerBehind(safe.x, safe.y, safe.dir);
       this.followerTrainerId = profile.trainerId;
+      this.currentBiomeId = getBiomeAt(safe.x, safe.y).id;
       const leadMeta = this._readLeadMeta(profile.team?.[0] || null);
       this.followerUid = leadMeta.uid;
       this.followerSpeciesId = leadMeta.speciesId;
@@ -1749,8 +1913,9 @@ export class OverworldEngine {
   }
 
   update(dt, heldDir) {
+    const safeDt = Number.isFinite(dt) && dt > 0 ? dt : 0;
+
     if (this._warpBeam) {
-      const safeDt = Number.isFinite(dt) && dt > 0 ? dt : 0;
       this._warpBeam.life += safeDt;
       if (this._warpBeam.life >= this._warpBeam.maxLife) {
         this._warpBeam = null;
@@ -1759,26 +1924,27 @@ export class OverworldEngine {
 
     for (let i = this.particles.length - 1; i >= 0; i--) {
       const p = this.particles[i];
-      p.life += dt;
+      p.life += safeDt;
       if (p.life >= p.maxLife) {
         this.particles.splice(i, 1);
       } else {
-        p.x += p.vx * dt;
-        p.y += p.vy * dt;
-        p.vy += 45 * dt;
+        p.x += p.vx * safeDt;
+        p.y += p.vy * safeDt;
+        const g = p.gravity !== undefined ? p.gravity : 45;
+        if (g !== 0) p.vy += g * safeDt;
       }
     }
 
     for (let i = this.ripples.length - 1; i >= 0; i--) {
       const r = this.ripples[i];
-      r.life += dt;
+      r.life += safeDt;
       if (r.life >= r.maxLife) {
         this.ripples.splice(i, 1);
       }
     }
 
     if (this.rustleTile) {
-      this.rustleTile.timer -= dt;
+      this.rustleTile.timer -= safeDt;
       if (this.rustleTile.timer <= 0) this.rustleTile = null;
     }
 
@@ -1795,12 +1961,11 @@ export class OverworldEngine {
       this.autoInteractTarget = null;
       this.touchDestination = null;
       this._touchDestArriveTimer = null;
-      this.touchSteerActive = false;
-      this.touchSteerDir = null;
+      this._clearPointerSteering();
     }
 
     if (this._touchDestArriveTimer !== null) {
-      this._touchDestArriveTimer -= dt;
+      this._touchDestArriveTimer -= safeDt;
       if (this._touchDestArriveTimer <= 0) {
         this._touchDestArriveTimer = null;
         if (!this.moving && this.autoPath.length === 0 && !this.autoInteractTarget) {
@@ -1809,10 +1974,10 @@ export class OverworldEngine {
       }
     }
 
-    this.refreshRarePatches(profile, dt);
+    this.refreshRarePatches(profile, safeDt);
 
     if (this.moving) {
-      this.moveProgress += dt / this.moveDuration;
+      this.moveProgress += safeDt / this.moveDuration;
       if (this.moveProgress >= 1) {
         this.moving = false;
         this.moveProgress = 0;
@@ -1835,8 +2000,16 @@ export class OverworldEngine {
             const interactAt = this.autoInteractTarget;
             this.autoInteractTarget = null;
             this.touchDestination = null;
-            this._faceTile(interactAt.x, interactAt.y);
-            this.triggerInteract();
+            if (
+              interactAt.x === profile.pos.x &&
+              interactAt.y === profile.pos.y &&
+              WORLD_MAP[profile.pos.y]?.[profile.pos.x] === TILE.HEAL
+            ) {
+              this._triggerSelfHeal(profile.pos.x, profile.pos.y);
+            } else {
+              this._faceTile(interactAt.x, interactAt.y);
+              this.triggerInteract();
+            }
           } else if (
             this.touchDestination &&
             this.touchDestination.x === profile.pos.x &&
@@ -2228,12 +2401,83 @@ export class OverworldEngine {
     // Draw particles
     for (let i = 0; i < this.particles.length; i++) {
       const p = this.particles[i];
-      const alpha = Math.max(0, 1 - p.life / p.maxLife);
-      ctx.globalAlpha = alpha;
-      ctx.fillStyle = p.color;
-      ctx.beginPath();
-      ctx.arc(p.x - camX, p.y - camY, p.size, 0, Math.PI * 2);
-      ctx.fill();
+      const progress = p.maxLife > 0 ? Math.min(1, p.life / p.maxLife) : 1;
+      const alpha = Math.max(0, 1 - progress);
+      const px = p.x - camX;
+      const py = p.y - camY;
+      const shape = p.shape || 'circle';
+
+      if (shape === 'ring') {
+        const startR = p.startRadius ?? 4;
+        const endR = p.endRadius ?? 28;
+        const eased = 1 - (1 - progress) * (1 - progress);
+        const r = Math.max(1, startR + (endR - startR) * eased);
+        ctx.globalAlpha = alpha * 0.85;
+        ctx.strokeStyle = p.color;
+        ctx.lineWidth = p.lineWidth ?? 1.8;
+        ctx.beginPath();
+        if (typeof ctx.ellipse === 'function') {
+          ctx.ellipse(px, py, r, r * 0.52, 0, 0, Math.PI * 2);
+        } else {
+          ctx.arc(px, py, r, 0, Math.PI * 2);
+        }
+        ctx.stroke();
+      } else if (shape === 'star') {
+        const arm = p.size * 1.45;
+        ctx.globalAlpha = alpha;
+        ctx.fillStyle = p.color;
+        ctx.fillRect(px - arm, py - 0.8, arm * 2, 1.6);
+        ctx.fillRect(px - 0.8, py - arm, 1.6, arm * 2);
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(px - 0.75, py - 0.75, 1.5, 1.5);
+      } else if (shape === 'spark') {
+        const len = Math.max(3, p.size * 1.6);
+        const speed = Math.hypot(p.vx, p.vy) || 1;
+        const dx = (p.vx / speed) * len;
+        const dy = (p.vy / speed) * len;
+        ctx.globalAlpha = alpha;
+        ctx.strokeStyle = p.color;
+        ctx.lineWidth = Math.max(1.2, p.size * 0.55);
+        if (typeof ctx.moveTo === 'function' && typeof ctx.lineTo === 'function') {
+          ctx.beginPath();
+          ctx.moveTo(px - dx * 0.6, py - dy * 0.6);
+          ctx.lineTo(px + dx * 0.6, py + dy * 0.6);
+          ctx.stroke();
+        } else {
+          ctx.fillStyle = p.color;
+          ctx.beginPath();
+          ctx.arc(px, py, p.size * 0.8, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      } else if (shape === 'diamond') {
+        const r = p.size * 1.25;
+        ctx.globalAlpha = alpha;
+        ctx.fillStyle = p.color;
+        if (typeof ctx.moveTo === 'function' && typeof ctx.lineTo === 'function' && typeof ctx.closePath === 'function') {
+          ctx.beginPath();
+          ctx.moveTo(px, py - r);
+          ctx.lineTo(px + r * 0.8, py);
+          ctx.lineTo(px, py + r);
+          ctx.lineTo(px - r * 0.8, py);
+          ctx.closePath();
+          ctx.fill();
+        } else {
+          ctx.beginPath();
+          ctx.arc(px, py, p.size, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      } else if (shape === 'mote') {
+        const pulse = 0.7 + 0.3 * Math.sin((nowMs || 0) * 0.02 + i);
+        ctx.globalAlpha = alpha * pulse;
+        ctx.fillStyle = p.color;
+        ctx.fillRect(px - p.size * 0.5, py - p.size * 1.2, p.size, p.size * 2.4);
+      } else {
+        ctx.globalAlpha = alpha;
+        ctx.fillStyle = p.color;
+        ctx.beginPath();
+        ctx.arc(px, py, p.size, 0, Math.PI * 2);
+        ctx.fill();
+      }
     }
     ctx.globalAlpha = 1;
   }
@@ -2252,59 +2496,94 @@ export class OverworldEngine {
       : Math.max(0, 1 - progress * progress);
 
     const pillarW = isDepart
-      ? Math.max(4, 22 * (1 - progress * 0.55))
-      : Math.max(6, 26 * (1 - progress * 0.72));
-    const coreW = Math.max(2, pillarW * 0.42);
-    const pillarTop = Math.max(0, cy - 150);
+      ? Math.max(4, 24 * (1 - progress * 0.52))
+      : Math.max(6, 28 * (1 - progress * 0.68));
+    const coreW = Math.max(2, pillarW * 0.44);
+    const pillarTop = Math.max(0, cy - 156);
     const pillarHeight = cy + 12 - pillarTop;
     const ringRadius = isDepart
-      ? 20 * (1 - progress * 0.7) + 4
-      : 6 + progress * 22;
+      ? 22 * (1 - progress * 0.68) + 4
+      : 6 + progress * 24;
 
     ctx.save();
-    ctx.globalAlpha = alpha * 0.34;
+    ctx.globalAlpha = alpha * 0.36;
     ctx.fillStyle = isSafe ? '#4ade80' : '#38bdf8';
     ctx.fillRect(Math.round(cx - pillarW / 2), pillarTop, Math.round(pillarW), pillarHeight);
 
-    ctx.globalAlpha = alpha * 0.42;
+    ctx.globalAlpha = alpha * 0.44;
     ctx.fillStyle = isSafe ? '#fbbf24' : '#c084fc';
     ctx.fillRect(Math.round(cx - pillarW * 0.36), pillarTop, Math.round(pillarW * 0.72), pillarHeight);
 
-    ctx.globalAlpha = alpha * 0.78;
+    ctx.globalAlpha = alpha * 0.82;
     ctx.fillStyle = '#fef08a';
     ctx.fillRect(Math.round(cx - coreW / 2), pillarTop, Math.round(coreW), pillarHeight);
 
-    ctx.globalAlpha = alpha * 0.9;
+    // Vertical ascending light motes gliding inside the warp pillar
+    for (let m = 0; m < 8; m++) {
+      const motePhase = ((progress * 1.45 + m * 0.125) % 1 + 1) % 1;
+      const my = Math.round(cy + 10 - motePhase * Math.max(24, pillarHeight - 8));
+      const mx = Math.round(cx + Math.sin(m * 2.1 + progress * Math.PI * 3) * (pillarW * 0.42));
+      ctx.globalAlpha = alpha * Math.sin(motePhase * Math.PI) * 0.92;
+      ctx.fillStyle = m % 3 === 0 ? '#ffffff' : (isSafe ? (m % 2 === 0 ? '#86efac' : '#fde047') : (m % 2 === 0 ? '#67e8f9' : '#f472b6'));
+      ctx.fillRect(mx - 1, my - 2, 2, 5);
+    }
+
+    // Dual counter-rotating rune ellipses
+    const spinCw = progress * Math.PI * 2 + nowMs * 0.008;
+    const spinCcw = -progress * Math.PI * 2.6 - nowMs * 0.011;
+
+    ctx.globalAlpha = alpha * 0.92;
     ctx.strokeStyle = isSafe
       ? (isDepart ? '#86efac' : '#fde047')
       : (isDepart ? '#67e8f9' : '#fde047');
     ctx.lineWidth = 2;
     ctx.beginPath();
     if (typeof ctx.ellipse === 'function') {
-      ctx.ellipse(cx, cy + 10, ringRadius, ringRadius * 0.42, 0, 0, Math.PI * 2);
+      ctx.ellipse(cx, cy + 10, ringRadius, ringRadius * 0.42, Math.sin(spinCw) * 0.12, 0, Math.PI * 2);
     } else {
       ctx.arc(cx, cy + 10, ringRadius, 0, Math.PI * 2);
     }
     ctx.stroke();
 
-    ctx.globalAlpha = alpha * 0.75;
+    ctx.globalAlpha = alpha * 0.8;
     ctx.strokeStyle = isSafe ? '#4ade80' : '#c084fc';
-    ctx.lineWidth = 1.2;
+    ctx.lineWidth = 1.4;
     ctx.beginPath();
     if (typeof ctx.ellipse === 'function') {
-      ctx.ellipse(cx, cy + 10, Math.max(3, ringRadius * 0.68), Math.max(1.5, ringRadius * 0.28), 0, 0, Math.PI * 2);
+      ctx.ellipse(
+        cx,
+        cy + 10,
+        Math.max(3, ringRadius * 0.68),
+        Math.max(1.5, ringRadius * 0.28),
+        Math.sin(spinCcw) * 0.16,
+        0,
+        Math.PI * 2,
+      );
     } else {
       ctx.arc(cx, cy + 10, Math.max(3, ringRadius * 0.68), 0, Math.PI * 2);
     }
     ctx.stroke();
 
-    const spin = progress * Math.PI * 2 + nowMs * 0.008;
-    for (let i = 0; i < 4; i++) {
-      const a = spin + (Math.PI / 2) * i;
+    // 8 clockwise outer rune sparks
+    for (let i = 0; i < 8; i++) {
+      const a = spinCw + (Math.PI / 4) * i;
       const sx = Math.round(cx + Math.cos(a) * ringRadius);
       const sy = Math.round(cy + 10 + Math.sin(a) * ringRadius * 0.42);
+      ctx.globalAlpha = alpha * (i % 2 === 0 ? 0.95 : 0.72);
       ctx.fillStyle = i % 2 === 0 ? '#ffffff' : (isSafe ? '#86efac' : '#fde047');
       ctx.fillRect(sx - 1, sy - 1, 3, 3);
+    }
+
+    // 6 counter-clockwise inner rune sparks
+    const innerRx = Math.max(3, ringRadius * 0.68);
+    const innerRy = Math.max(1.5, ringRadius * 0.28);
+    for (let i = 0; i < 6; i++) {
+      const a = spinCcw + (Math.PI / 3) * i;
+      const sx = Math.round(cx + Math.cos(a) * innerRx);
+      const sy = Math.round(cy + 10 + Math.sin(a) * innerRy);
+      ctx.globalAlpha = alpha * 0.85;
+      ctx.fillStyle = i % 2 === 0 ? (isSafe ? '#fde047' : '#e879f9') : '#67e8f9';
+      ctx.fillRect(sx - 1, sy - 1, 2, 2);
     }
     ctx.restore();
   }
@@ -5317,7 +5596,7 @@ export class OverworldEngine {
     ];
 
     const tryLoad = (idx) => {
-      if (idx >= candidates.length) {
+      if (this._destroyed || idx >= candidates.length) {
         entry.status = 'failed';
         return;
       }
