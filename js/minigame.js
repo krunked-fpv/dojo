@@ -487,11 +487,12 @@ const SKY_PALETTES = [
 ];
 
 export class StarlightMinigame {
-  constructor({ storage = null, audio = null, onClose = null, onCelebrate = null, onRewardsEarned = null } = {}) {
+  constructor({ storage = null, audio = null, onClose = null, onCelebrate = null, onRunStart = null, onRewardsEarned = null } = {}) {
     this.storage = storage;
     this.audio = audio;
     this.onClose = onClose;
     this.onCelebrate = onCelebrate;
+    this.onRunStart = onRunStart;
     this.onRewardsEarned = onRewardsEarned;
 
     this.modalEl = typeof document !== 'undefined' ? document.getElementById('minigame-modal') : null;
@@ -1000,6 +1001,7 @@ export class StarlightMinigame {
       this.resultsEl.hidden = true;
     }
 
+    this.onRunStart?.();
     this.onRewardsEarned?.(null, null);
     this._beginWave(1);
     this.syncHud();

@@ -242,8 +242,10 @@ class GameApp {
       storage,
       audio,
       onCelebrate: (opts) => this.triggerCelebration(opts),
+      onRunStart: () => this.clearCelebration(),
       onRewardsEarned: () => this.refreshHud(),
       onClose: () => {
+        this.clearCelebration();
         this.refreshHud();
         this.syncControlVisibility();
         this.syncOverworldPause();
@@ -352,6 +354,7 @@ class GameApp {
     if (typeof document !== 'undefined' && document.body) {
       document.body.classList.toggle('in-battle', inBattle);
       document.body.classList.toggle('modal-open', modalOpen);
+      document.body.classList.toggle('in-minigame', Boolean(this.minigame?.isOpen()));
     }
 
     if (becameInBattle || becameModalOpen) {
@@ -2202,6 +2205,7 @@ class GameApp {
 
   async triggerEncounterTransition(bgmTheme = 'battle', meta = {}) {
     const token = ++this.encounterToken;
+    this.clearCelebration();
     this.encounterTransitioning = true;
     this._starterFallbackStyle = null;
     this._starterFallbackAcc = null;
@@ -2580,6 +2584,7 @@ class GameApp {
     if (this.dialogueOpen) this.closeDialogue();
     if (this.pokedex?.isOpen()) this.pokedex.close();
     if (this.isSettingsOpen()) this.closeSettings();
+    this.clearCelebration();
     this.overworld?.clearTouchNavigation?.();
     this.minigame?.open();
     this.syncControlVisibility();
@@ -2605,6 +2610,7 @@ class GameApp {
     if (this.isSettingsOpen()) {
       this.closeSettings();
     }
+    this.clearCelebration();
     this.pokedex.open(tab);
     this.syncControlVisibility();
     this.syncOverworldPause();
@@ -2632,6 +2638,7 @@ class GameApp {
     if (this.pokedex?.isOpen()) {
       this.pokedex.close();
     }
+    this.clearCelebration();
     if (this.resetStatusEl) this.resetStatusEl.textContent = '';
     this.settingsModalEl.hidden = false;
     this.syncControlVisibility();
