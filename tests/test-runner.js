@@ -5,7 +5,7 @@ import {
   ABILITIES,
   BADGES,
   BIOMES,
-  BIOME_MINIMAP_PALETTE,
+  BIOME_SCALING_OFFSETS,
   BIOME_WARP_POINTS,
   CHESTS,
   ENCOUNTER_TRAITS,
@@ -28,16 +28,24 @@ import {
   TRAINER_ACCESSORIES,
   TRAINER_AURAS,
   TRAINER_STYLES,
+  TRAINER_XP_WEIGHTS,
   TRAINERS,
   TYPES,
   TYPE_CHART,
   WORLD_COLS,
   WORLD_MAP,
   WORLD_ROWS,
+  computeMilestoneTrainerXp,
   getBiomeAt,
   getBiomeDiscoveryStats,
   getBiomeWarpPoint,
   getCompassGuidance,
+  getCumulativeXpForPlayerLevel,
+  getPlayerLevel,
+  getPlayerLevelFromXp,
+  getPlayerLevelXpRequired,
+  getPlayerProgression,
+  getSafeZoneWarpPoint,
   getSpriteUrls,
   getTileDepthInfo,
   isTileWalkableAt,
@@ -45,12 +53,15 @@ import {
   resolveTrainerLook,
 } from '../js/config.js';
 import {
+  BIOME_SCALING_OFFSETS as POKEMON_BIOME_SCALING_OFFSETS,
   MAX_UPGRADE_TIER,
   Pokemon,
   SPECIES_ARCHETYPES,
+  TRAINER_XP_WEIGHTS as POKEMON_TRAINER_XP_WEIGHTS,
   attachPokemonSprite,
   calculateCatchAttempt,
   calculateDamage,
+  computeMilestoneTrainerXp as computePokemonMilestoneTrainerXp,
   createPokemon,
   evaluateDefensiveAbility,
   evaluateEntryAbility,
@@ -60,7 +71,12 @@ import {
   getBattleShardReward,
   getBiomeScaledRange,
   getBondTier,
+  getCumulativeXpForPlayerLevel as getPokemonCumulativeXpForPlayerLevel,
   getPartyFarmingLevel,
+  getPlayerLevel as getPokemonPlayerLevel,
+  getPlayerLevelFromXp as getPokemonPlayerLevelFromXp,
+  getPlayerLevelXpRequired as getPokemonPlayerLevelXpRequired,
+  getPlayerProgression as getPokemonPlayerProgression,
   getPokemonAbility,
   getScaledRivalParty,
   getScaledShrineGuard,
@@ -86,9 +102,14 @@ import {
   isSpeciesSeen,
   sanitizePosition,
   storage,
+  syncProfilePlayerProgression,
   syncProfilePokedex,
   validateAndRepairProfile,
 } from '../js/storage.js';
+import {
+  getPlayerProgressionSafe,
+  getRecommendedFarmingZoneSafe,
+} from '../js/pokedex.js';
 import { AudioEngine, THEMES, audio } from '../js/audio.js';
 import {
   BATTLE_STATES,
@@ -137,6 +158,100 @@ function assertFinite(actual, label = '') {
 }
 
 function buildTestSuites() {
+  /** Create a deterministic mock Web Audio context for verifying audio cues without side effects. */
+  const createMockAudioCtx = (state, autoResume = false) => {
+    const makeParam = (init = 0) => ({
+      value: init,
+      setValueAtTime() {},
+      linearRampToValueAtTime() {},
+      exponentialRampToValueAtTime() {},
+    });
+    const createdOsc = [];
+    const createdBuf = [];
+    return {
+      state,
+      currentTime: 1,
+      sampleRate: 44100,
+      destination: {},
+      createdOsc,
+      createdBuf,
+      createGain() {
+        return { gain: makeParam(1), connect() {}, disconnect() {} };
+      },
+      createOscillator() {
+        const osc = {
+          type: 'sine',
+          frequency: makeParam(440),
+          connect() {},
+          disconnect() {},
+          start() {},
+          stop() {},
+          setPeriodicWave() {},
+          onended: null,
+        };
+        createdOsc.push(osc);
+        return osc;
+      },
+      createPeriodicWave() {
+        return {};
+      },
+      createBiquadFilter() {
+        return { type: 'bandpass', Q: makeParam(1), frequency: makeParam(440), connect() {}, disconnect() {} };
+      },
+      createBuffer(ch, len) {
+        return { getChannelData: () => new Float32Array(len) };
+      },
+      createBufferSource() {
+        const src = { buffer: null, loop: false, connect() {}, disconnect() {}, start() {}, stop() {}, onended: null };
+        createdBuf.push(src);
+        return src;
+      },
+      resume() {
+        if (autoResume) this.state = 'running';
+        return Promise.resolve();
+      },
+    };
+  };
+
+  /** Snapshot and restore GameApp/Overworld/localStorage state across Suite 47 DOM tests. */
+  const snapshotAppForTest = (app) => ({
+    prevRawSave: window.localStorage.getItem(STORAGE_KEY),
+    wasBootHidden: app.bootScreenEl.hidden,
+    wasStarterHidden: app.starterScreenEl.hidden,
+    wasShellHidden: app.gameShellEl.hidden,
+    wasOverworldActive: app.overworld.active,
+    prevRarePatches: [...(app.overworld.rarePatches || [])],
+    origCabinetStyle: app.cabinetEl?.getAttribute('style') ?? null,
+  });
+
+  const restoreAppFromSnapshot = (app, snap) => {
+    if (snap.origCabinetStyle === null) app.cabinetEl?.removeAttribute('style');
+    else app.cabinetEl?.setAttribute('style', snap.origCabinetStyle);
+    app.handleInteractHint(null);
+    clearTimeout(app.biomeBannerTimer);
+    if (app.biomeBannerEl) app.biomeBannerEl.hidden = true;
+    app.cancelWarpTransition?.();
+    app.minigame?.close?.();
+    app.pokedex?.close?.();
+    app.closeSettings?.();
+    app.closeDialogue?.();
+    app.clearCelebration?.();
+    if (app.battle?.active) app.battle.stop({ outcome: 'escaped', faintedAll: false });
+    app.encounterTransitioning = false;
+    app.overworld.rarePatches = snap.prevRarePatches;
+    app.overworld.setActive(snap.wasOverworldActive);
+    if (snap.prevRawSave === null) window.localStorage.removeItem(STORAGE_KEY);
+    else window.localStorage.setItem(STORAGE_KEY, snap.prevRawSave);
+    storage.state = storage.load();
+    app.applyTrainerTheme(storage.getActiveTrainerId() || 'violet');
+    app.bootScreenEl.hidden = snap.wasBootHidden;
+    app.starterScreenEl.hidden = snap.wasStarterHidden;
+    app.gameShellEl.hidden = snap.wasShellHidden;
+    if (!snap.wasOverworldActive) audio?.stopBGM?.();
+    if (!snap.wasBootHidden) app.showBootScreen();
+    else app.refreshHud();
+  };
+
   return [
     {
       name: '1. Type Effectiveness Matrix',
@@ -10336,30 +10451,291 @@ function buildTestSuites() {
       ],
     },
     {
-      name: '47. Sprint 13 Level-Matched Zone Warp & Live Starlight Universe Minimap',
+      name: '47. Sprint 14 Player-Level Progression, Anti-Spike Scaling, Safe-Zone Recall & 2-Button Warp Dock',
       tests: [
         {
-          name: 'Level-to-biome matching (Lv.1..50), village exclusion, mixed/fainted party math & deterministic shrine tiebreak',
+          name: 'Player Level & Trainer XP progression, Lv.40+ party/box immunity & lossless starlight_pokemon_save_v1 Violet & Ozias migration',
+          fn() {
+            const TEST_KEY = 'starlight_pokemon_test_s47_prog_migration_v1';
+
+            // 1. Single-source XP weights, curve & parity between world-data (config.js) and pokemon.js
+            const expectedWeights = {
+              battleWin: 14,
+              badge: 60,
+              shrine: 85,
+              rival: 50,
+              rivalRematch: 30,
+              shrineTrial: 40,
+              quest: 45,
+              speciesCaught: 4,
+            };
+            for (const [k, val] of Object.entries(expectedWeights)) {
+              assertEqual(TRAINER_XP_WEIGHTS[k], val, `TRAINER_XP_WEIGHTS.${k} (config)`);
+              assertEqual(POKEMON_TRAINER_XP_WEIGHTS[k], val, `TRAINER_XP_WEIGHTS.${k} (pokemon)`);
+            }
+
+            assertEqual(getPlayerLevelXpRequired(1), 30, 'Lv.1->2 requires 30 XP');
+            assertEqual(getPlayerLevelXpRequired(2), 40, 'Lv.2->3 requires 40 XP');
+            assertEqual(getPlayerLevelXpRequired(49), 510, 'Lv.49->50 requires 510 XP');
+            assertEqual(getPlayerLevelXpRequired(50), 0, 'Lv.50 requires 0 XP (cap)');
+            assertEqual(getPlayerLevelXpRequired(99), 0, 'Lv.99 requires 0 XP (cap)');
+            assertEqual(getPlayerLevelXpRequired(NaN), 30, 'invalid level defaults to 30 XP');
+            assertEqual(getPokemonPlayerLevelXpRequired(3), 50, 'pokemon getPlayerLevelXpRequired matches');
+
+            assertEqual(getCumulativeXpForPlayerLevel(1), 0, 'Lv.1 cumulative XP === 0');
+            assertEqual(getCumulativeXpForPlayerLevel(2), 30, 'Lv.2 cumulative XP === 30');
+            assertEqual(getCumulativeXpForPlayerLevel(3), 70, 'Lv.3 cumulative XP === 70');
+            assertEqual(getCumulativeXpForPlayerLevel(50), 13230, 'Lv.50 cumulative XP === 13230');
+            assertEqual(getCumulativeXpForPlayerLevel(-Infinity), 0, '-Infinity cumulative XP === 0');
+            assertEqual(getCumulativeXpForPlayerLevel(Infinity), 13230, 'Infinity cumulative XP === 13230');
+            assertEqual(getPokemonCumulativeXpForPlayerLevel(50), 13230, 'pokemon cumulative XP matches');
+
+            const xp0 = getPlayerLevelFromXp(0);
+            assertEqual(xp0.level, 1, '0 XP -> Lv.1');
+            assertEqual(xp0.xpIntoLevel, 0, '0 XP -> 0 xpIntoLevel');
+            assertEqual(xp0.xpToNext, 30, '0 XP -> 30 xpToNext');
+            assertEqual(xp0.isMaxLevel, false, '0 XP -> not max');
+
+            const xp29 = getPlayerLevelFromXp(29);
+            assertEqual(xp29.level, 1, '29 XP stays Lv.1');
+            assertEqual(xp29.xpIntoLevel, 29, '29 XP -> 29 xpIntoLevel');
+
+            const xp30 = getPlayerLevelFromXp(30);
+            assertEqual(xp30.level, 2, '30 XP advances to Lv.2');
+            assertEqual(xp30.xpIntoLevel, 0, '30 XP -> 0 xpIntoLevel');
+            assertEqual(xp30.xpToNext, 40, 'Lv.2 -> 40 xpToNext');
+
+            const xpMax = getPlayerLevelFromXp(Infinity);
+            assertEqual(xpMax.level, 50, 'Infinity XP -> Lv.50');
+            assertEqual(xpMax.isMaxLevel, true, 'Lv.50 isMaxLevel === true');
+            assertEqual(xpMax.xpToNext, 0, 'Lv.50 xpToNext === 0');
+            assertEqual(xpMax.progressPct, 100, 'Lv.50 progressPct === 100');
+            assertEqual(getPokemonPlayerLevelFromXp(70).level, 3, 'pokemon getPlayerLevelFromXp matches');
+
+            // 2. Scalar, string & invalid inputs on getPlayerProgression / getPlayerLevel
+            assertEqual(getPlayerLevel(-Infinity), 1, '-Infinity -> Lv.1');
+            assertEqual(getPlayerLevel(Infinity), 50, 'Infinity -> Lv.50');
+            assertEqual(getPlayerLevel(NaN), 1, 'NaN -> Lv.1');
+            assertEqual(getPlayerLevel(null), 1, 'null -> Lv.1');
+            assertEqual(getPlayerLevel(undefined), 1, 'undefined -> Lv.1');
+            assertEqual(getPlayerLevel(true), 1, 'boolean -> Lv.1');
+            assertEqual(getPlayerLevel([]), 1, 'array -> Lv.1');
+            assertEqual(getPlayerLevel(''), 1, 'empty string -> Lv.1');
+            assertEqual(getPlayerLevel(' 12 '), 12, 'trimmed numeric string -> Lv.12');
+            assertEqual(getPlayerLevel(0), 1, '0 clamps to Lv.1');
+            assertEqual(getPlayerLevel(99), 50, '99 clamps to Lv.50');
+            assertEqual(getPokemonPlayerLevel(' 15 '), 15, 'pokemon getPlayerLevel matches');
+            assertEqual(getPokemonPlayerProgression(10).xp, getPlayerProgression(10).xp, 'progression parity across modules');
+
+            // 3. computeMilestoneTrainerXp exact formula & total immunity to Lv.40+ team/box levels
+            const milestoneProfile = {
+              stats: { battlesWon: 3 }, // 3*14 = 42
+              badges: ['meadow', 'meadow', 'flame'], // 2 unique * 60 = 120
+              shrinesCleared: ['forest_shrine', 'forest_shrine'], // 1 unique * 85 = 85
+              rivalsDefeated: ['rival_leo', 'rival_leo'], // 1 unique * 50 = 50
+              rivalRematchCounts: { rival_leo: 2, invalid: -5, bad: NaN }, // 2*30 = 60
+              shrineTrialCounts: { forest_shrine: 1, bad: true }, // 1*40 = 40
+              questsCompleted: ['quest_forest_friends'], // 1*45 = 45
+              pokedex: { caught: { 1: 1, 16: true, 25: 0, 150: 2 } }, // 3 unique caught -> (3-1)*4 = 8
+              team: [{ speciesId: 150, level: 50, hp: 180 }, { speciesId: 384, level: 48, hp: 170 }],
+              box: [{ speciesId: 493, level: 50, hp: 200 }, { speciesId: 1024, level: 45, hp: 160 }],
+            };
+            const expectedMilestoneXp = 42 + 120 + 85 + 50 + 60 + 40 + 45 + 8; // 450 XP
+            assertEqual(computeMilestoneTrainerXp(milestoneProfile), expectedMilestoneXp, 'computeMilestoneTrainerXp sums all 8 weights & ignores Lv.45-50 team/box');
+            assertEqual(computePokemonMilestoneTrainerXp(milestoneProfile), expectedMilestoneXp, 'pokemon computeMilestoneTrainerXp matches');
+
+            const caughtArrayProfile = {
+              pokedex: { caught: [1, 16, '16', 25] },
+              team: [{ speciesId: 493, level: 50 }],
+              box: [{ speciesId: 150, level: 49 }],
+            };
+            assertEqual(computeMilestoneTrainerXp(caughtArrayProfile), 8, 'array pokedex.caught deduplicates & ignores starter + Lv.49-50 mons');
+
+            // Explicit floor only applies when persisted trainerXp is 0, else max(persistedXp, milestoneXp)
+            assertEqual(getPlayerLevel({ trainerXp: 0, playerLevel: 9 }), 9, 'explicit playerLevel floor honored when trainerXp === 0');
+            assertEqual(getPlayerLevel({ trainerXp: 100, playerLevel: 25 }), 3, 'non-zero trainerXp + milestone dominates arbitrary playerLevel');
+            assertEqual(getPlayerLevel({ trainerXp: 20, stats: { battlesWon: 5 } }), 3, 'higher milestoneXp overrides lower persisted trainerXp');
+
+            try {
+              window.localStorage.removeItem(TEST_KEY);
+
+              // 4. Catching/holding Lv.40+ Pokemon in party & box never inflates Player Level or farming zone
+              const store = new StorageManager(TEST_KEY);
+              store.selectTrainer('violet');
+              store.chooseStarter(1); // Bulbasaur Lv.5
+              assertEqual(store.getPlayerLevel(), 1, 'fresh starter Violet starts at Player Lv.1');
+              assertEqual(store.getActiveProfile().trainerXp, 0, 'fresh starter Violet starts at 0 trainerXp');
+
+              const lv45Mewtwo = createPokemon(150, 45, 'rift');
+              const lv48Rayquaza = createPokemon(384, 48, 'sanctum');
+              const lv50Arceus = createPokemon(493, 50, 'rift');
+              store.recordCaught(lv45Mewtwo);
+              store.recordCaught(lv48Rayquaza);
+              const activeProf = store.getActiveProfile();
+              assertEqual(activeProf.badges.length, 0, 'catching Lv.45 Mewtwo + Lv.48 Rayquaza unlocks 0 badges');
+              assertEqual(activeProf.trainerXp, 2 * 4, 'catching Lv.45 + Lv.48 grants only 8 speciesCaught XP');
+              assertEqual(store.getPlayerLevel(), 1, 'holding Lv.45 & Lv.48 mons in party keeps Player Lv.1');
+
+              for (const id of [10, 16, 19, 25]) {
+                store.recordCaught(createPokemon(id, 4));
+              }
+              store.recordCaught(lv50Arceus); // goes to box (party of 6 full)
+              assert(activeProf.team.some((m) => m.level >= 45), 'Lv.45+ mons held in party');
+              assert(activeProf.box.some((m) => m.level >= 50), 'Lv.50 mon held in box');
+              const expectedAfter7Catches = 7 * 4 + activeProf.badges.length * 60; // 28 + 2*60 = 148
+              assertEqual(activeProf.trainerXp, expectedAfter7Catches, 'catching 7 species grants 28 species XP + badge XP only (ignoring Lv.45-50 levels)');
+              assertEqual(store.getPlayerLevel(), 4, '148 XP places trainer at Player Lv.4 despite Lv.45-50 party & box');
+              const immuneZone = resolveRecommendedFarmingZone(activeProf);
+              assertEqual(immuneZone.biomeId, 'forest', 'Lv.40+ mon holder still farms Whispering Forest at Player Lv.4');
+              assertEqual(immuneZone.minLv, 2, 'Lv.40+ mon holder forest minLv stays 2');
+              assertEqual(immuneZone.maxLv, 7, 'Lv.40+ mon holder forest maxLv stays 7');
+              const immuneWild = rollWildPokemon('forest', activeProf, { forceElite: false });
+              assertInRange(immuneWild.level, 2, 7, 'wild encounter stays Lv.2..7 despite Lv.45-50 party & box');
+
+              // Earning real trainer milestones advances trainerXp & playerLevel
+              store.recordBattleWin({ expEarned: 20 });
+              assertEqual(activeProf.trainerXp, expectedAfter7Catches + 14, 'battleWin adds +14 XP');
+              store.markShrineCleared('forest_shrine', 151);
+              assert(activeProf.trainerXp >= expectedAfter7Catches + 14 + 85, 'shrine clear advances trainerXp');
+              assertGreater(store.getPlayerLevel(), 4, 'shrine clear advances Player Level beyond Lv.4');
+
+              // 5. Lossless starlight_pokemon_save_v1 migration for BOTH Violet & Ozias
+              const v1LegacySave = {
+                version: 1,
+                activeTrainerId: 'violet',
+                settings: { muted: true, crtEnabled: false, battlePace: 'fast' },
+                profiles: {
+                  violet: {
+                    trainerId: 'violet',
+                    starterId: 1,
+                    pos: { x: 11, y: 15, dir: 'left' },
+                    team: [
+                      { speciesId: 1, level: 12, hp: 32, maxHp: 32, exp: 400 },
+                      { speciesId: 150, level: 44, hp: 140, maxHp: 140 },
+                    ],
+                    box: [{ speciesId: 25, level: 42, hp: 98, maxHp: 98 }],
+                    bag: { potions: 9, greatBalls: 4, starBalls: 2, starShards: 7, cheerCharges: 2, gems: { sun_gem: 1 } },
+                    badges: ['meadow'],
+                    shrinesCleared: ['forest_shrine'],
+                    rivalsDefeated: ['rival_leo'],
+                    questsCompleted: ['quest_forest_friends'],
+                    stats: { battlesWon: 4, steps: 88 },
+                    pokedex: { seen: [1, 25, 150], caught: { 1: 1, 25: 1, 150: 1 } },
+                  },
+                  ozias: {
+                    trainerId: 'ozias',
+                    starterId: 4,
+                    pos: { x: 4, y: 5, dir: 'up' },
+                    team: [{ speciesId: 4, level: 18, hp: 44, maxHp: 44 }],
+                    box: [{ speciesId: 384, level: 46, hp: 165, maxHp: 165 }],
+                    bag: { potions: 3, greatBalls: 5, starBalls: 2, starShards: 10, gems: { fire_gem: 2 } },
+                    badges: ['meadow', 'flame'],
+                    stats: { battlesWon: 2 },
+                    pokedex: { seen: [4, 384], caught: { 4: 1, 384: 1 } },
+                  },
+                },
+              };
+              window.localStorage.setItem(TEST_KEY, JSON.stringify(v1LegacySave));
+              const migrated = new StorageManager(TEST_KEY);
+              const mViolet = migrated.getProfile('violet');
+              const mOzias = migrated.getProfile('ozias');
+
+              assertEqual(mViolet.team.length, 2, 'v1 Violet team count preserved');
+              assertEqual(mViolet.team[0].level, 12, 'v1 Violet starter level preserved');
+              assertEqual(mViolet.team[1].level, 44, 'v1 Violet Lv.44 party mon preserved losslessly');
+              assertEqual(mViolet.box.length, 1, 'v1 Violet box count preserved');
+              assertEqual(mViolet.box[0].level, 42, 'v1 Violet Lv.42 box mon preserved losslessly');
+              assertEqual(mViolet.bag.potions, 9, 'v1 Violet potions preserved');
+              assertEqual(mViolet.bag.starShards, 7, 'v1 Violet starShards preserved');
+              assertEqual(mViolet.bag.gems.sun_gem, 1, 'v1 Violet gems preserved');
+              assertEqual(mViolet.badges.length, 1, 'v1 Violet badges preserved');
+              assertEqual(mViolet.pos.x, 11, 'v1 Violet walkable x preserved');
+              assertEqual(mViolet.pos.y, 15, 'v1 Violet walkable y preserved');
+              assertEqual(mViolet.pos.dir, 'left', 'v1 Violet dir preserved');
+              // Violet milestone XP: 4*14 + 1*60 + 1*85 + 1*50 + 1*45 + (3-1)*4 = 56+60+85+50+45+8 = 304 -> Lv.7 (0+30+40+50+60+70=250, +80=330)
+              assertEqual(mViolet.trainerXp, 304, 'v1 Violet trainerXp hydrated accurately without reading team/box levels');
+              assertEqual(mViolet.playerLevel, 6, 'v1 Violet playerLevel hydrated accurately (304 XP -> Lv.6)');
+
+              assertEqual(mOzias.team.length, 1, 'v1 Ozias team count preserved');
+              assertEqual(mOzias.team[0].speciesId, 4, 'v1 Ozias starter speciesId preserved');
+              assertEqual(mOzias.team[0].level, 18, 'v1 Ozias starter level preserved');
+              assertEqual(mOzias.box.length, 1, 'v1 Ozias box count preserved');
+              assertEqual(mOzias.box[0].level, 46, 'v1 Ozias Lv.46 box mon preserved losslessly');
+              assertEqual(mOzias.bag.greatBalls, 5, 'v1 Ozias greatBalls preserved');
+              assertEqual(mOzias.bag.gems.fire_gem, 2, 'v1 Ozias gems preserved');
+              assertEqual(mOzias.badges.length, 2, 'v1 Ozias badges preserved');
+              assertEqual(mOzias.pos.x, 4, 'v1 Ozias walkable x preserved');
+              assertEqual(mOzias.pos.y, 5, 'v1 Ozias walkable y preserved');
+              // Ozias milestone XP: 2*14 + 2*60 + (2-1)*4 = 28+120+4 = 152 -> Lv.4 (0+30+40+50=120, +60=180)
+              assertEqual(mOzias.trainerXp, 152, 'v1 Ozias trainerXp hydrated accurately');
+              assertEqual(mOzias.playerLevel, 4, 'v1 Ozias playerLevel hydrated accurately');
+
+              const vSummary = migrated.getProfileSummary('violet');
+              const oSummary = migrated.getProfileSummary('ozias');
+              assertEqual(vSummary.playerLevel, 6, 'Violet getProfileSummary exposes playerLevel');
+              assert(vSummary.label.startsWith('Trainer Lv.6 •'), `Violet summary label includes Trainer Lv.6 (got "${vSummary.label}")`);
+              assertEqual(oSummary.playerLevel, 4, 'Ozias getProfileSummary exposes playerLevel');
+              assert(oSummary.label.startsWith('Trainer Lv.4 •'), `Ozias summary label includes Trainer Lv.4 (got "${oSummary.label}")`);
+
+              // Invalid/solid positions still repaired safely without stranding
+              const repairedViolet = validateAndRepairProfile({ ...v1LegacySave.profiles.violet, pos: { x: 0, y: 0, dir: 'down' } }, 'violet');
+              assertEqual(isTileWalkableAt(repairedViolet.pos.x, repairedViolet.pos.y), true, 'solid Violet pos repaired to walkable');
+              const repairedOzias = validateAndRepairProfile({ ...v1LegacySave.profiles.ozias, pos: { x: -5, y: 999, dir: 'right' } }, 'ozias');
+              assertEqual(isTileWalkableAt(repairedOzias.pos.x, repairedOzias.pos.y), true, 'out-of-bounds Ozias pos repaired to walkable');
+
+              // syncProfilePlayerProgression handles corrupted fields cleanly
+              const corruptProg = { trainerXp: NaN, playerLevel: -5, stats: { battlesWon: 1 }, pokedex: { caught: { 1: 1 } } };
+              const synced = syncProfilePlayerProgression(corruptProg);
+              assertEqual(synced.xp, 14, 'corrupted trainerXp repaired from milestones');
+              assertEqual(corruptProg.trainerXp, 14, 'syncProfilePlayerProgression writes repaired trainerXp');
+              assertEqual(corruptProg.playerLevel, 1, 'syncProfilePlayerProgression writes repaired playerLevel');
+            } finally {
+              window.localStorage.removeItem(TEST_KEY);
+            }
+          },
+        },
+        {
+          name: 'Player-Level farming zone selection (Lv.1..50), actual encounter bracket parity, Veteran/Apex anti-spike protection & shrine tiebreak',
           fn() {
             assertEqual(Array.isArray(FARMING_BIOME_ORDER), true, 'FARMING_BIOME_ORDER exported');
             assertEqual(FARMING_BIOME_ORDER.length, 17, 'FARMING_BIOME_ORDER covers all 17 encounter biomes');
             assertEqual(FARMING_BIOME_ORDER.includes('village'), false, 'non-farming village excluded from FARMING_BIOME_ORDER');
+            assertEqual(Object.keys(BIOMES).length, 18, '18 total BIOMES defined');
 
-            const allBiomeIds = Object.keys(BIOMES);
-            assertEqual(allBiomeIds.length, 18, '18 total BIOMES defined');
-            for (const id of allBiomeIds) {
-              const pal = BIOME_MINIMAP_PALETTE[id];
-              assert(Boolean(pal && pal.base && pal.path && pal.encounter && pal.accent), `BIOME_MINIMAP_PALETTE[${id}] complete`);
+            const expectedOffsets = {
+              village: -2,
+              forest: -1,
+              cave: 0,
+              water: 0,
+              volcano: 0,
+              desert: 0,
+              peak: 1,
+              grove: 1,
+              marsh: 1,
+              faeveldt: 1,
+              canyon: 1,
+              sanctum: 1,
+              atoll: 1,
+              reef: 1,
+              highlands: 1,
+              ruins: 1,
+              crater: 1,
+              rift: 1,
+            };
+            for (const [bId, expectedOffset] of Object.entries(expectedOffsets)) {
+              assertEqual(BIOME_SCALING_OFFSETS[bId], expectedOffset, `BIOME_SCALING_OFFSETS.${bId} (config)`);
+              assertEqual(POKEMON_BIOME_SCALING_OFFSETS[bId], expectedOffset, `BIOME_SCALING_OFFSETS.${bId} (pokemon)`);
             }
 
-            // Clamping & edge-value normalization
+            // Edge clamping & legacy getPartyFarmingLevel compatibility
             const lv1World = resolveFarmingBiomeForLevel(1);
             const lv1Poke = resolveRecommendedFarmingZone(1);
             assertEqual(lv1World.biomeId, 'forest', 'Lv.1 low-clamps to forest (world-data)');
             assertEqual(lv1World.clamped, 'low', 'Lv.1 marks clamped=low (world-data)');
             assertEqual(lv1Poke.biomeId, 'forest', 'Lv.1 low-clamps to forest (pokemon)');
             assertEqual(lv1Poke.clamped, 'low', 'Lv.1 marks clamped=low (pokemon)');
-            assertEqual(lv1Poke.partyLevel, 1, 'Lv.1 partyLevel === 1');
+            assertEqual(lv1Poke.playerLevel, 1, 'Lv.1 playerLevel === 1');
+            assertEqual(lv1Poke.partyLevel, 1, 'Lv.1 partyLevel alias === 1');
 
             for (const highLv of [37, 45, 50]) {
               const wHigh = resolveFarmingBiomeForLevel(highLv);
@@ -10370,87 +10746,134 @@ function buildTestSuites() {
               assertEqual(pHigh.clamped, 'high', `Lv.${highLv} clamped=high (pokemon)`);
             }
 
-            assertEqual(getPartyFarmingLevel(-Infinity), 1, '-Infinity normalizes to 1');
-            assertEqual(getPartyFarmingLevel(Infinity), 50, '+Infinity normalizes to 50');
-            assertEqual(getPartyFarmingLevel(NaN), 5, 'NaN defaults to 5');
-            assertEqual(getPartyFarmingLevel(null), 5, 'null defaults to 5');
-            assertEqual(getPartyFarmingLevel(undefined), 5, 'undefined defaults to 5');
-            assertEqual(getPartyFarmingLevel(true), 5, 'boolean defaults to 5');
-            assertEqual(getPartyFarmingLevel([]), 5, 'empty team defaults to 5');
-            assertEqual(getPartyFarmingLevel({ team: [] }), 5, 'empty profile team defaults to 5');
+            assertEqual(getPartyFarmingLevel(-Infinity), 1, 'legacy getPartyFarmingLevel(-Infinity) === 1');
+            assertEqual(getPartyFarmingLevel(Infinity), 50, 'legacy getPartyFarmingLevel(Infinity) === 50');
+            assertEqual(getPartyFarmingLevel([{ level: 14, hp: 30, isFainted: false }]), 14, 'legacy getPartyFarmingLevel kept exported');
 
-            // Every integer Lv.2..36 resolves to a farming biome whose base levelRange contains it
-            for (let lv = 2; lv <= 36; lv++) {
+            // Every integer Lv.1..50 resolves identically across world-data, pokemon & pokedex,
+            // matches actual scaled encounter brackets, and NEVER puts players into Veteran/Apex spikes.
+            for (let lv = 1; lv <= 50; lv++) {
               const w = resolveFarmingBiomeForLevel(lv);
               const p = resolveRecommendedFarmingZone(lv);
+              const px = getRecommendedFarmingZoneSafe(lv);
               assert(w.biomeId !== 'village' && p.biomeId !== 'village', `Lv.${lv} never matches village`);
               assertEqual(w.biomeId, p.biomeId, `Lv.${lv} world-data and pokemon match (${w.biomeId})`);
-              assertEqual(w.clamped, null, `Lv.${lv} not clamped`);
-              assertEqual(p.clamped, null, `Lv.${lv} not clamped in pokemon helper`);
-              const [bMin, bMax] = BIOMES[w.biomeId].levelRange;
+              assertEqual(px.biomeId, p.biomeId, `Lv.${lv} pokedex helper matches (${px.biomeId})`);
+              assertEqual(w.minLv, p.minLv, `Lv.${lv} minLv matches`);
+              assertEqual(w.maxLv, p.maxLv, `Lv.${lv} maxLv matches`);
+              assertEqual(w.clamped, lv < 2 ? 'low' : (lv > 36 ? 'high' : null), `Lv.${lv} clamped state exact`);
+              assertEqual(p.clamped, w.clamped, `Lv.${lv} pokemon clamped state exact`);
               assert(
-                lv >= bMin && lv <= bMax,
-                `Lv.${lv} falls within ${w.biomeId} levelRange [${bMin}, ${bMax}]`,
+                w.threatTone !== 'veteran' && w.threatTone !== 'apex',
+                `Lv.${lv} world-data never Veteran/Apex (got ${w.threatTone})`,
+              );
+              assert(
+                p.threatTone !== 'veteran' && p.threatTone !== 'apex',
+                `Lv.${lv} pokemon never Veteran/Apex (got ${p.threatTone})`,
+              );
+              assert(
+                p.maxLv <= Math.max(7, lv + 4) && p.minLv <= Math.max(2, lv + 1),
+                `Lv.${lv} bracket [${p.minLv},${p.maxLv}] obeys anti-spike cap`,
+              );
+
+              const scaledCheck = getBiomeScaledRange(p.biomeId, lv);
+              assertEqual(scaledCheck.minLv, p.minLv, `Lv.${lv} getBiomeScaledRange minLv parity`);
+              assertEqual(scaledCheck.maxLv, p.maxLv, `Lv.${lv} getBiomeScaledRange maxLv parity`);
+              assert(
+                scaledCheck.threatTone !== 'veteran' && scaledCheck.threatTone !== 'apex',
+                `Lv.${lv} getBiomeScaledRange never Veteran/Apex`,
+              );
+              if (lv >= 2) {
+                assert(
+                  lv >= p.minLv && lv <= p.maxLv,
+                  `Lv.${lv} falls within ${p.biomeId} actual bracket [${p.minLv}, ${p.maxLv}]`,
+                );
+              }
+
+              // Verify actual wild encounter rolls stay inside the chosen bracket
+              const lvProf = {
+                trainerId: 'violet',
+                playerLevel: lv,
+                trainerXp: getCumulativeXpForPlayerLevel(lv),
+                badges: lv > 7 ? ['meadow', 'flame'] : [],
+                stats: { battlesWon: 0 },
+                shrinesCleared: [],
+                questsCompleted: [],
+                team: [{ speciesId: 1, level: 50, hp: 150 }],
+                box: [{ speciesId: 150, level: 50, hp: 180 }],
+              };
+              const recProf = resolveRecommendedFarmingZone(lvProf);
+              assertEqual(recProf.playerLevel, lv, `Lv.${lv} profile ignores Lv.50 team/box`);
+              assert(
+                recProf.threatTone !== 'veteran' && recProf.threatTone !== 'apex',
+                `Lv.${lv} profile with Lv.50 mons never hits Veteran/Apex spike`,
+              );
+              const rolledWild = rollWildPokemon(recProf.biomeId, lvProf, { forceElite: false });
+              assertInRange(
+                rolledWild.level,
+                recProf.minLv,
+                recProf.maxLv,
+                `Lv.${lv} rolled wild mon level fits ${recProf.biomeId} [${recProf.minLv}, ${recProf.maxLv}]`,
               );
             }
 
-            // Mixed & fainted-lead party math
-            assertEqual(getPartyFarmingLevel([{ level: 14, hp: 30, isFainted: false }]), 14, '1 healthy mon uses its level');
-            assertEqual(
-              getPartyFarmingLevel([
-                { level: 10, hp: 20, isFainted: false },
-                { level: 20, hp: 40, isFainted: false },
-              ]),
-              Math.round(0.68 * 20 + 0.32 * 10),
-              '2+ healthy mons blend top 2 descending levels (0.68*20 + 0.32*10 = 17)',
-            );
-            assertEqual(
-              getPartyFarmingLevel([
-                { level: 40, hp: 0, isFainted: true },
-                { level: 10, hp: 22, isFainted: false },
-                { level: 6, hp: 18, isFainted: false },
-              ]),
-              Math.round(0.68 * 10 + 0.32 * 6),
-              'fainted Lv.40 lead is skipped when healthy mons exist (0.68*10 + 0.32*6 = 9)',
-            );
-            assertEqual(
-              getPartyFarmingLevel([
-                { level: 24, hp: 0, isFainted: true },
-                { level: 16, hp: 0, isFainted: true },
-              ]),
-              Math.round(0.68 * 24 + 0.32 * 16),
-              'all-fainted party falls back to all team mons (21)',
-            );
-
             // Deterministic regardless of trainer position & shrine tiebreak
-            const teamSample = [{ level: 14, hp: 35, isFainted: false }];
-            const resVillagePos = resolveRecommendedFarmingZone({ team: teamSample, pos: { x: 8, y: 15, dir: 'down' }, shrinesCleared: [] });
-            const resRiftPos = resolveRecommendedFarmingZone({ team: teamSample, pos: { x: 78, y: 42, dir: 'up' }, shrinesCleared: [] });
+            const lv14Profile = {
+              playerLevel: 14,
+              trainerXp: getCumulativeXpForPlayerLevel(14),
+              team: [{ level: 48, hp: 150, isFainted: false }],
+              pos: { x: 8, y: 15, dir: 'down' },
+              shrinesCleared: [],
+            };
+            const resVillagePos = resolveRecommendedFarmingZone(lv14Profile);
+            const resRiftPos = resolveRecommendedFarmingZone({ ...lv14Profile, pos: { x: 78, y: 42, dir: 'up' } });
             assertEqual(resVillagePos.biomeId, resRiftPos.biomeId, 'zone resolution does not depend on profile.pos');
-            assertEqual(resVillagePos.biomeId, 'peak', 'Lv.14 matches peak (10-18, midpoint 14)');
+            assertEqual(resVillagePos.biomeId, 'peak', 'Player Lv.14 matches peak (10-18, midpoint 14)');
 
-            const tieFresh = resolveFarmingBiomeForLevel({ team: [{ level: 7, hp: 25 }], shrinesCleared: [] });
+            const tieBase = {
+              playerLevel: 7,
+              trainerXp: getCumulativeXpForPlayerLevel(7),
+              team: [{ level: 45, hp: 120 }],
+            };
+            const tieFresh = resolveFarmingBiomeForLevel({ ...tieBase, shrinesCleared: [] });
             const tieCaveCleared = resolveFarmingBiomeForLevel({
-              team: [{ level: 7, hp: 25 }],
+              ...tieBase,
               shrinesCleared: ['cave_shrine', 'eclipse_shrine'],
             });
-            assertEqual(tieFresh.biomeId, 'cave', 'Lv.7 selects cave first when both shrines uncleared');
-            assertEqual(tieCaveCleared.biomeId, 'water', 'Lv.7 prefers uncleared water shrine when cave shrines cleared');
+            assertEqual(tieFresh.biomeId, 'cave', 'Player Lv.7 selects cave first when both shrines uncleared');
+            assertEqual(tieCaveCleared.biomeId, 'water', 'Player Lv.7 prefers uncleared water shrine when cave shrines cleared');
           },
         },
         {
-          name: 'Guaranteed walkable arrival coordinates across all 18 biomes, storage.warpToZone, overworld.warpToPosition & Save Sanctity',
-          fn() {
-            const TEST_KEY = 'starlight_pokemon_test_s47_warp_storage_v1';
+          name: 'Safe-Zone recall (getSafeZoneWarpPoint, storage.warpToSafeZone, KeyH, #warp-safe-btn, #guide-warp-safe-btn, AudioEngine.playSafeRecall & boot cancel)',
+          async fn() {
+            const TEST_KEY = 'starlight_pokemon_test_s47_safe_recall_v1';
             const app = window.__starlightApp;
             const ow = app?.overworld;
-            assert(Boolean(ow), 'OverworldEngine mounted');
+            assert(Boolean(app && ow), 'GameApp & OverworldEngine mounted');
 
-            const prevRawSave = window.localStorage.getItem(STORAGE_KEY);
-            const prevOwActive = ow.active;
-            const prevRarePatches = [...(ow.rarePatches || [])];
+            // 1. Safe Zone tile beside Healing Fountain & all 18 biome warp points walkable
+            const safeWp = getSafeZoneWarpPoint();
+            assertEqual(safeWp.biomeId, 'village', 'getSafeZoneWarpPoint targets Starlight Village');
+            assertEqual(safeWp.biome?.id, 'village', 'getSafeZoneWarpPoint returns village biome object');
+            assertEqual(isTileWalkableAt(safeWp.x, safeWp.y), true, 'Safe Zone landing tile is walkable');
+            assertEqual(WORLD_MAP[safeWp.y]?.[safeWp.x], TILE.PATH, 'Safe Zone landing tile is TILE.PATH');
+            assertEqual(BIOMES.village.encounters.length, 0, 'Starlight Village has zero wild encounters');
+            assertEqual(getBiomeAt(safeWp.x, safeWp.y).id, 'village', 'Safe Zone landing tile is inside village');
+            const villageHeals = [];
+            for (let y = 0; y < WORLD_ROWS; y++) {
+              for (let x = 0; x < WORLD_COLS; x++) {
+                if (WORLD_MAP[y]?.[x] === TILE.HEAL && getBiomeAt(x, y).id === 'village') {
+                  villageHeals.push({ x, y });
+                }
+              }
+            }
+            assertGreater(villageHeals.length, 0, 'Starlight Village has Healing Fountain tile');
+            assert(
+              villageHeals.some((h) => Math.abs(h.x - safeWp.x) + Math.abs(h.y - safeWp.y) <= 4),
+              'Safe Zone landing tile is right beside Starlight Village Healing Fountain',
+            );
 
-            // 1. All 18 BIOME_WARP_POINTS & getBiomeWarpPoint(biomeId)
             const blockedTiles = new Set([
               TILE.WALL,
               TILE.WATER,
@@ -10469,8 +10892,8 @@ function buildTestSuites() {
               assertEqual(isTileWalkableAt(wp.x, wp.y), true, `${biomeId} warp (${wp.x},${wp.y}) is walkable`);
               const tile = WORLD_MAP[wp.y]?.[wp.x];
               assertEqual(SOLID_TILES.has(tile), false, `${biomeId} warp (${wp.x},${wp.y}) is non-solid`);
-              assertEqual(blockedTiles.has(tile), false, `${biomeId} warp (${wp.x},${wp.y}) not on wall/water/lava/shrine`);
-              assertEqual(getBiomeAt(wp.x, wp.y).id, biomeId, `${biomeId} warp (${wp.x},${wp.y}) inside biome ${biomeId}`);
+              assertEqual(blockedTiles.has(tile), false, `${biomeId} warp (${wp.x},${wp.y}) not on solid/interactive tile`);
+              assertEqual(getBiomeAt(wp.x, wp.y).id, biomeId, `${biomeId} warp (${wp.x},${wp.y}) inside biome`);
               const coordKey = `${wp.x},${wp.y}`;
               assert(
                 !SHRINES[coordKey] && !CHESTS[coordKey] && !NPCS[coordKey]
@@ -10479,134 +10902,246 @@ function buildTestSuites() {
               );
             }
 
+            // 2. AudioEngine.playSafeRecall muted / suspended / running + 0 leaked timers/nodes
+            const mutedAudio = new AudioEngine({ attachUnlockListeners: false });
+            mutedAudio.muted = true;
+            const mutedSafe = mutedAudio.playSafeRecall({ phase: 'full' });
+            assertEqual(mutedSafe.played, false, 'muted playSafeRecall returns played:false');
+            assertEqual(mutedSafe.muted, true, 'muted playSafeRecall returns muted:true');
+            assertEqual(mutedSafe.phase, 'full', 'muted playSafeRecall reports phase');
+            assertEqual(mutedSafe.mode, 'safe', 'muted playSafeRecall reports mode:safe');
+            assertEqual(mutedAudio.playWarpTeleport({ phase: 'full', mode: 'safe' }).mode, 'safe', 'muted playWarpTeleport mode:safe delegates to playSafeRecall');
+
+            const suspSafeEngine = new AudioEngine({ attachUnlockListeners: false });
+            suspSafeEngine.muted = false;
+            suspSafeEngine.ctx = createMockAudioCtx('suspended', false);
+            suspSafeEngine.masterFilter = { connect() {} };
+            suspSafeEngine.masterGain = { gain: { value: 1 }, connect() {} };
+            suspSafeEngine.noiseBuffer = { length: 44100 };
+            const suspSafeRes = suspSafeEngine.playSafeRecall({ phase: 'full' });
+            assertEqual(suspSafeRes.played, true, 'suspended context queues safe recall cue');
+            assertEqual(suspSafeRes.mode, 'safe', 'suspended safe recall reports mode:safe');
+            assertEqual(suspSafeEngine._pendingVoices.length, 12, 'suspended safe recall queues 12 voices (11 tonal + 1 noise)');
+            assertEqual(suspSafeEngine.getDiagnostics().schedulerActive, false, 'safe recall leaks 0 scheduler timers');
+            assertEqual(suspSafeEngine.getDiagnostics().activeBgmNodes, 0, 'safe recall leaks 0 BGM nodes');
+            suspSafeEngine.ctx.state = 'running';
+            suspSafeEngine._flushPendingVoices();
+            assertEqual(suspSafeEngine._pendingVoices.length, 0, 'flushing drains safe recall pending queue');
+            assertEqual(suspSafeEngine.ctx.createdOsc.length, 11, 'flushed safe recall plays 11 oscillators');
+            assertEqual(
+              suspSafeEngine.ctx.createdBuf.filter((src) => src.buffer === suspSafeEngine.noiseBuffer).length,
+              1,
+              'flushed safe recall plays 1 airy breeze noise',
+            );
+
+            const runSafeEngine = new AudioEngine({ attachUnlockListeners: false });
+            runSafeEngine.muted = false;
+            runSafeEngine.ctx = createMockAudioCtx('running', true);
+            runSafeEngine.masterFilter = { connect() {} };
+            runSafeEngine.masterGain = { gain: { value: 1 }, connect() {} };
+            runSafeEngine.noiseBuffer = { length: 44100 };
+            assertEqual(runSafeEngine.playSafeRecall({ phase: 'depart' }).played, true, 'running playSafeRecall depart plays');
+            assertEqual(runSafeEngine.playSafeRecall({ phase: 'arrive' }).played, true, 'running playSafeRecall arrive plays');
+            assertEqual(runSafeEngine.playSafeRecall({ phase: 'full' }).played, true, 'running playSafeRecall full plays');
+            assertEqual(runSafeEngine.playWarpTeleport({ phase: 'full', mode: 'safe' }).mode, 'safe', 'running playWarpTeleport mode:safe delegates');
+            assertGreater(runSafeEngine.ctx.createdOsc.length, 20, 'running playSafeRecall synthesizes chime & Cmaj9 hearth chord');
+            assertGreater(
+              runSafeEngine.ctx.createdBuf.filter((src) => src.buffer === runSafeEngine.noiseBuffer).length,
+              2,
+              'running playSafeRecall synthesizes bandpass breeze noise',
+            );
+            assertEqual(runSafeEngine.getDiagnostics().schedulerActive, false, 'running playSafeRecall leaks 0 scheduler timers');
+            assertEqual(runSafeEngine.getDiagnostics().activeBgmNodes, 0, 'running playSafeRecall leaks 0 BGM nodes');
+
+            // 3. storage.warpToSafeZone + GameApp triggerSafeZoneWarp guards, KeyH, #warp-safe-btn, #guide-warp-safe-btn & boot cancel
+            const snap = snapshotAppForTest(app);
+            const origPlaySafeRecall = audio.playSafeRecall;
+            const safeAudioCalls = [];
+
             try {
+              audio.playSafeRecall = function patchedPlaySafeRecall(opts = {}) {
+                safeAudioCalls.push(opts);
+                return origPlaySafeRecall.call(this, opts);
+              };
+
               window.localStorage.removeItem(TEST_KEY);
               const store = new StorageManager(TEST_KEY);
-              assertEqual(store.warpToZone(4, 5, 'up', 'forest').warped, false, 'warpToZone blocked before trainer selected');
-
-              store.selectTrainer('violet');
-              store.chooseStarter(1);
-              const prof = store.getActiveProfile();
-              const extraMon = createPokemon(25, 12);
-              store.recordCaught(extraMon);
-              store.addRewards({ potions: 2, greatBalls: 3, starBalls: 2, starShards: 4, cheerCharges: 1 });
+              assertEqual(store.warpToSafeZone().warped, false, 'warpToSafeZone blocked before trainer selected');
+              store.selectTrainer('ozias');
+              store.chooseStarter(4);
+              const sProf = store.getActiveProfile();
+              store.addRewards({ starShards: 5, cheerCharges: 1 });
               store.unlockArcade();
-              prof.stats.steps = 42;
-              prof.cheerStepProgress = 12;
-
-              // Hardened updatePosition never stores solid/NaN coordinates
-              store.updatePosition(0, 0, 'up', false);
-              assertEqual(isTileWalkableAt(prof.pos.x, prof.pos.y), true, 'updatePosition(0,0) sanitized to walkable tile');
-              store.updatePosition(NaN, Infinity, 'bad_dir', false);
-              assertEqual(isTileWalkableAt(prof.pos.x, prof.pos.y), true, 'updatePosition(NaN,Infinity) sanitized to walkable tile');
-
-              // Hardened warpToZone sanitizes solid coords and preserves team/box/bag/Dex/steps/arcade
-              const teamSnap = prof.team.length;
-              const boxSnap = prof.box.length;
-              const bagSnap = JSON.stringify(prof.bag);
-              const dexCaughtSnap = JSON.stringify(prof.pokedex.caught);
-              const dexSeenSnap = JSON.stringify(prof.pokedex.seen);
-              const arcadeChargesSnap = prof.arcade.charges;
-
-              const solidWarp = store.warpToZone(0, 0, 'invalid', 'forest');
-              assertEqual(solidWarp.warped, true, 'warpToZone with solid coord succeeds safely');
-              assertEqual(isTileWalkableAt(solidWarp.pos.x, solidWarp.pos.y), true, 'warpToZone sanitized landing coord is walkable');
-              assertEqual(SOLID_TILES.has(WORLD_MAP[solidWarp.pos.y][solidWarp.pos.x]), false, 'warpToZone landing tile is non-solid');
-
+              sProf.stats.steps = 37;
+              sProf.cheerStepProgress = 14;
               const riftPt = getBiomeWarpPoint('rift');
-              const riftWarp = store.warpToZone(riftPt.x, riftPt.y, riftPt.dir, 'rift');
-              assertEqual(riftWarp.warped, true, 'warpToZone to rift succeeds');
-              assertEqual(riftWarp.pos.x, riftPt.x, 'warpToZone lands at exact rift x');
-              assertEqual(riftWarp.pos.y, riftPt.y, 'warpToZone lands at exact rift y');
-              assertEqual(prof.pos.x, riftPt.x, 'profile.pos.x updated to rift');
-              assertEqual(prof.pos.y, riftPt.y, 'profile.pos.y updated to rift');
-              assertEqual(prof.stats.steps, 42, 'warpToZone does not increment stats.steps');
-              assertEqual(prof.cheerStepProgress, 12, 'warpToZone preserves cheerStepProgress');
-              assertEqual(prof.team.length, teamSnap, 'warpToZone preserves team');
-              assertEqual(prof.box.length, boxSnap, 'warpToZone preserves box');
-              assertEqual(JSON.stringify(prof.bag), bagSnap, 'warpToZone preserves bag');
-              assertEqual(JSON.stringify(prof.pokedex.caught), dexCaughtSnap, 'warpToZone preserves Dex caught');
-              assertEqual(JSON.stringify(prof.pokedex.seen), dexSeenSnap, 'warpToZone preserves Dex seen');
-              assertEqual(prof.arcade.charges, arcadeChargesSnap, 'warpToZone preserves arcade charges');
-              assert(prof.biomesVisited.includes('rift'), 'warpToZone records visited biome');
+              store.warpToZone(riftPt.x, riftPt.y, riftPt.dir, 'rift');
+              const snapTeam = sProf.team.length;
+              const snapBag = JSON.stringify(sProf.bag);
+              const snapArcade = sProf.arcade.charges;
+              const snapXp = sProf.trainerXp;
+              const snapLv = sProf.playerLevel;
 
-              const persistedRaw = JSON.parse(window.localStorage.getItem(TEST_KEY));
-              assertEqual(persistedRaw.profiles.violet.pos.x, riftPt.x, 'warpToZone immediately persisted x to localStorage');
-              assertEqual(persistedRaw.profiles.violet.pos.y, riftPt.y, 'warpToZone immediately persisted y to localStorage');
+              const safeRes = store.warpToSafeZone();
+              assertEqual(safeRes.warped, true, 'storage.warpToSafeZone succeeds from rift');
+              assertEqual(safeRes.mode, 'safe', 'storage.warpToSafeZone returns mode:safe');
+              assertEqual(safeRes.biomeId, 'village', 'storage.warpToSafeZone returns biomeId:village');
+              assertEqual(safeRes.pos.x, safeWp.x, 'storage.warpToSafeZone lands at safeWp.x');
+              assertEqual(safeRes.pos.y, safeWp.y, 'storage.warpToSafeZone lands at safeWp.y');
+              assertEqual(sProf.stats.steps, 37, 'warpToSafeZone preserves stats.steps');
+              assertEqual(sProf.cheerStepProgress, 14, 'warpToSafeZone preserves cheerStepProgress');
+              assertEqual(sProf.team.length, snapTeam, 'warpToSafeZone preserves team');
+              assertEqual(JSON.stringify(sProf.bag), snapBag, 'warpToSafeZone preserves bag');
+              assertEqual(sProf.arcade.charges, snapArcade, 'warpToSafeZone preserves arcade charges');
+              assertEqual(sProf.trainerXp, snapXp, 'warpToSafeZone preserves trainerXp');
+              assertEqual(sProf.playerLevel, snapLv, 'warpToSafeZone preserves playerLevel');
 
-              // Save Sanctity: v1/v2 Violet & Ozias saves hydrate losslessly without stranding coordinates
-              const legacyViolet = validateAndRepairProfile({
-                trainerId: 'violet',
-                starterId: 1,
-                pos: { x: 0, y: 0, dir: 'down' },
-                team: [{ speciesId: 1, level: 12, hp: 32, maxHp: 32, exp: 400 }],
-                box: [{ speciesId: 25, level: 8, hp: 24, maxHp: 24 }],
-                bag: { potions: 9, greatBalls: 4, starBalls: 1, starShards: 7, cheerCharges: 2, gems: { sun_gem: 1 } },
-                pokedex: { seen: [1, 25], caught: { 1: 1, 25: 1 } },
-              }, 'violet');
-              assertEqual(isTileWalkableAt(legacyViolet.pos.x, legacyViolet.pos.y), true, 'legacy Violet solid pos repaired to walkable');
-              assertEqual(legacyViolet.team.length, 1, 'legacy Violet team preserved');
-              assertEqual(legacyViolet.team[0].level, 12, 'legacy Violet team level preserved');
-              assertEqual(legacyViolet.box.length, 1, 'legacy Violet box preserved');
-              assertEqual(legacyViolet.bag.starShards, 7, 'legacy Violet bag starShards preserved');
-              assertEqual(legacyViolet.pokedex.caught['25'], 1, 'legacy Violet Dex caught preserved');
-
-              const legacyOzias = validateAndRepairProfile({
-                trainerId: 'ozias',
-                starterId: 4,
-                pos: { x: -5, y: 999, dir: 'right' },
-                team: [{ speciesId: 4, level: 18, hp: 44, maxHp: 44 }],
-                bag: { potions: 3, greatBalls: 5, starBalls: 2, starShards: 10 },
-                pokedex: { seen: [4], caught: { 4: 1 } },
-              }, 'ozias');
-              assertEqual(isTileWalkableAt(legacyOzias.pos.x, legacyOzias.pos.y), true, 'legacy Ozias out-of-bounds pos repaired to walkable');
-              assertEqual(legacyOzias.team[0].speciesId, 4, 'legacy Ozias starter preserved');
-              assertEqual(legacyOzias.team[0].level, 18, 'legacy Ozias level preserved');
-              assertEqual(legacyOzias.bag.greatBalls, 5, 'legacy Ozias bag preserved');
-
-              // overworld.warpToPosition clears navigation, prevents stranding & repositions follower
+              // Live GameApp Safe-Zone guards
               window.localStorage.removeItem(STORAGE_KEY);
               storage.state = storage.load();
-              storage.selectTrainer('violet');
+              app.showBootScreen();
+              assertEqual((await app.triggerSafeZoneWarp({ instant: true })).warped, false, 'triggerSafeZoneWarp blocked on boot');
+              app.selectTrainer('violet');
+              assertEqual((await app.triggerSafeZoneWarp({ instant: true })).warped, false, 'triggerSafeZoneWarp blocked on starter');
               storage.chooseStarter(1);
-              app.enterOverworld(false);
+              app.enterOverworld(true);
+              assertEqual((await app.triggerSafeZoneWarp({ instant: true })).warped, false, 'triggerSafeZoneWarp blocked while dialogueOpen');
               app.closeDialogue();
 
-              const liveProf = storage.getActiveProfile();
-              liveProf.pos = { x: 8, y: 15, dir: 'down' };
+              app.encounterTransitioning = true;
+              assertEqual((await app.triggerSafeZoneWarp({ instant: true })).warped, false, 'triggerSafeZoneWarp blocked during encounterTransitioning');
+              app.encounterTransitioning = false;
+
+              const bStart = app.battle.start({ enemy: createPokemon(16, 4), biomeId: 'forest' });
+              const bFlush = setInterval(() => app.battle.finishTypewriter(), 15);
+              try {
+                await bStart;
+              } finally {
+                clearInterval(bFlush);
+              }
+              app.syncControlVisibility();
+              assertEqual((await app.triggerSafeZoneWarp({ instant: true })).warped, false, 'triggerSafeZoneWarp blocked during battle');
+              app.battle.stop({ outcome: 'escaped', faintedAll: false });
+              app.syncControlVisibility();
+              app.syncOverworldPause();
+
+              app.openPokedex('guide');
+              assertEqual((await app.triggerSafeZoneWarp({ instant: true })).warped, false, 'triggerSafeZoneWarp blocked while Pokédex open');
+              app.pokedex.close();
+              app.openSettings();
+              assertEqual((await app.triggerSafeZoneWarp({ instant: true })).warped, false, 'triggerSafeZoneWarp blocked while Settings open');
+              app.closeSettings();
+              storage.unlockArcade();
+              app.openMinigame();
+              assertEqual((await app.triggerSafeZoneWarp({ instant: true })).warped, false, 'triggerSafeZoneWarp blocked while Sky-Hop open');
+              app.minigame.close();
+
+              app.warpTransitioning = true;
+              assertEqual((await app.triggerSafeZoneWarp({ instant: true })).warped, false, 'triggerSafeZoneWarp blocked while warpTransitioning');
+              app.warpTransitioning = false;
+
+              // Move Violet to Rift, queue held key + touch path, and execute Safe-Zone recall
+              storage.warpToZone(riftPt.x, riftPt.y, riftPt.dir, 'rift');
               ow.syncFromProfile();
-              ow.walkToTile(8, 13);
-              ow.moving = true;
-              ow.moveProgress = 0.5;
-              ow.rustleTile = { x: 4, y: 5 };
-              const landed = ow.warpToPosition(0, 0, 'left', { announceBiome: false });
-              assertEqual(isTileWalkableAt(landed.x, landed.y), true, 'overworld.warpToPosition(0,0) lands on walkable tile');
-              assertEqual(ow.moving, false, 'warpToPosition clears moving');
-              assertEqual(ow.moveProgress, 0, 'warpToPosition clears moveProgress');
-              assertEqual(ow.followerMoving, false, 'warpToPosition clears followerMoving');
-              assertEqual(ow.rustleTile, null, 'warpToPosition clears rustleTile');
-              assertEqual(ow.getTouchNavigationState().autoPathLength, 0, 'warpToPosition clears touch navigation');
-              assert(Boolean(ow._warpBeam && ow._warpBeam.phase === 'arrive'), 'warpToPosition spawns arrive warp beam');
+              app.input.pushDirection('left');
+              ow.walkToTile(riftPt.x - 1, riftPt.y);
+
+              const recallRes = await app.triggerSafeZoneWarp({ instant: true });
+              assertEqual(recallRes.warped, true, 'triggerSafeZoneWarp succeeds on clean overworld');
+              assertEqual(recallRes.mode, 'safe', 'triggerSafeZoneWarp returns mode:safe');
+              assertEqual(recallRes.biomeId, 'village', 'triggerSafeZoneWarp lands in village');
+              assertEqual(recallRes.x, safeWp.x, 'triggerSafeZoneWarp x === safeWp.x');
+              assertEqual(recallRes.y, safeWp.y, 'triggerSafeZoneWarp y === safeWp.y');
+              assertEqual(app.input.getDirection(), null, 'triggerSafeZoneWarp clears held keyboard input');
+              assertEqual(ow.getTouchNavigationState().autoPathLength, 0, 'triggerSafeZoneWarp clears touch navigation');
+              assertEqual(safeAudioCalls.length, 1, 'audio.playSafeRecall called once');
+              assertEqual(safeAudioCalls[0]?.phase, 'full', 'audio.playSafeRecall called with phase=full');
+              assertEqual(ow._warpBeam?.tone, 'safe', 'overworld warp beam uses safe tone');
+              assert(app.biomeBannerEl.textContent.includes('Starlight Village'), 'biome banner displays Starlight Village');
+              assert(app.celebrationLayerEl.textContent.includes('SAFE ZONE RECALL!'), 'celebration displays SAFE ZONE RECALL!');
+
+              // KeyH shortcut (ignored inside <input>, works on overworld)
+              const tempInput = document.createElement('input');
+              document.body.appendChild(tempInput);
+              tempInput.focus();
+              app.input.lastEmitTime.safeWarp = 0;
+              tempInput.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyH', key: 'h', bubbles: true }));
+              assertEqual(app.warpTransitioning, false, 'KeyH ignored when focused inside editable input');
+              tempInput.blur();
+              tempInput.remove();
+
+              storage.warpToZone(riftPt.x, riftPt.y, riftPt.dir, 'rift');
+              ow.syncFromProfile();
+              app.input.lastEmitTime.safeWarp = 0;
+              window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyH', key: 'h', bubbles: true }));
+              assertEqual(app.warpTransitioning, true, 'KeyH initiates Safe-Zone recall');
+              assertEqual(app.warpTransitionEl.dataset.mode, 'safe', '#warp-transition sets data-mode="safe" during Safe-Zone recall');
+              const keyHDeadline = performance.now() + 1500;
+              while (app.warpTransitioning && performance.now() < keyHDeadline) {
+                await new Promise((r) => setTimeout(r, 25));
+              }
+              assertEqual(app.warpTransitioning, false, 'KeyH Safe-Zone recall finishes cleanly');
+              assertEqual(app.warpTransitionEl.dataset.mode, undefined, '#warp-transition clears data-mode after finish');
+              assertEqual(storage.getActiveProfile().pos.x, safeWp.x, 'KeyH recall lands at Safe Zone x');
+              assertEqual(storage.getActiveProfile().pos.y, safeWp.y, 'KeyH recall lands at Safe Zone y');
+
+              // #warp-safe-btn click triggers Safe-Zone recall
+              storage.warpToZone(riftPt.x, riftPt.y, riftPt.dir, 'rift');
+              ow.syncFromProfile();
+              document.getElementById('warp-safe-btn').click();
+              assertEqual(app.warpTransitioning, true, '#warp-safe-btn click initiates Safe-Zone recall');
+              const safeBtnDeadline = performance.now() + 1500;
+              while (app.warpTransitioning && performance.now() < safeBtnDeadline) {
+                await new Promise((r) => setTimeout(r, 25));
+              }
+              assertEqual(storage.getActiveProfile().pos.x, safeWp.x, '#warp-safe-btn lands at Safe Zone x');
+              assertEqual(storage.getActiveProfile().pos.y, safeWp.y, '#warp-safe-btn lands at Safe Zone y');
+
+              // Guide tab #guide-warp-safe-btn closes Pokédex and triggers Safe-Zone recall
+              storage.warpToZone(riftPt.x, riftPt.y, riftPt.dir, 'rift');
+              ow.syncFromProfile();
+              app.openPokedex('guide');
+              const guideSafeBtn = document.getElementById('guide-warp-safe-btn');
+              assert(Boolean(guideSafeBtn), '#guide-warp-safe-btn rendered in Guide tab');
+              guideSafeBtn.click();
+              assertEqual(app.pokedex.isOpen(), false, 'clicking #guide-warp-safe-btn closes Pokédex');
+              assertEqual(app.warpTransitioning, true, 'clicking #guide-warp-safe-btn initiates Safe-Zone recall');
+              const guideSafeDeadline = performance.now() + 1500;
+              while (app.warpTransitioning && performance.now() < guideSafeDeadline) {
+                await new Promise((r) => setTimeout(r, 25));
+              }
+              assertEqual(storage.getActiveProfile().pos.x, safeWp.x, '#guide-warp-safe-btn lands at Safe Zone x');
+              assertEqual(storage.getActiveProfile().pos.y, safeWp.y, '#guide-warp-safe-btn lands at Safe Zone y');
+
+              // Boot cancellation mid Safe-Zone recall
+              storage.warpToZone(riftPt.x, riftPt.y, riftPt.dir, 'rift');
+              ow.syncFromProfile();
+              const cancelPromise = app.triggerSafeZoneWarp();
+              assertEqual(app.warpTransitioning, true, 'non-instant Safe-Zone recall sets warpTransitioning=true');
+              assertEqual(app.warpTransitionEl.dataset.mode, 'safe', '#warp-transition has data-mode="safe"');
+              app.showBootScreen();
+              const cancelRes = await cancelPromise;
+              assertEqual(cancelRes.warped, false, 'showBootScreen cancels active Safe-Zone recall');
+              assertEqual(cancelRes.reason, 'cancelled', 'cancelled Safe-Zone recall returns reason=cancelled');
+              assertEqual(app.warpTransitioning, false, 'warpTransitioning cleared on Safe-Zone cancel');
+              assertEqual(app.warpTransitionEl.hidden, true, '#warp-transition hidden on Safe-Zone cancel');
+              assertEqual(app.warpTransitionEl.dataset.mode, undefined, 'data-mode cleared on Safe-Zone cancel');
+              assertEqual(storage.getProfile('violet').pos.x, riftPt.x, 'cancelled Safe-Zone recall preserves prior x');
+              assertEqual(storage.getProfile('violet').pos.y, riftPt.y, 'cancelled Safe-Zone recall preserves prior y');
             } finally {
               window.localStorage.removeItem(TEST_KEY);
-              app.cancelWarpTransition?.();
-              ow.rarePatches = prevRarePatches;
-              ow.setActive(prevOwActive);
-              if (prevRawSave === null) window.localStorage.removeItem(STORAGE_KEY);
-              else window.localStorage.setItem(STORAGE_KEY, prevRawSave);
-              storage.state = storage.load();
-              app.applyTrainerTheme(storage.getActiveTrainerId() || 'violet');
-              app.showBootScreen();
+              audio.playSafeRecall = origPlaySafeRecall;
+              restoreAppFromSnapshot(app, snap);
             }
           },
         },
         {
-          name: 'Teleport state/modal/transition guards, input clear, KeyT, AudioEngine.playWarpTeleport, banner/celebration & boot cancellation',
+          name: 'Level-matched farming warp (KeyT, AudioEngine.playWarpTeleport, #guide-warp-zone-btn, banner/celebration & boot cancellation)',
           async fn() {
             const app = window.__starlightApp;
             assert(Boolean(app), 'GameApp mounted');
 
-            // 1. AudioEngine.playWarpTeleport muted / suspended / running verification
+            // 1. AudioEngine.playWarpTeleport muted / suspended (13 voices) / running verification
             const mutedAudio = new AudioEngine({ attachUnlockListeners: false });
             mutedAudio.muted = true;
             const mutedRes = mutedAudio.playWarpTeleport({ phase: 'full' });
@@ -10614,63 +11149,9 @@ function buildTestSuites() {
             assertEqual(mutedRes.muted, true, 'muted playWarpTeleport returns muted:true');
             assertEqual(mutedRes.phase, 'full', 'muted playWarpTeleport reports phase');
 
-            const makeMockAudioCtx = (state, autoResume = false) => {
-              const makeParam = (init = 0) => ({
-                value: init,
-                setValueAtTime() {},
-                linearRampToValueAtTime() {},
-                exponentialRampToValueAtTime() {},
-              });
-              const createdOsc = [];
-              const createdBuf = [];
-              return {
-                state,
-                currentTime: 1,
-                sampleRate: 44100,
-                destination: {},
-                createdOsc,
-                createdBuf,
-                createGain() {
-                  return { gain: makeParam(1), connect() {}, disconnect() {} };
-                },
-                createOscillator() {
-                  const osc = {
-                    type: 'sine',
-                    frequency: makeParam(440),
-                    connect() {},
-                    disconnect() {},
-                    start() {},
-                    stop() {},
-                    setPeriodicWave() {},
-                    onended: null,
-                  };
-                  createdOsc.push(osc);
-                  return osc;
-                },
-                createPeriodicWave() {
-                  return {};
-                },
-                createBiquadFilter() {
-                  return { type: 'bandpass', Q: makeParam(1), frequency: makeParam(440), connect() {}, disconnect() {} };
-                },
-                createBuffer(ch, len) {
-                  return { getChannelData: () => new Float32Array(len) };
-                },
-                createBufferSource() {
-                  const src = { buffer: null, loop: false, connect() {}, disconnect() {}, start() {}, stop() {}, onended: null };
-                  createdBuf.push(src);
-                  return src;
-                },
-                resume() {
-                  if (autoResume) this.state = 'running';
-                  return Promise.resolve();
-                },
-              };
-            };
-
             const suspEngine = new AudioEngine({ attachUnlockListeners: false });
             suspEngine.muted = false;
-            suspEngine.ctx = makeMockAudioCtx('suspended', false);
+            suspEngine.ctx = createMockAudioCtx('suspended', false);
             suspEngine.masterFilter = { connect() {} };
             suspEngine.masterGain = { gain: { value: 1 }, connect() {} };
             suspEngine.noiseBuffer = { length: 44100 };
@@ -10691,27 +11172,20 @@ function buildTestSuites() {
 
             const runEngine = new AudioEngine({ attachUnlockListeners: false });
             runEngine.muted = false;
-            runEngine.ctx = makeMockAudioCtx('running', true);
+            runEngine.ctx = createMockAudioCtx('running', true);
             runEngine.masterFilter = { connect() {} };
             runEngine.masterGain = { gain: { value: 1 }, connect() {} };
             runEngine.noiseBuffer = { length: 44100 };
-            const runDepart = runEngine.playWarpTeleport({ phase: 'depart' });
-            const runArrive = runEngine.playWarpTeleport({ phase: 'arrive' });
-            const runFull = runEngine.playWarpTeleport({ phase: 'full' });
-            assertEqual(runDepart.played, true, 'running context plays depart phase');
-            assertEqual(runArrive.played, true, 'running context plays arrive phase');
-            assertEqual(runFull.played, true, 'running context plays full phase');
+            assertEqual(runEngine.playWarpTeleport({ phase: 'depart' }).played, true, 'running context plays depart phase');
+            assertEqual(runEngine.playWarpTeleport({ phase: 'arrive' }).played, true, 'running context plays arrive phase');
+            assertEqual(runEngine.playWarpTeleport({ phase: 'full' }).played, true, 'running context plays full phase');
             assertGreater(runEngine.ctx.createdOsc.length, 10, 'warp cue synthesizes multi-note arpeggio + chord');
             assertGreater(runEngine.ctx.createdBuf.length, 0, 'warp cue synthesizes bandpass whoosh noise');
             assertEqual(runEngine.getDiagnostics().schedulerActive, false, 'no scheduler timer leaked after running warp cues');
             assertEqual(runEngine.getDiagnostics().activeBgmNodes, 0, 'no BGM nodes leaked after running warp cues');
 
-            // 2. GameApp teleport guards, transition, audio hook, banner, celebration, KeyT, Guide CTA, and boot cancel
-            const prevRawSave = window.localStorage.getItem(STORAGE_KEY);
-            const wasBootHidden = app.bootScreenEl.hidden;
-            const wasStarterHidden = app.starterScreenEl.hidden;
-            const wasShellHidden = app.gameShellEl.hidden;
-            const wasOverworldActive = app.overworld.active;
+            // 2. GameApp farming warp guards, KeyT, Guide CTA, tone, banner/celebration & boot cancel
+            const snap = snapshotAppForTest(app);
             const origPlayWarpTeleport = audio.playWarpTeleport;
             const warpAudioCalls = [];
 
@@ -10724,95 +11198,52 @@ function buildTestSuites() {
               window.localStorage.removeItem(STORAGE_KEY);
               storage.state = storage.load();
 
-              // Blocked on boot screen
               app.showBootScreen();
               assertEqual(app.canTriggerZoneWarp(), false, 'warp blocked on boot screen');
               assertEqual((await app.triggerLevelZoneWarp({ instant: true })).warped, false, 'triggerLevelZoneWarp blocked on boot');
 
-              // Blocked on starter screen
               app.selectTrainer('violet');
-              assertEqual(app.starterScreenEl.hidden, false, 'starter screen visible');
               assertEqual(app.canTriggerZoneWarp(), false, 'warp blocked on starter screen');
               assertEqual((await app.triggerLevelZoneWarp({ instant: true })).warped, false, 'triggerLevelZoneWarp blocked on starter');
 
-              // Enter overworld with welcome dialogue open -> blocked until dialogue closes
               storage.chooseStarter(1);
               app.enterOverworld(true);
-              assertEqual(app.dialogueOpen, true, 'welcome dialogue open');
               assertEqual(app.canTriggerZoneWarp(), false, 'warp blocked while dialogueOpen');
               assertEqual((await app.triggerLevelZoneWarp({ instant: true })).warped, false, 'triggerLevelZoneWarp blocked during dialogue');
-
               app.closeDialogue();
               assertEqual(app.canTriggerZoneWarp(), true, 'warp allowed on clean non-battle overworld');
 
-              // Blocked during encounterTransitioning
-              app.encounterTransitioning = true;
-              assertEqual(app.canTriggerZoneWarp(), false, 'warp blocked during encounterTransitioning');
-              app.encounterTransitioning = false;
-
-              // Blocked during battle
-              const startBattleP = app.battle.start({ enemy: createPokemon(16, 4), biomeId: 'forest' });
-              const flushT = setInterval(() => app.battle.finishTypewriter(), 15);
-              try {
-                await startBattleP;
-              } finally {
-                clearInterval(flushT);
-              }
-              app.syncControlVisibility();
-              assertEqual(app.canTriggerZoneWarp(), false, 'warp blocked during active battle');
-              app.battle.stop({ outcome: 'escaped', faintedAll: false });
-              app.syncControlVisibility();
-              app.syncOverworldPause();
-
-              // Blocked during Pokédex modal (+ Guide tab recommended UI check)
               app.openPokedex('guide');
               assertEqual(app.canTriggerZoneWarp(), false, 'warp blocked when Pokédex modal open');
+              const guideText = document.getElementById('pokedex-body')?.textContent || '';
               const guidePill = document.querySelector('#pokedex-body .guide-recommended-pill');
               const guideWarpBtn = document.getElementById('guide-warp-zone-btn');
+              const guideSafeBtn = document.getElementById('guide-warp-safe-btn');
               const recBiomeCard = document.querySelector('#pokedex-body .biome-progress-card.is-recommended');
-              assert(Boolean(guidePill && guidePill.textContent.includes('Lv.5')), 'Guide tab shows recommended level pill');
-              assert(Boolean(guideWarpBtn && guideWarpBtn.textContent.includes('Lv.2–7')), 'Guide tab shows warp button');
+              assert(guideText.includes('Trainer Power:'), 'Guide tab preserves Trainer Power stat');
+              assert(guideText.includes('Player Level: Lv.1'), 'Guide tab shows Player Level: Lv.1');
+              assert(Boolean(guidePill && guidePill.textContent.includes('Recommended for Player Lv.1')), 'Guide tab shows Player Lv.1 recommended pill');
+              assert(Boolean(guideWarpBtn && guideWarpBtn.textContent.includes('Lv.2–7')), 'Guide tab shows farming warp button');
+              assert(Boolean(guideSafeBtn && guideSafeBtn.textContent.includes('Safe Zone')), 'Guide tab shows Safe Zone button');
               assert(Boolean(recBiomeCard && recBiomeCard.querySelector('.biome-recommended-tag')), 'Guide tab marks matching biome card');
               app.pokedex.close();
-              app.syncControlVisibility();
-              app.syncOverworldPause();
 
-              // Blocked during Settings modal
-              app.openSettings();
-              assertEqual(app.canTriggerZoneWarp(), false, 'warp blocked when Settings modal open');
-              app.closeSettings();
-
-              // Blocked during Sky-Hop minigame modal
-              storage.unlockArcade();
-              app.openMinigame();
-              assertEqual(app.canTriggerZoneWarp(), false, 'warp blocked when Sky-Hop modal open');
-              app.minigame.close();
-
-              // Blocked when warpTransitioning already true
-              app.warpTransitioning = true;
-              assertEqual(app.canTriggerZoneWarp(), false, 'warp blocked when warpTransitioning active');
-              app.warpTransitioning = false;
-              assertEqual(app.canTriggerZoneWarp(), true, 'warp allowed once all blockers cleared');
-
-              // Execute instant warp with active held key + touch navigation queued
               app.input.pushDirection('right');
-              assertEqual(app.input.getDirection(), 'right', 'held direction set pre-warp');
               app.overworld.walkToTile(8, 13);
-              assertGreater(app.overworld.getTouchNavigationState().autoPathLength, 0, 'touch navigation queued pre-warp');
-
               const warpRes = await app.triggerLevelZoneWarp({ instant: true });
               assertEqual(warpRes.warped, true, 'triggerLevelZoneWarp succeeds on overworld');
-              assertEqual(warpRes.biomeId, 'forest', 'Lv.5 Violet warps to Whispering Forest');
+              assertEqual(warpRes.mode, 'farm', 'triggerLevelZoneWarp returns mode:farm');
+              assertEqual(warpRes.biomeId, 'forest', 'Player Lv.1 Violet warps to Whispering Forest');
+              assertEqual(warpRes.playerLevel, 1, 'triggerLevelZoneWarp reports playerLevel:1');
               assertEqual(app.input.getDirection(), null, 'triggerLevelZoneWarp clears held keyboard input');
               assertEqual(app.overworld.getTouchNavigationState().autoPathLength, 0, 'triggerLevelZoneWarp clears touch navigation');
               assertEqual(warpAudioCalls.length, 1, 'audio.playWarpTeleport called once');
               assertEqual(warpAudioCalls[0]?.phase, 'full', 'audio.playWarpTeleport called with phase=full');
-              assertEqual(app.biomeBannerEl.hidden, false, '#biome-banner shown on warp arrival');
+              assertEqual(app.overworld._warpBeam?.tone, 'starlight', 'farming warp uses starlight beam tone');
               assert(
                 app.biomeBannerEl.textContent.includes('Whispering Forest') && app.biomeBannerEl.textContent.includes('Lv.2–7'),
                 `#biome-banner shows zone name & Lv.2–7 (got "${app.biomeBannerEl.textContent}")`,
               );
-              assertEqual(app.celebrationLayerEl.hidden, false, 'celebration layer shown on warp arrival');
               assert(
                 app.celebrationLayerEl.textContent.includes('Whispering Forest') && app.celebrationLayerEl.textContent.includes('Lv.2–7'),
                 'celebration shows zone name & Lv.2–7',
@@ -10823,15 +11254,14 @@ function buildTestSuites() {
               assertEqual(savedNow.profiles.violet.pos.x, forestPt.x, 'localStorage persisted forest warp x');
               assertEqual(savedNow.profiles.violet.pos.y, forestPt.y, 'localStorage persisted forest warp y');
               assert(savedNow.profiles.violet.biomesVisited.includes('forest'), 'localStorage recorded forest visited');
-              assertEqual(isTileWalkableAt(savedNow.profiles.violet.pos.x, savedNow.profiles.violet.pos.y), true, 'persisted arrival tile walkable');
 
-              // KeyT shortcut triggers warp (and ignored inside <input>)
+              // KeyT shortcut ignored inside <input> & triggers warp on overworld
               const tempInput = document.createElement('input');
               document.body.appendChild(tempInput);
               tempInput.focus();
               app.input.lastEmitTime.warp = 0;
               tempInput.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyT', key: 't', bubbles: true }));
-              assertEqual(app.warpTransitioning, false, 'KeyT ignored when focused inside editable input');
+              assertEqual(app.warpTransitioning, false, 'KeyT ignored inside editable input');
               tempInput.blur();
               tempInput.remove();
 
@@ -10840,6 +11270,7 @@ function buildTestSuites() {
               app.input.lastEmitTime.warp = 0;
               window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyT', key: 't', bubbles: true }));
               assertEqual(app.warpTransitioning, true, 'KeyT initiates warp transition on overworld');
+              assertEqual(app.warpTransitionEl.dataset.mode, 'farm', '#warp-transition sets data-mode="farm" during farming warp');
               const keyTDeadline = performance.now() + 1500;
               while (app.warpTransitioning && performance.now() < keyTDeadline) {
                 await new Promise((r) => setTimeout(r, 25));
@@ -10847,7 +11278,7 @@ function buildTestSuites() {
               assertEqual(app.warpTransitioning, false, 'KeyT warp transition finished cleanly');
               assertEqual(storage.getActiveProfile().pos.x, forestPt.x, 'KeyT warp landed in forest');
 
-              // Guide tab #guide-warp-zone-btn closes Pokédex and triggers warp
+              // #guide-warp-zone-btn closes Pokédex and triggers warp
               storage.updatePosition(8, 15, 'down', false);
               app.overworld.syncFromProfile();
               app.openPokedex('guide');
@@ -10876,42 +11307,17 @@ function buildTestSuites() {
               assertEqual(storage.getProfile('violet').pos.y, 15, 'cancelled warp does not mutate village y');
             } finally {
               audio.playWarpTeleport = origPlayWarpTeleport;
-              app.cancelWarpTransition?.();
-              app.minigame?.close?.();
-              app.pokedex?.close?.();
-              app.closeSettings?.();
-              app.closeDialogue?.();
-              app.clearCelebration?.();
-              clearTimeout(app.biomeBannerTimer);
-              if (app.biomeBannerEl) app.biomeBannerEl.hidden = true;
-              if (app.battle?.active) app.battle.stop({ outcome: 'escaped', faintedAll: false });
-              app.encounterTransitioning = false;
-              if (prevRawSave === null) window.localStorage.removeItem(STORAGE_KEY);
-              else window.localStorage.setItem(STORAGE_KEY, prevRawSave);
-              storage.state = storage.load();
-              app.applyTrainerTheme(storage.getActiveTrainerId() || 'violet');
-              app.bootScreenEl.hidden = wasBootHidden;
-              app.starterScreenEl.hidden = wasStarterHidden;
-              app.gameShellEl.hidden = wasShellHidden;
-              app.overworld.setActive(wasOverworldActive);
-              if (!wasOverworldActive) audio?.stopBGM?.();
-              if (!wasBootHidden) app.showBootScreen();
-              else app.refreshHud();
+              restoreAppFromSnapshot(app, snap);
             }
           },
         },
         {
-          name: 'Minimap visibility lifecycle, cached 200x168 canvas, getMinimapState telemetry, pointer isolation & zero-overlap layout',
+          name: 'Clean minimap removal, 2-button #warp-dock visibility lifecycle, pointer isolation, #compass-hud Guide, #hud-player-level & zero-overlap layout',
           async fn() {
             const app = window.__starlightApp;
             assert(Boolean(app), 'GameApp mounted');
 
-            const prevRawSave = window.localStorage.getItem(STORAGE_KEY);
-            const wasBootHidden = app.bootScreenEl.hidden;
-            const wasStarterHidden = app.starterScreenEl.hidden;
-            const wasShellHidden = app.gameShellEl.hidden;
-            const wasOverworldActive = app.overworld.active;
-            const origCabinetStyle = app.cabinetEl?.getAttribute('style') ?? null;
+            const snap = snapshotAppForTest(app);
 
             const rectOf = (sel) => {
               const el = document.querySelector(sel);
@@ -10930,49 +11336,89 @@ function buildTestSuites() {
               window.localStorage.removeItem(STORAGE_KEY);
               storage.state = storage.load();
 
-              const minimapHud = document.getElementById('minimap-hud');
-              const minimapCanvas = document.getElementById('minimap-canvas');
-              const minimapWrap = document.getElementById('minimap-canvas-wrap');
-              const warpBtn = document.getElementById('warp-zone-btn');
-              assert(Boolean(minimapHud && minimapCanvas && minimapWrap && warpBtn), 'minimap DOM elements present');
+              // 1. Assert clean minimap removal (DOM + app + overworld)
+              assertEqual(document.getElementById('minimap-hud'), null, '#minimap-hud cleanly removed from DOM');
+              assertEqual(document.getElementById('minimap-canvas'), null, '#minimap-canvas cleanly removed from DOM');
+              assertEqual(document.getElementById('minimap-canvas-wrap'), null, '#minimap-canvas-wrap cleanly removed from DOM');
+              assertEqual(document.getElementById('minimap-zone-label'), null, '#minimap-zone-label cleanly removed from DOM');
+              assertEqual(app.minimapHudEl, undefined, 'app.minimapHudEl cleanly removed');
+              assertEqual(app.isMinimapHidden, undefined, 'app.isMinimapHidden cleanly removed');
+              assertEqual(app.syncMinimapHud, undefined, 'app.syncMinimapHud cleanly removed');
+              assertEqual(app.overworld.attachMinimapCanvas, undefined, 'overworld.attachMinimapCanvas cleanly removed');
+              assertEqual(app.overworld.renderMinimap, undefined, 'overworld.renderMinimap cleanly removed');
+              assertEqual(app.overworld.getMinimapState, undefined, 'overworld.getMinimapState cleanly removed');
 
-              // 1. Hidden on boot & starter
+              const warpDock = document.getElementById('warp-dock');
+              const warpZoneBtn = document.getElementById('warp-zone-btn');
+              const warpSafeBtn = document.getElementById('warp-safe-btn');
+              const warpZoneLabel = document.getElementById('warp-zone-label');
+              const warpSafeLabel = document.getElementById('warp-safe-label');
+              const hudPlayerLevel = document.getElementById('hud-player-level');
+              const compassHud = document.getElementById('compass-hud');
+              assert(
+                Boolean(warpDock && warpZoneBtn && warpSafeBtn && warpZoneLabel && warpSafeLabel && hudPlayerLevel && compassHud),
+                '2-button #warp-dock, #hud-player-level & #compass-hud DOM elements present',
+              );
+
+              // 2. Hidden on boot & starter
               app.showBootScreen();
-              assertEqual(app.isMinimapHidden(), true, 'isMinimapHidden() true on boot');
-              assertEqual(minimapHud.hidden, true, '#minimap-hud hidden on boot');
+              assertEqual(app.isWarpDockHidden(), true, 'isWarpDockHidden() true on boot');
+              assertEqual(warpDock.hidden, true, '#warp-dock hidden on boot');
 
               app.selectTrainer('violet');
-              assertEqual(app.isMinimapHidden(), true, 'isMinimapHidden() true on starter screen');
-              assertEqual(minimapHud.hidden, true, '#minimap-hud hidden on starter screen');
+              assertEqual(app.isWarpDockHidden(), true, 'isWarpDockHidden() true on starter screen');
+              assertEqual(warpDock.hidden, true, '#warp-dock hidden on starter screen');
 
-              // 2. Visible on non-battle overworld
+              // 3. Visible on non-battle overworld
               storage.chooseStarter(1);
-              app.enterOverworld(false);
-              app.closeDialogue();
-              assertEqual(app.isMinimapHidden(), false, 'isMinimapHidden() false on non-battle overworld');
-              assertEqual(minimapHud.hidden, false, '#minimap-hud visible on non-battle overworld');
+              app.enterOverworld(true);
+              // During welcome dialogue, dock is visible but disabled via canTriggerZoneWarp()
+              assertEqual(warpDock.hidden, false, '#warp-dock visible during overworld dialogue');
+              assertEqual(warpZoneBtn.disabled, true, '#warp-zone-btn disabled during dialogue');
+              assertEqual(warpSafeBtn.disabled, true, '#warp-safe-btn disabled during dialogue');
+              assertEqual(warpZoneBtn.getAttribute('aria-disabled'), 'true', '#warp-zone-btn aria-disabled during dialogue');
 
-              // 3. Auto-hidden on Pokédex, Settings, Sky-Hop, and Battle; restored on close
+              app.closeDialogue();
+              assertEqual(app.isWarpDockHidden(), false, 'isWarpDockHidden() false on clean overworld');
+              assertEqual(warpDock.hidden, false, '#warp-dock visible on clean overworld');
+              assertEqual(warpZoneBtn.disabled, false, '#warp-zone-btn enabled on clean overworld');
+              assertEqual(warpSafeBtn.disabled, false, '#warp-safe-btn enabled on clean overworld');
+              assertEqual(warpZoneLabel.textContent, 'Farm • Lv.2–7', '#warp-zone-label initializes to Farm • Lv.2–7');
+              assertEqual(warpSafeLabel.textContent, 'Safe Zone', '#warp-safe-label displays Safe Zone');
+              assertEqual(hudPlayerLevel.textContent, 'Lv.1', '#hud-player-level initializes to Lv.1');
+
+              // 4. Hidden on Pokédex, Settings, Sky-Hop, encounterTransitioning & Battle; restored on close
               app.openPokedex('dex');
-              assertEqual(app.isMinimapHidden(), true, 'minimap hidden when Pokédex opens');
-              assertEqual(minimapHud.hidden, true, '#minimap-hud hidden when Pokédex opens');
+              assertEqual(app.isWarpDockHidden(), true, 'isWarpDockHidden() true when Pokédex opens');
+              assertEqual(warpDock.hidden, true, '#warp-dock hidden when Pokédex opens');
               app.pokedex.close();
-              app.syncControlVisibility();
-              app.syncOverworldPause();
-              assertEqual(minimapHud.hidden, false, '#minimap-hud restored when Pokédex closes');
+              assertEqual(warpDock.hidden, false, '#warp-dock restored when Pokédex closes');
 
               app.openSettings();
-              assertEqual(minimapHud.hidden, true, '#minimap-hud hidden when Settings opens');
+              assertEqual(warpDock.hidden, true, '#warp-dock hidden when Settings opens');
               app.closeSettings();
-              assertEqual(minimapHud.hidden, false, '#minimap-hud restored when Settings closes');
+              assertEqual(warpDock.hidden, false, '#warp-dock restored when Settings closes');
 
               storage.unlockArcade();
               app.openMinigame();
-              assertEqual(minimapHud.hidden, true, '#minimap-hud hidden when Sky-Hop opens');
+              assertEqual(warpDock.hidden, true, '#warp-dock hidden when Sky-Hop opens');
               app.minigame.close();
+              assertEqual(warpDock.hidden, false, '#warp-dock restored when Sky-Hop closes');
+
+              app.encounterTransitioning = true;
               app.syncControlVisibility();
-              app.syncOverworldPause();
-              assertEqual(minimapHud.hidden, false, '#minimap-hud restored when Sky-Hop closes');
+              assertEqual(warpDock.hidden, true, '#warp-dock hidden during encounterTransitioning');
+              app.encounterTransitioning = false;
+              app.syncControlVisibility();
+              assertEqual(warpDock.hidden, false, '#warp-dock restored after encounterTransitioning');
+
+              app.warpTransitioning = true;
+              app.syncWarpDock();
+              assertEqual(warpZoneBtn.disabled, true, '#warp-zone-btn disabled during warpTransitioning');
+              assertEqual(warpSafeBtn.disabled, true, '#warp-safe-btn disabled during warpTransitioning');
+              app.warpTransitioning = false;
+              app.syncWarpDock();
+              assertEqual(warpZoneBtn.disabled, false, '#warp-zone-btn re-enabled after warpTransitioning');
 
               const startBattleP = app.battle.start({ enemy: createPokemon(16, 4), biomeId: 'forest' });
               const flushT = setInterval(() => app.battle.finishTypewriter(), 15);
@@ -10982,78 +11428,73 @@ function buildTestSuites() {
                 clearInterval(flushT);
               }
               app.syncControlVisibility();
-              assertEqual(minimapHud.hidden, true, '#minimap-hud hidden when battle starts');
-              assertEqual(window.getComputedStyle(minimapHud).display, 'none', 'body.in-battle forces minimap display:none');
+              assertEqual(warpDock.hidden, true, '#warp-dock hidden when battle starts');
+              assertEqual(window.getComputedStyle(warpDock).display, 'none', 'body.in-battle forces #warp-dock display:none');
               app.battle.stop({ outcome: 'escaped', faintedAll: false });
               app.syncControlVisibility();
               app.syncOverworldPause();
-              assertEqual(minimapHud.hidden, false, '#minimap-hud restored when battle stops');
+              assertEqual(warpDock.hidden, false, '#warp-dock restored when battle stops');
 
-              // 4. Cached 200x168 canvas & getMinimapState() live telemetry
-              assertEqual(minimapCanvas.width, 200, '#minimap-canvas width === 200');
-              assertEqual(minimapCanvas.height, 168, '#minimap-canvas height === 168');
-              const state0 = app.overworld.getMinimapState();
-              assertEqual(state0.attached, true, 'minimap attached === true');
-              assertEqual(state0.baseCached, true, 'minimap offscreen base map cached');
-              assertEqual(state0.width, 200, 'getMinimapState().width === 200');
-              assertEqual(state0.height, 168, 'getMinimapState().height === 168');
-              assertEqual(state0.shrineCount, 20, 'getMinimapState().shrineCount === 20');
-              assertEqual(state0.healSpotCount, 15, 'getMinimapState().healSpotCount === 15');
-              assertEqual(state0.trainerPos.x, 8, 'initial trainerPos.x === 8');
-              assertEqual(state0.trainerPos.y, 15, 'initial trainerPos.y === 15');
-              assertEqual(state0.recommendedBiomeId, 'forest', 'initial recommendedBiomeId === forest');
-
+              // 5. #hud-player-level & #warp-zone-label update from Player Level progression (not party mon levels)
               const prof = storage.getActiveProfile();
-              prof.pos.x = 10;
-              prof.pos.y = 14;
-              prof.team[0].level = 26;
-              app.syncMinimapHud();
-              const state1 = app.overworld.getMinimapState();
-              assertEqual(state1.trainerPos.x, 10, 'getMinimapState().trainerPos.x tracks live move');
-              assertEqual(state1.trainerPos.y, 14, 'getMinimapState().trainerPos.y tracks live move');
-              assertEqual(state1.recommendedBiomeId, 'ruins', 'getMinimapState().recommendedBiomeId updates for Lv.26');
-              assertEqual(document.getElementById('warp-zone-label')?.textContent, 'Warp • Lv.20–30', '#warp-zone-label updates to Lv.20–30');
+              prof.team[0].level = 48;
+              app.refreshHud();
+              assertEqual(hudPlayerLevel.textContent, 'Lv.1', '#hud-player-level ignores Lv.48 starter');
+              assertEqual(warpZoneLabel.textContent, 'Farm • Lv.2–7', '#warp-zone-label ignores Lv.48 starter');
 
-              // 5. Pointer isolation & minimap canvas click opens Guide tab
-              const mRect = minimapHud.getBoundingClientRect();
-              minimapHud.dispatchEvent(new PointerEvent('pointerdown', {
-                pointerId: 11, button: 0, clientX: mRect.left + 8, clientY: mRect.top + 8, bubbles: true, cancelable: true,
-              }));
-              minimapHud.dispatchEvent(new PointerEvent('pointerup', {
-                pointerId: 11, button: 0, clientX: mRect.left + 8, clientY: mRect.top + 8, bubbles: true, cancelable: true,
-              }));
-              assertEqual(app.overworld.getTouchNavigationState().autoPathLength, 0, 'pointer on #minimap-hud never leaks walk to canvas');
+              prof.badges = ['meadow', 'flame', 'cascade', 'thunder']; // 4*60 = 240 XP
+              prof.shrinesCleared = ['forest_shrine', 'cave_shrine']; // 2*85 = 170 XP
+              prof.stats.battlesWon = 1; // +14 -> 424 XP -> Lv.8
+              syncProfilePlayerProgression(prof);
+              app.refreshHud();
+              assertEqual(hudPlayerLevel.textContent, 'Lv.8', '#hud-player-level updates to Lv.8');
+              assertEqual(warpZoneLabel.textContent, 'Farm • Lv.5–10', '#warp-zone-label updates to Farm • Lv.5–10 for Player Lv.8 with badges');
 
-              minimapWrap.click();
-              assertEqual(app.pokedex.isOpen(), true, 'clicking #minimap-canvas-wrap opens Pokédex');
-              assertEqual(app.pokedex.activeTab, 'guide', 'clicking #minimap-canvas-wrap opens Guide tab');
+              // 6. Pointer isolation on #warp-dock, #warp-zone-btn & #warp-safe-btn
+              for (const targetEl of [warpDock, warpZoneBtn, warpSafeBtn]) {
+                const r = targetEl.getBoundingClientRect();
+                targetEl.dispatchEvent(new PointerEvent('pointerdown', {
+                  pointerId: 12, button: 0, clientX: r.left + 4, clientY: r.top + 4, bubbles: true, cancelable: true,
+                }));
+                targetEl.dispatchEvent(new PointerEvent('pointerup', {
+                  pointerId: 12, button: 0, clientX: r.left + 4, clientY: r.top + 4, bubbles: true, cancelable: true,
+                }));
+              }
+              assertEqual(app.overworld.getTouchNavigationState().autoPathLength, 0, 'pointer events on #warp-dock never leak walk to canvas');
+
+              // 7. #compass-hud opens Guide tab & Trainer tab shows Player Level + Trainer XP
+              compassHud.click();
+              assertEqual(app.pokedex.isOpen(), true, 'clicking #compass-hud opens Pokédex');
+              assertEqual(app.pokedex.activeTab, 'guide', 'clicking #compass-hud opens Guide tab');
+              app.openPokedex('trainer');
+              const trainerText = document.getElementById('pokedex-body')?.textContent || '';
+              assert(trainerText.includes('Player Level') && trainerText.includes('Lv.8'), 'Trainer tab shows Player Level Lv.8');
+              assert(trainerText.includes('Trainer XP') && trainerText.includes('424 XP'), 'Trainer tab shows Trainer XP total');
               app.pokedex.close();
-              app.syncControlVisibility();
-              app.syncOverworldPause();
 
-              // 6. Zero bounding-box overlap among #minimap-hud, #compass-hud, #biome-banner & #interact-pill
-              for (const [w, h] of [[1280, 720], [1024, 768], [768, 1024]]) {
+              // 8. Zero bounding-box overlap among #warp-dock, #compass-hud, #biome-banner & #interact-pill
+              for (const [w, h] of [[1280, 720], [1024, 768], [768, 1024], [390, 844]]) {
                 app.cabinetEl.style.width = `${w}px`;
                 app.cabinetEl.style.height = `${h}px`;
-                app.handleBiomeChange(BIOMES.forest, true);
+                app.handleBiomeChange(BIOMES.rift, true);
                 app.handleInteractHint({ label: '💬 Read Sign' });
-                app.syncMinimapHud();
+                app.syncWarpDock();
                 await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
 
                 const boxes = {
-                  minimap: rectOf('#minimap-hud'),
+                  warpDock: rectOf('#warp-dock'),
                   compass: rectOf('#compass-hud'),
                   banner: rectOf('#biome-banner'),
                   interact: rectOf('#interact-pill'),
                 };
                 assert(
-                  Boolean(boxes.minimap && boxes.compass && boxes.banner && boxes.interact),
+                  Boolean(boxes.warpDock && boxes.compass && boxes.banner && boxes.interact),
                   `${w}x${h}: all 4 overworld HUD overlays visible`,
                 );
                 const pairs = [
-                  ['minimap', 'compass'],
-                  ['minimap', 'banner'],
-                  ['minimap', 'interact'],
+                  ['warpDock', 'compass'],
+                  ['warpDock', 'banner'],
+                  ['warpDock', 'interact'],
                   ['compass', 'banner'],
                   ['compass', 'interact'],
                   ['banner', 'interact'],
@@ -11067,29 +11508,7 @@ function buildTestSuites() {
                 }
               }
             } finally {
-              if (origCabinetStyle === null) app.cabinetEl?.removeAttribute('style');
-              else app.cabinetEl?.setAttribute('style', origCabinetStyle);
-              app.handleInteractHint(null);
-              clearTimeout(app.biomeBannerTimer);
-              if (app.biomeBannerEl) app.biomeBannerEl.hidden = true;
-              app.cancelWarpTransition?.();
-              app.minigame?.close?.();
-              app.pokedex?.close?.();
-              app.closeSettings?.();
-              app.closeDialogue?.();
-              app.clearCelebration?.();
-              if (app.battle?.active) app.battle.stop({ outcome: 'escaped', faintedAll: false });
-              if (prevRawSave === null) window.localStorage.removeItem(STORAGE_KEY);
-              else window.localStorage.setItem(STORAGE_KEY, prevRawSave);
-              storage.state = storage.load();
-              app.applyTrainerTheme(storage.getActiveTrainerId() || 'violet');
-              app.bootScreenEl.hidden = wasBootHidden;
-              app.starterScreenEl.hidden = wasStarterHidden;
-              app.gameShellEl.hidden = wasShellHidden;
-              app.overworld.setActive(wasOverworldActive);
-              if (!wasOverworldActive) audio?.stopBGM?.();
-              if (!wasBootHidden) app.showBootScreen();
-              else app.refreshHud();
+              restoreAppFromSnapshot(app, snap);
             }
           },
         },
