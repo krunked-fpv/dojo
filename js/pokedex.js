@@ -939,6 +939,9 @@ export class PokedexUI {
         if (tab === 'dex') {
           this.resetDexFilters();
         }
+        if (this.bodyEl) {
+          this.bodyEl.scrollTop = 0;
+        }
         this.render();
       });
     });
@@ -962,12 +965,16 @@ export class PokedexUI {
     if (this.modalEl) {
       this.modalEl.hidden = false;
     }
+    if (this.bodyEl) {
+      this.bodyEl.scrollTop = 0;
+    }
     this.render();
   }
 
   close() {
     const wasOpen = this.isOpen();
     this.disconnectDexObserver();
+    this.swapBoxIndex = null;
     this.evoBanner = null;
     this.editingNicknameUid = null;
     this._fallbackStyle = null;
@@ -989,7 +996,9 @@ export class PokedexUI {
     if (!profile || !this.bodyEl) return;
 
     Object.entries(this.tabButtons).forEach(([tab, btn]) => {
-      btn?.classList.toggle('is-active', tab === this.activeTab);
+      const isActive = tab === this.activeTab;
+      btn?.classList.toggle('is-active', isActive);
+      btn?.setAttribute('aria-selected', String(isActive));
     });
 
     if (this.activeTab === 'dex') {
@@ -1629,6 +1638,33 @@ export class PokedexUI {
       refreshDexResults();
     });
 
+    searchInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' || e.code === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
+        if (this.dexSearchQuery) {
+          this.audio?.playMenuBlip?.(560);
+          this.dexSearchQuery = '';
+          syncControlStates();
+          refreshDexResults();
+        } else {
+          searchInput.blur();
+          this.close();
+        }
+      }
+    });
+
+    for (const sel of [typeSelect, abilitySelect, genSelect]) {
+      sel.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' || e.code === 'Escape') {
+          e.preventDefault();
+          e.stopPropagation();
+          sel.blur();
+          this.close();
+        }
+      });
+    }
+
     clearSearchBtn.addEventListener('click', () => {
       this.audio.playMenuBlip(560);
       this.dexSearchQuery = '';
@@ -1966,8 +2002,8 @@ export class PokedexUI {
           ? `⬆️ Leveled up to Lv.${b.newLevel}!`
           : '✨ Bonus XP, Full Heal & +10 Bond!';
         const extraBits = [
-          b.pendingEvoName ? `🌟 Evolution Ready → ${b.pendingEvoName}!` : '',
-          b.newBadges?.length ? `🏅 Badge Unlocked: ${b.newBadges.map((badge) => badge.name).join(', ')}!` : '',
+          b.pendingEvoName ? `🌟 Evolution Ready → ${escapeHtml(b.pendingEvoName)}!` : '',
+          b.newBadges?.length ? `🏅 Badge Unlocked: ${b.newBadges.map((badge) => escapeHtml(badge.name)).join(', ')}!` : '',
         ].filter(Boolean);
 
         copy.innerHTML = `
@@ -1993,7 +2029,7 @@ export class PokedexUI {
         `;
       } else {
         const moveNames = (this.evoBanner.unlockedMoves || [])
-          .map((mId) => MOVES[mId]?.name || mId)
+          .map((mId) => escapeHtml(MOVES[mId]?.name || mId))
           .filter(Boolean);
         copy.innerHTML = `
           <div class="evo-celebration-eyebrow">🌟 STARLIGHT EVOLUTION COMPLETE!</div>
@@ -2014,19 +2050,23 @@ export class PokedexUI {
       const sparkBurst = document.createElement('div');
       sparkBurst.className = 'evo-sparkle-burst';
       sparkBurst.setAttribute('aria-hidden', 'true');
-      const sparkIcons = ['✨', '🌟', '💫', '⭐', '💖', '✨'];
+      const sparkIcons = ['✨', '🌟', '💫', '⭐', '💖', '✨', '🌠', '💛', '💫', '✨', '🌟', '💖'];
       sparkIcons.forEach((glyph, sIdx) => {
         const dot = document.createElement('span');
         dot.className = 'evo-sparkle-dot';
         dot.textContent = glyph;
-        dot.style.left = `${10 + sIdx * 15}%`;
-        dot.style.top = `${18 + (sIdx % 3) * 24}%`;
-        dot.style.setProperty('--spark-delay', `${sIdx * 75}ms`);
+        dot.style.left = `${6 + sIdx * 8}%`;
+        dot.style.top = `${14 + (sIdx % 4) * 20}%`;
+        dot.style.setProperty('--spark-delay', `${(sIdx % 6) * 65}ms`);
         sparkBurst.appendChild(dot);
       });
       banner.appendChild(sparkBurst);
       banner.appendChild(dismissBtn);
       wrap.appendChild(banner);
+    }
+
+    if (this.swapBoxIndex !== null && (!Array.isArray(profile.box) || this.swapBoxIndex < 0 || this.swapBoxIndex >= profile.box.length)) {
+      this.swapBoxIndex = null;
     }
 
     if (this.swapBoxIndex !== null) {
@@ -2176,6 +2216,16 @@ export class PokedexUI {
           this.audio?.playMenuBlip?.(760);
           this.onTeamChanged?.();
           this.render();
+        });
+
+        nickInput.addEventListener('keydown', (e) => {
+          if (e.key === 'Escape' || e.code === 'Escape') {
+            e.preventDefault();
+            e.stopPropagation();
+            this.editingNicknameUid = null;
+            this.audio?.playMenuBlip?.(520);
+            this.render();
+          }
         });
 
         nickForm.appendChild(nickInput);
@@ -2583,7 +2633,7 @@ export class PokedexUI {
     } else {
       arcadeCopy.innerHTML = `
         <strong>✨ Starlight Attuned — Secret Wall Ready!</strong>
-        <p>Your Starlight hums! Search the star-marked cottage wall east of Professor Willow in Starlight Village and knock 3 times (${Math.min(2, arcadeState.secretKnocks)}/3) to reveal Starlight Sky-Hop.</p>
+        <p>Your Starlight hums! Search the star-marked cottage wall east of Professor Willow in Starlight Village and knock 3 times (${Math.min(2, toNonNegIntSafe(arcadeState.secretKnocks))}/3) to reveal Starlight Sky-Hop.</p>
       `;
       arcadeCard.appendChild(arcadeCopy);
     }

@@ -41,8 +41,28 @@ const DIGIT_SLOTS = {
   4: 3,
 };
 
+const KEY_NORMALIZE = {
+  w: 'KeyW',
+  W: 'KeyW',
+  a: 'KeyA',
+  A: 'KeyA',
+  s: 'KeyS',
+  S: 'KeyS',
+  d: 'KeyD',
+  D: 'KeyD',
+  ArrowUp: 'ArrowUp',
+  ArrowDown: 'ArrowDown',
+  ArrowLeft: 'ArrowLeft',
+  ArrowRight: 'ArrowRight',
+};
+
 function resolveDirFromKey(codeOrKey) {
   return KEY_TO_DIR[codeOrKey] || KEY_NAME_TO_DIR[codeOrKey] || null;
+}
+
+function resolveKeyId(e) {
+  if (e?.code) return e.code;
+  return KEY_NORMALIZE[e?.key] || e?.key || '';
 }
 
 export class InputController {
@@ -126,6 +146,7 @@ export class InputController {
     };
 
     window.addEventListener('keydown', (e) => {
+      if (e.defaultPrevented) return;
       const targetTag = (e.target?.tagName || '').toUpperCase();
       const activeEl = typeof document !== 'undefined' ? document.activeElement : null;
       const inInput = isEditableElement(e.target) || isEditableElement(activeEl);
@@ -133,7 +154,7 @@ export class InputController {
 
       if (e.ctrlKey || e.metaKey || e.altKey) return;
 
-      const keyId = e.code || e.key;
+      const keyId = resolveKeyId(e);
       const dir = resolveDirFromKey(e.code) || resolveDirFromKey(e.key);
       if (dir) {
         if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(keyId)) {
@@ -157,16 +178,24 @@ export class InputController {
         return;
       }
 
-      if (e.code === 'Space' || e.code === 'KeyZ' || ((e.code === 'Enter' || e.code === 'NumpadEnter') && targetTag !== 'BUTTON')) {
-        if (e.code === 'Space') e.preventDefault();
+      const isSpace = e.code === 'Space' || e.key === ' ';
+      const isEnter = e.code === 'Enter' || e.code === 'NumpadEnter' || e.key === 'Enter';
+      const isKeyZ = e.code === 'KeyZ' || e.key === 'z' || e.key === 'Z';
+      const isInteractiveInOverlay = Boolean(
+        (targetTag === 'BUTTON' || targetTag === 'SUMMARY' || targetTag === 'A') &&
+        e.target?.closest?.('.modal-backdrop:not([hidden]), .boot-screen:not([hidden]), .starter-screen:not([hidden])'),
+      );
+
+      if ((isSpace && !isInteractiveInOverlay) || isKeyZ || (isEnter && targetTag !== 'BUTTON' && targetTag !== 'SUMMARY' && targetTag !== 'A')) {
+        if (isSpace) e.preventDefault();
         this.emit('action');
-      } else if (e.code === 'Escape' || e.code === 'Backspace' || e.code === 'KeyX') {
+      } else if (e.code === 'Escape' || e.key === 'Escape' || e.code === 'Backspace' || e.key === 'Backspace' || e.code === 'KeyX' || e.key === 'x' || e.key === 'X') {
         this.emit('cancel');
-      } else if (e.code === 'KeyP' || e.code === 'KeyM') {
+      } else if (e.code === 'KeyP' || e.key === 'p' || e.key === 'P' || e.code === 'KeyM' || e.key === 'm' || e.key === 'M') {
         this.emit('pokedex');
-      } else if (e.code === 'KeyT') {
+      } else if (e.code === 'KeyT' || e.key === 't' || e.key === 'T') {
         this.emit('warp');
-      } else if (e.code === 'KeyH') {
+      } else if (e.code === 'KeyH' || e.key === 'h' || e.key === 'H') {
         this.emit('safeWarp');
       }
     });
@@ -181,7 +210,7 @@ export class InputController {
     }
 
     window.addEventListener('keyup', (e) => {
-      const keyId = e.code || e.key;
+      const keyId = resolveKeyId(e);
       const dir = resolveDirFromKey(e.code) || resolveDirFromKey(e.key);
       if (!dir) return;
       this.heldKeys.delete(keyId);

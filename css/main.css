@@ -1048,7 +1048,9 @@ button {
   z-index: 8;
   padding: 5px 14px;
   border-radius: 999px;
-  background: rgba(15, 23, 42, 0.9);
+  background: rgba(15, 23, 42, 0.92);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
   border: 2px solid var(--trainer-accent);
   color: #ffffff;
   font-weight: 900;
@@ -1057,14 +1059,34 @@ button {
   max-width: min(540px, calc(100% - 32px));
   overflow: hidden;
   text-overflow: ellipsis;
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.5), 0 0 14px var(--trainer-accent-soft, rgba(192, 132, 252, 0.28));
   pointer-events: none;
-  animation: biome-banner-fade 200ms ease;
+  animation: biome-banner-fade 220ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.biome-banner[data-threat='safe'] {
+  border-color: #4ade80;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.5), 0 0 14px rgba(74, 222, 128, 0.28);
+}
+
+.biome-banner[data-threat='challenging'] {
+  border-color: #facc15;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.5), 0 0 14px rgba(250, 204, 21, 0.3);
+}
+
+.biome-banner[data-threat='veteran'] {
+  border-color: #fb923c;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.5), 0 0 14px rgba(251, 146, 60, 0.34);
+}
+
+.biome-banner[data-threat='apex'] {
+  border-color: #fb7185;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.5), 0 0 16px rgba(244, 63, 94, 0.42);
 }
 
 @keyframes biome-banner-fade {
-  from { opacity: 0; }
-  to { opacity: 1; }
+  from { opacity: 0; transform: translate(-50%, -6px) scale(0.96); }
+  to { opacity: 1; transform: translate(-50%, 0) scale(1); }
 }
 
 .compass-hud {
@@ -1270,20 +1292,44 @@ button {
   top: 56px;
   right: 14px;
   z-index: 70;
-  max-width: 290px;
+  max-width: min(300px, calc(100% - 28px));
+  overflow: hidden;
   display: flex;
   align-items: center;
   gap: 10px;
   padding: 10px 14px;
   border-radius: 14px;
-  background: linear-gradient(135deg, #1e1b4b, #312e81);
+  background: linear-gradient(135deg, #1e1b4b 0%, #312e81 62%, #581c87 100%);
   border: 2px solid #fde047;
-  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.55);
-  animation: pop-in 220ms ease;
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.62), 0 0 22px rgba(250, 204, 21, 0.35);
+  animation: pop-in 240ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.badge-toast::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(110deg, transparent 25%, rgba(255, 255, 255, 0.18) 50%, transparent 75%);
+  transform: translateX(-110%);
+  animation: badge-toast-sheen 1.2s ease-out 100ms forwards;
+  pointer-events: none;
 }
 
 .badge-toast-icon {
-  font-size: 1.8rem;
+  font-size: 1.85rem;
+  filter: drop-shadow(0 0 8px rgba(253, 224, 71, 0.6));
+  animation: badge-icon-bounce 600ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@keyframes badge-toast-sheen {
+  0% { transform: translateX(-110%); }
+  100% { transform: translateX(130%); }
+}
+
+@keyframes badge-icon-bounce {
+  0% { transform: scale(0.6) rotate(-12deg); }
+  55% { transform: scale(1.16) rotate(6deg); }
+  100% { transform: scale(1) rotate(0deg); }
 }
 
 .badge-toast-eyebrow {
@@ -1673,6 +1719,8 @@ button {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 6px;
+  min-width: 0;
   margin-bottom: 3px;
 }
 
@@ -1680,6 +1728,7 @@ button {
   font-size: 0.78rem;
   font-weight: 800;
   color: #fde047;
+  flex-shrink: 0;
 }
 
 .team-bar-row {
@@ -2147,14 +2196,30 @@ button {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
   gap: 12px;
   padding: 12px 14px;
   margin-bottom: 12px;
   border-radius: 14px;
-  background: linear-gradient(135deg, rgba(126, 34, 206, 0.45), rgba(234, 179, 8, 0.25));
+  background: linear-gradient(135deg, rgba(126, 34, 206, 0.52), rgba(14, 165, 233, 0.24), rgba(234, 179, 8, 0.32));
   border: 2px solid #fde047;
-  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.4);
-  animation: pop-in 220ms ease;
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.46), 0 0 18px rgba(250, 204, 21, 0.28);
+  animation: pop-in 240ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.evo-celebration-banner::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(110deg, transparent 25%, rgba(255, 255, 255, 0.16) 50%, transparent 75%);
+  transform: translateX(-110%);
+  animation: evo-banner-sheen 1.25s ease-out 100ms forwards;
+  pointer-events: none;
+}
+
+.evo-celebration-banner > :not(.evo-sparkle-burst) {
+  position: relative;
+  z-index: 1;
 }
 
 .evo-sparkle-burst {
@@ -2166,15 +2231,21 @@ button {
 
 .evo-sparkle-dot {
   position: absolute;
-  font-size: 0.88rem;
+  font-size: 0.92rem;
   opacity: 0;
-  animation: evo-sparkle-float 1.6s ease-out var(--spark-delay, 0ms) forwards;
+  filter: drop-shadow(0 0 5px rgba(253, 224, 71, 0.7));
+  animation: evo-sparkle-float 1.7s ease-out var(--spark-delay, 0ms) forwards;
+}
+
+@keyframes evo-banner-sheen {
+  0% { transform: translateX(-110%); }
+  100% { transform: translateX(130%); }
 }
 
 @keyframes evo-sparkle-float {
-  0% { opacity: 0; transform: translateY(8px) scale(0.5); }
+  0% { opacity: 0; transform: translateY(10px) scale(0.45) rotate(-15deg); }
   25% { opacity: 1; }
-  100% { opacity: 0; transform: translateY(-22px) scale(1.15); }
+  100% { opacity: 0; transform: translateY(-26px) scale(1.2) rotate(18deg); }
 }
 
 .evo-celebration-eyebrow {

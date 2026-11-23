@@ -1762,30 +1762,50 @@ export const NPCS = {
 };
 
 function countCaughtFromList(profile, ids) {
-  const caught = profile?.pokedex?.caught || {};
-  return ids.filter((id) => {
+  const caught = profile?.pokedex?.caught;
+  if (!caught) return 0;
+  if (Array.isArray(caught) || caught instanceof Set) {
+    const caughtSet = new Set(Array.from(caught, Number).filter((n) => Number.isFinite(n) && n > 0));
+    const seen = new Set();
+    let count = 0;
+    for (const id of ids) {
+      if (!seen.has(id) && caughtSet.has(id)) {
+        seen.add(id);
+        count += 1;
+      }
+    }
+    return count;
+  }
+  if (typeof caught !== 'object') return 0;
+  const seen = new Set();
+  let count = 0;
+  for (const id of ids) {
+    if (seen.has(id)) continue;
+    seen.add(id);
     const v = caught[id];
-    return v === true || Number(v) > 0;
-  }).length;
+    if (v === true || (typeof v !== 'boolean' && Number.isFinite(Number(v)) && Number(v) > 0)) {
+      count += 1;
+    }
+  }
+  return count;
 }
 
 function countTotalCaught(profile) {
-  const caught = profile?.pokedex?.caught || {};
-  return Object.values(caught).filter((v) => v === true || Number(v) > 0).length;
+  return countUniqueCaughtSpecies(profile);
 }
 
-const FOREST_QUEST_IDS = [10, 11, 16, 25, 39, 43, 133, 143, 179, 280, 403, 152, 153, 154, 387, 388, 389, 495, 496, 497, 123, 212, 214, 396, 397, 398];
-const CAVE_QUEST_IDS = [35, 37, 63, 74, 92, 93, 95, 180, 281, 41, 42, 169, 304, 305, 306, 524, 525, 526, 200, 429, 302];
-const WATER_QUEST_IDS = [54, 58, 60, 116, 117, 120, 129, 131, 363, 158, 159, 160, 393, 394, 395, 501, 502, 503, 170, 171, 90, 91, 183, 184];
+const FOREST_QUEST_IDS = [10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 25, 26, 29, 30, 31, 32, 33, 34, 39, 40, 43, 44, 45, 52, 53, 69, 70, 71, 83, 114, 123, 127, 133, 134, 135, 136, 143, 152, 153, 154, 161, 162, 163, 164, 165, 166, 172, 179, 180, 181, 182, 185, 190, 196, 197, 204, 205, 212, 214, 216, 217, 234, 261, 262, 263, 264, 265, 266, 267, 268, 269, 273, 274, 275, 276, 277, 280, 281, 282, 287, 288, 289, 290, 291, 292, 352, 387, 388, 389, 396, 397, 398, 399, 400, 401, 402, 403, 404, 405, 412, 413, 414, 415, 416, 417, 424, 438, 446, 465, 470, 471, 475, 495, 496, 497, 504, 505, 506, 507, 508, 509, 510, 519, 520, 521, 540, 541, 542, 588, 589, 700, 862, 863, 865, 899, 900, 901];
+const CAVE_QUEST_IDS = [35, 36, 37, 38, 41, 42, 50, 51, 63, 64, 65, 66, 67, 68, 74, 75, 76, 92, 93, 94, 95, 109, 110, 169, 180, 181, 200, 202, 206, 208, 281, 282, 293, 294, 295, 296, 297, 302, 303, 304, 305, 306, 360, 429, 475, 524, 525, 526, 527, 528, 529, 530, 532, 533, 534, 597, 598, 621, 632, 982];
+const WATER_QUEST_IDS = [54, 55, 58, 59, 60, 61, 62, 90, 91, 116, 117, 118, 119, 120, 121, 129, 130, 131, 158, 159, 160, 170, 171, 183, 184, 186, 230, 278, 279, 298, 320, 321, 341, 342, 349, 350, 363, 364, 365, 393, 394, 395, 418, 419, 422, 423, 501, 502, 503, 515, 516, 550, 580, 581, 902];
 const VOLCANO_CORE_IDS = [77, 126];
-const VOLCANO_ALL_IDS = [77, 37, 58, 126, 74, 181, 404, 255, 256, 257, 390, 391, 392, 228, 229, 218, 219, 125, 466, 636, 637];
+const VOLCANO_ALL_IDS = [37, 38, 58, 59, 74, 75, 76, 77, 78, 125, 126, 155, 156, 157, 181, 218, 219, 228, 229, 240, 255, 256, 257, 322, 323, 324, 371, 372, 373, 390, 391, 392, 404, 405, 466, 467, 485, 498, 499, 500, 513, 514, 631, 636, 637];
 const PEAK_CORE_IDS = [86, 147, 148];
-const YUKI_PEAK_IDS = [86, 87, 144, 147, 148, 149, 151, 230, 333, 334, 363, 364, 365, 471, 220, 221, 473, 215, 461, 459, 460, 362, 582, 583, 584, 613, 614, 359];
-const TWILIGHT_QUEST_IDS = [35, 36, 63, 64, 65, 92, 93, 94, 196, 197, 280, 281, 282, 41, 42, 169, 200, 429, 302, 355, 356, 477, 607, 608, 609, 577, 578, 579, 574, 575, 576];
-const GROVE_QUEST_IDS = [175, 176, 468, 252, 253, 254, 350, 385, 447, 448, 475, 478, 546, 547, 548, 549, 570, 571, 572, 573, 427, 428];
-const DESERT_QUEST_IDS = [27, 28, 111, 112, 464, 231, 232, 246, 247, 248, 328, 329, 330, 443, 444, 445, 551, 552, 553, 343, 344];
-const MARSH_QUEST_IDS = [258, 259, 260, 270, 271, 272, 285, 286, 406, 315, 407, 194, 195, 355, 356, 477, 607, 608, 609, 577, 578, 579, 251];
-const SANCTUM_QUEST_IDS = [81, 82, 462, 137, 233, 474, 374, 375, 376, 610, 611, 612, 633, 634, 635, 574, 575, 576, 624, 625, 249, 384];
+const YUKI_PEAK_IDS = [35, 36, 86, 87, 90, 91, 92, 93, 94, 124, 144, 147, 148, 149, 151, 215, 220, 221, 225, 227, 230, 238, 307, 308, 333, 334, 351, 359, 361, 362, 363, 364, 365, 371, 372, 373, 378, 380, 381, 384, 443, 444, 445, 459, 460, 461, 471, 473, 478, 483, 484, 487, 582, 583, 584, 610, 611, 612, 613, 614, 615, 621, 635, 646, 697, 698, 699, 704, 705, 706, 712, 713, 715, 718, 780, 782, 783, 784, 841, 842, 866, 872, 873, 875, 885, 886, 887, 895, 896, 903, 967, 974, 975, 978, 991, 996, 997, 998, 1005];
+const TWILIGHT_QUEST_IDS = [35, 36, 41, 42, 63, 64, 65, 92, 93, 94, 96, 97, 137, 150, 151, 169, 177, 196, 197, 199, 200, 201, 202, 203, 233, 249, 280, 281, 282, 302, 325, 326, 337, 353, 354, 355, 356, 358, 360, 385, 386, 425, 426, 429, 433, 442, 474, 477, 478, 480, 481, 482, 488, 493, 517, 518, 561, 562, 563, 574, 575, 576, 577, 578, 579, 605, 606, 607, 608, 609, 648, 655, 677, 678, 708, 709, 710, 711, 720, 724, 765, 781, 789, 790, 792, 800, 826, 854, 855, 856, 857, 864, 876, 897, 898, 899, 937, 955, 956, 971, 972, 981, 987, 999];
+const GROVE_QUEST_IDS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 39, 40, 102, 103, 113, 133, 134, 135, 136, 174, 175, 176, 187, 188, 189, 191, 192, 196, 197, 209, 210, 235, 242, 252, 253, 254, 280, 281, 282, 300, 301, 313, 314, 333, 334, 350, 357, 385, 420, 421, 427, 428, 431, 432, 440, 441, 447, 448, 468, 470, 471, 475, 478, 492, 511, 512, 531, 546, 547, 548, 549, 570, 571, 572, 573, 585, 586, 640, 700];
+const DESERT_QUEST_IDS = [27, 28, 104, 105, 111, 112, 115, 231, 232, 246, 247, 248, 328, 329, 330, 331, 332, 336, 343, 344, 377, 443, 444, 445, 449, 450, 464, 551, 552, 553, 554, 555, 556, 557, 558, 559, 560, 629, 630];
+const MARSH_QUEST_IDS = [23, 24, 46, 47, 48, 49, 88, 89, 167, 168, 193, 194, 195, 251, 258, 259, 260, 270, 271, 272, 283, 284, 285, 286, 315, 316, 317, 339, 340, 355, 356, 406, 407, 434, 435, 451, 452, 453, 454, 455, 469, 477, 535, 536, 537, 543, 544, 545, 568, 569, 577, 578, 579, 590, 591, 607, 608, 609, 616, 617, 618, 980];
+const SANCTUM_QUEST_IDS = [81, 82, 96, 97, 122, 137, 198, 233, 249, 358, 374, 375, 376, 384, 430, 433, 439, 462, 474, 574, 575, 576, 610, 611, 612, 624, 625, 633, 634, 635, 638, 866, 983];
 const CANYON_QUEST_IDS = [21, 22, 56, 57, 84, 85, 100, 101, 106, 107, 125, 128, 203, 207, 213, 236, 237, 239, 241, 243, 244, 309, 310, 311, 312, 327, 335, 466, 472, 522, 523, 538, 539, 587, 595, 596, 619, 620, 626, 627, 628, 639];
 const REEF_QUEST_IDS = [72, 73, 79, 80, 98, 99, 199, 211, 222, 223, 224, 226, 245, 318, 319, 366, 367, 368, 369, 370, 382, 456, 457, 458, 489, 490, 564, 565, 592, 593, 594, 602, 603, 604, 647];
 const RUINS_QUEST_IDS = [138, 139, 140, 141, 142, 177, 178, 201, 299, 345, 346, 347, 348, 353, 354, 379, 408, 409, 410, 411, 436, 437, 442, 476, 483, 486, 561, 562, 563, 566, 567, 599, 600, 601, 622, 623];
@@ -1815,7 +1835,7 @@ export const FIELD_QUESTS = [
     id: 'quest_cave_crystal',
     npcId: 'npc_pip',
     title: 'Crystal Cavern Spelunker',
-    description: 'Befriend any Crystal Cavern Pokémon (Geodude, Clefairy, Vulpix, Abra, Gastly, or Onix).',
+    description: 'Befriend any Crystal Cavern Pokémon (such as Geodude, Clefairy, Vulpix, Abra, Gastly, or Onix).',
     rewards: { gems: { moon_gem: 1 }, potions: 1 },
     check(profile) {
       return countCaughtFromList(profile, CAVE_QUEST_IDS) >= 1;
@@ -3668,6 +3688,16 @@ function resolveThreatTierFallback(biomeId, playerLevel, maxLv, isScaled) {
   return { threatLabel: 'Balanced', threatTone: 'balanced' };
 }
 
+const ENDGAME_WARP_BIOMES = new Set([
+  'sanctum',
+  'atoll',
+  'reef',
+  'highlands',
+  'ruins',
+  'crater',
+  'rift',
+]);
+
 /**
  * Deterministically resolve the best spike-free farming biome and landing warp coordinate
  * for a scalar Player Level or trainer profile (never keying off party/box Pokémon levels).
@@ -3771,13 +3801,15 @@ export function resolveFarmingBiomeForLevel(levelOrProfile, profileArg = null, o
   );
   const clearedSet = hasShrinesCleared ? new Set(profile.shrinesCleared) : null;
 
-  candidates.sort((a, b) => {
-    const scoreA = Math.abs(playerLevel - a.actualMid) * 1.2
-      + Math.abs(playerLevel - a.baseMid) * 0.8
-      + (a.threatTone === 'balanced' ? 0 : 0.6);
-    const scoreB = Math.abs(playerLevel - b.actualMid) * 1.2
-      + Math.abs(playerLevel - b.baseMid) * 0.8
-      + (b.threatTone === 'balanced' ? 0 : 0.6);
+  const computeFitScore = (entry) => (
+    Math.abs(playerLevel - entry.actualMid) * 1.2
+    + Math.abs(playerLevel - entry.baseMid) * 0.8
+    + (entry.threatTone === 'balanced' ? 0 : 0.6)
+  );
+
+  const compareCandidates = (a, b) => {
+    const scoreA = computeFitScore(a);
+    const scoreB = computeFitScore(b);
     if (Math.abs(scoreA - scoreB) > 1e-6) {
       return scoreA - scoreB;
     }
@@ -3789,9 +3821,11 @@ export function resolveFarmingBiomeForLevel(levelOrProfile, profileArg = null, o
     }
 
     return a.orderIdx - b.orderIdx;
-  });
+  };
 
-  const chosen = candidates[0] || {
+  candidates.sort(compareCandidates);
+
+  const defaultBest = candidates[0] || {
     biomeId: 'forest',
     biome: BIOMES.forest,
     baseMin: BIOMES.forest.levelRange[0],
@@ -3802,6 +3836,45 @@ export function resolveFarmingBiomeForLevel(levelOrProfile, profileArg = null, o
     threatTone: 'balanced',
     isScaled: false,
   };
+
+  let chosen = defaultBest;
+  const recentWarpBiomes = Array.isArray(profile?.recentWarpBiomes)
+    ? profile.recentWarpBiomes.filter((id) => typeof id === 'string' && id !== 'village' && Boolean(BIOMES[id]))
+    : [];
+
+  if (recentWarpBiomes.length > 0 && candidates[0]) {
+    const recentSet = new Set(recentWarpBiomes);
+    if (recentSet.has(defaultBest.biomeId)) {
+      const bestScore = computeFitScore(defaultBest);
+      const rotationPool = filtered
+        .filter((e) => (
+          e.threatTone === 'balanced'
+          && (
+            Math.abs(computeFitScore(e) - bestScore) <= 4.5
+            || (playerLevel >= 28 && ENDGAME_WARP_BIOMES.has(e.biomeId))
+          )
+        ))
+        .sort(compareCandidates);
+
+      const fresh = rotationPool.find((e) => !recentSet.has(e.biomeId));
+      if (fresh) {
+        chosen = fresh;
+      } else {
+        const leastRecentPool = rotationPool.some((e) => e.biomeId === defaultBest.biomeId)
+          ? rotationPool
+          : [...rotationPool, defaultBest];
+        if (leastRecentPool.length >= 2) {
+          leastRecentPool.sort((a, b) => {
+            const idxA = recentWarpBiomes.lastIndexOf(a.biomeId);
+            const idxB = recentWarpBiomes.lastIndexOf(b.biomeId);
+            if (idxA !== idxB) return idxA - idxB;
+            return compareCandidates(a, b);
+          });
+          chosen = leastRecentPool[0];
+        }
+      }
+    }
+  }
 
   const clamped = playerLevel < 2 ? 'low' : (playerLevel > 36 ? 'high' : null);
   const warp = getBiomeWarpPoint(chosen.biomeId);
