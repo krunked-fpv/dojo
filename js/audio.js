@@ -958,6 +958,7 @@ export class AudioEngine {
     this._resumeCount = 0;
     this._wakeBufferPlayed = false;
     this._pausedByVisibility = false;
+    this._destroying = false;
     this._pendingVoices = [];
     this._activeCryCleanup = null;
     this._crySeq = 0;
@@ -1263,6 +1264,7 @@ export class AudioEngine {
   }
 
   async destroy() {
+    this._destroying = true;
     this.stopBGM();
     this._stopActiveCry(true);
     this._clearCryTimers();
@@ -1288,6 +1290,7 @@ export class AudioEngine {
     this.compressor = null;
     this.bgmBus = null;
     this.silentSink = null;
+    this._destroying = false;
     if (ctx && typeof ctx.close === 'function') {
       await ctx.close().catch(() => {});
     }
@@ -1390,7 +1393,7 @@ export class AudioEngine {
     }
     this.activeBgmNodes.clear();
 
-    if (this.ctx && this.masterFilter) {
+    if (this.ctx && this.masterFilter && !this._destroying && this.ctx.state !== 'closed' && typeof this.ctx.createGain === 'function') {
       if (this.bgmBus) {
         try {
           this.bgmBus.disconnect();
@@ -1407,9 +1410,15 @@ export class AudioEngine {
   setMuted(muted) {
     this.muted = Boolean(muted);
     if (this.masterGain && this.ctx) {
-      const now = this.ctx.currentTime;
-      this.masterGain.gain.cancelScheduledValues(now);
-      this.masterGain.gain.setTargetAtTime(this.muted ? 0 : 0.52, now, 0.015);
+      const now = Number.isFinite(Number(this.ctx.currentTime))
+        ? Math.max(0, Number(this.ctx.currentTime))
+        : 0;
+      try {
+        this.masterGain.gain?.cancelScheduledValues?.(now);
+        this.masterGain.gain?.setTargetAtTime?.(this.muted ? 0 : 0.52, now, 0.015);
+      } catch {
+        // Ignore mock AudioParam differences
+      }
     }
     if (this.muted) {
       this._pendingVoices = [];
@@ -1503,21 +1512,15 @@ export class AudioEngine {
       return null;
     }
 
-    const rawDur = Number(duration);
-    const dur = Math.max(0.025, Number.isFinite(rawDur) ? rawDur : 0.14);
-    const rawDelay = Number(delay);
-    const safeDelay = Number.isFinite(rawDelay) ? Math.max(0, rawDelay) : 0;
-    const start = startTime !== null && Number.isFinite(Number(startTime))
-      ? Number(startTime)
-      : ctx.currentTime + safeDelay;
-    const rawAtk = Number(attack);
-    const atk = Math.min(dur * 0.45, Math.max(0.002, Number.isFinite(rawAtk) ? rawAtk : 0.006));
-    const rawDec = Number(decay);
-    const decEnd = Math.min(dur * 0.82, atk + Math.max(0.008, Number.isFinite(rawDec) ? rawDec : 0.045));
-    const rawGain = Number(gain);
-    const peakGain = Math.max(0.001, Number.isFinite(rawGain) ? rawGain : 0.12);
-    const rawSustain = Number(sustain);
-    const safeSustain = Number.isFinite(rawSustain) ? rawSustain : 0.36;
+    const hasNum = (v) => v !== null && v !== undefined && v !== '' && typeof v !== 'boolean' && Number.isFinite(Number(v));
+    const ctxNow = Number.isFinite(Number(ctx.currentTime)) ? Math.max(0, Number(ctx.currentTime)) : 0;
+    const dur = Math.max(0.025, hasNum(duration) ? Number(duration) : 0.14);
+    const safeDelay = hasNum(delay) ? Math.max(0, Number(delay)) : 0;
+    const start = Math.max(0, hasNum(startTime) ? Number(startTime) : ctxNow + safeDelay);
+    const atk = Math.min(dur * 0.45, Math.max(0.002, hasNum(attack) ? Number(attack) : 0.006));
+    const decEnd = Math.min(dur * 0.82, atk + Math.max(0.008, hasNum(decay) ? Number(decay) : 0.045));
+    const peakGain = Math.max(0.001, hasNum(gain) ? Number(gain) : 0.12);
+    const safeSustain = hasNum(sustain) ? Number(sustain) : 0.36;
     const sustainGain = Math.max(0.0001, peakGain * Math.max(0.04, Math.min(0.95, safeSustain)));
 
     const osc = ctx.createOscillator();
@@ -1531,13 +1534,13 @@ export class AudioEngine {
       osc.type = wave === 'pulse12' || wave === 'pulse25' ? 'square' : wave;
     }
 
-    const safeFreq = Number.isFinite(Number(freq)) ? Number(freq) : 440;
+    const safeFreq = hasNum(freq) ? Number(freq) : 440;
     const startHz = Math.max(20, safeFreq);
     osc.frequency.setValueAtTime(startHz, start);
-    if (midFreq !== null && Number.isFinite(Number(midFreq))) {
+    if (hasNum(midFreq)) {
       osc.frequency.exponentialRampToValueAtTime(Math.max(20, Number(midFreq)), start + dur * 0.45);
     }
-    if (endFreq !== null && Number.isFinite(Number(endFreq)) && Number(endFreq) !== safeFreq) {
+    if (hasNum(endFreq) && Math.max(20, Number(endFreq)) !== startHz) {
       osc.frequency.exponentialRampToValueAtTime(Math.max(20, Number(endFreq)), start + dur);
     }
 
@@ -1619,19 +1622,16 @@ export class AudioEngine {
     }
     if (!this.noiseBuffer) return null;
 
-    const rawDur = Number(duration);
-    const dur = Math.max(0.02, Number.isFinite(rawDur) ? rawDur : 0.14);
-    const rawDelay = Number(delay);
-    const safeDelay = Number.isFinite(rawDelay) ? Math.max(0, rawDelay) : 0;
-    const start = startTime !== null && Number.isFinite(Number(startTime))
-      ? Number(startTime)
-      : ctx.currentTime + safeDelay;
-    const rawAtk = Number(attack);
-    const atk = Math.min(dur * 0.35, Math.max(0.002, Number.isFinite(rawAtk) ? rawAtk : 0.003));
-    const safeStartFreq = Number.isFinite(Number(startFreq)) ? Math.max(30, Number(startFreq)) : 820;
-    const safeEndFreq = Number.isFinite(Number(endFreq)) ? Math.max(30, Number(endFreq)) : 180;
-    const safeGain = Number.isFinite(Number(gain)) ? Math.max(0.001, Number(gain)) : 0.18;
-    const safeQ = Number.isFinite(Number(q)) ? Math.max(0.1, Number(q)) : 0.9;
+    const hasNum = (v) => v !== null && v !== undefined && v !== '' && typeof v !== 'boolean' && Number.isFinite(Number(v));
+    const ctxNow = Number.isFinite(Number(ctx.currentTime)) ? Math.max(0, Number(ctx.currentTime)) : 0;
+    const dur = Math.max(0.02, hasNum(duration) ? Number(duration) : 0.14);
+    const safeDelay = hasNum(delay) ? Math.max(0, Number(delay)) : 0;
+    const start = Math.max(0, hasNum(startTime) ? Number(startTime) : ctxNow + safeDelay);
+    const atk = Math.min(dur * 0.35, Math.max(0.002, hasNum(attack) ? Number(attack) : 0.003));
+    const safeStartFreq = hasNum(startFreq) ? Math.max(30, Number(startFreq)) : 820;
+    const safeEndFreq = hasNum(endFreq) ? Math.max(30, Number(endFreq)) : 180;
+    const safeGain = hasNum(gain) ? Math.max(0.001, Number(gain)) : 0.18;
+    const safeQ = hasNum(q) ? Math.max(0.1, Number(q)) : 0.9;
 
     const src = ctx.createBufferSource();
     src.buffer = this.noiseBuffer;
@@ -1774,12 +1774,15 @@ export class AudioEngine {
 
   startScheduler() {
     this.stopScheduler();
+    if (this.muted || this._destroying) return;
+    if (typeof document !== 'undefined' && document.hidden === true) return;
     const ctx = this.ensureContext();
-    if (!ctx || !this.currentTheme) return;
+    if (!ctx || !this.currentTheme || ctx.state !== 'running') return;
 
     const gen = ++this.bgmGeneration;
     this.schedulerStartCount += 1;
-    this.nextStepTime = ctx.currentTime + 0.03;
+    const ctxNow = Number.isFinite(Number(ctx.currentTime)) ? Math.max(0, Number(ctx.currentTime)) : 0;
+    this.nextStepTime = ctxNow + 0.03;
     this.bgmSyncStartTime = this.nextStepTime;
     this.bgmStepsSinceSync = 0;
     this.schedulerTimer = setInterval(() => this.scheduleAhead(gen), 25);
@@ -1963,28 +1966,355 @@ export class AudioEngine {
     });
   }
 
-  playEncounterAlert() {
-    // Bold 2-step minor encounter alert
-    this.triggerVoice({
+  playEncounterAlert(mode = 'wild') {
+    const raw = typeof mode === 'string' ? mode.trim().toLowerCase() : 'wild';
+    const resolvedMode = raw === 'rare' || raw === 'rival' || raw === 'shrine' ? raw : 'wild';
+    let firstVoice = null;
+    const trackFirst = (v) => {
+      if (!firstVoice && v) firstVoice = v;
+      return v;
+    };
+
+    if (resolvedMode === 'rare') {
+      // Glittering crystal major-9th sparkle swell for rare / shiny encounters
+      trackFirst(this.playNoise({
+        duration: 0.16,
+        gain: 0.055,
+        filterType: 'bandpass',
+        startFreq: 1800,
+        endFreq: 4200,
+        q: 1.5,
+        delay: 0,
+      }));
+      [
+        { freq: Fs5, wave: 'pulse12', dur: 0.11, delay: 0, gain: 0.075 },
+        { freq: A5, wave: 'sine', dur: 0.13, delay: 0.065, gain: 0.08 },
+        { freq: 1108.73, wave: 'pulse12', dur: 0.15, delay: 0.13, gain: 0.082 },
+        { freq: E6, endFreq: E6 * 1.02, wave: 'sine', dur: 0.28, delay: 0.195, gain: 0.09 },
+      ].forEach((n) => {
+        trackFirst(this.triggerVoice({
+          freq: n.freq,
+          endFreq: n.endFreq ?? null,
+          wave: n.wave,
+          duration: n.dur,
+          attack: 0.005,
+          decay: 0.04,
+          sustain: 0.56,
+          gain: n.gain,
+          delay: n.delay,
+        }));
+      });
+      trackFirst(this.triggerVoice({
+        freq: E4,
+        endFreq: B4,
+        wave: 'triangle',
+        duration: 0.34,
+        attack: 0.01,
+        decay: 0.08,
+        sustain: 0.5,
+        gain: 0.075,
+        delay: 0.02,
+      }));
+      return { played: Boolean(firstVoice), muted: this.muted, mode: resolvedMode };
+    }
+
+    if (resolvedMode === 'rival') {
+      // Dramatic brassy showdown fanfare swell for Rival encounters
+      trackFirst(this.playNoise({
+        duration: 0.12,
+        gain: 0.08,
+        filterType: 'highpass',
+        startFreq: 1200,
+        endFreq: 2600,
+        q: 1.0,
+        delay: 0,
+      }));
+      [
+        { freq: E4, dur: 0.09, delay: 0, wave: 'pulse25', gain: 0.088 },
+        { freq: G4, dur: 0.09, delay: 0.07, wave: 'pulse25', gain: 0.09 },
+        { freq: A4, dur: 0.09, delay: 0.14, wave: 'pulse25', gain: 0.092 },
+        { freq: B4, dur: 0.10, delay: 0.21, wave: 'pulse12', gain: 0.095 },
+        { freq: E5, endFreq: E5 * 1.015, dur: 0.26, delay: 0.29, wave: 'pulse25', gain: 0.102 },
+      ].forEach((n) => {
+        trackFirst(this.triggerVoice({
+          freq: n.freq,
+          endFreq: n.endFreq ?? null,
+          wave: n.wave,
+          duration: n.dur,
+          attack: 0.004,
+          decay: 0.03,
+          sustain: 0.58,
+          gain: n.gain,
+          delay: n.delay,
+        }));
+      });
+      trackFirst(this.triggerVoice({
+        freq: E3,
+        endFreq: B3,
+        wave: 'triangle',
+        duration: 0.38,
+        attack: 0.008,
+        decay: 0.08,
+        sustain: 0.55,
+        gain: 0.095,
+        delay: 0,
+      }));
+      return { played: Boolean(firstVoice), muted: this.muted, mode: resolvedMode };
+    }
+
+    if (resolvedMode === 'shrine') {
+      // Mystical echoing astral fifths swell for Shrine Guardian encounters
+      trackFirst(this.playNoise({
+        duration: 0.22,
+        gain: 0.05,
+        filterType: 'bandpass',
+        startFreq: 760,
+        endFreq: 1950,
+        q: 1.6,
+        delay: 0,
+      }));
+      [
+        { freq: C5, dur: 0.15, delay: 0, wave: 'sine', gain: 0.088 },
+        { freq: G5, dur: 0.17, delay: 0.085, wave: 'triangle', gain: 0.088 },
+        { freq: D6, dur: 0.20, delay: 0.17, wave: 'sine', gain: 0.082 },
+        { freq: E6, dur: 0.32, delay: 0.26, wave: 'sine', gain: 0.085 },
+      ].forEach((n) => {
+        trackFirst(this.triggerVoice({
+          freq: n.freq,
+          wave: n.wave,
+          duration: n.dur,
+          attack: 0.012,
+          decay: 0.055,
+          sustain: 0.58,
+          gain: n.gain,
+          delay: n.delay,
+        }));
+      });
+      [C4, G4].forEach((freq, i) => {
+        trackFirst(this.triggerVoice({
+          freq,
+          wave: 'triangle',
+          duration: 0.36,
+          attack: 0.016,
+          decay: 0.09,
+          sustain: 0.52,
+          gain: 0.072,
+          delay: i * 0.085,
+        }));
+      });
+      return { played: Boolean(firstVoice), muted: this.muted, mode: resolvedMode };
+    }
+
+    // Default 'wild': bold chiptune encounter alert swell
+    trackFirst(this.playNoise({
+      duration: 0.10,
+      gain: 0.055,
+      filterType: 'bandpass',
+      startFreq: 1200,
+      endFreq: 2400,
+      delay: 0.01,
+    }));
+    trackFirst(this.triggerVoice({
       freq: B4,
       wave: 'pulse25',
-      duration: 0.11,
+      duration: 0.10,
       attack: 0.004,
       decay: 0.03,
       sustain: 0.55,
       gain: 0.09,
       delay: 0,
-    });
-    this.triggerVoice({
+    }));
+    trackFirst(this.triggerVoice({
+      freq: E4,
+      wave: 'triangle',
+      duration: 0.10,
+      gain: 0.06,
+      delay: 0,
+    }));
+    trackFirst(this.triggerVoice({
       freq: E5,
       wave: 'pulse25',
-      duration: 0.20,
+      duration: 0.14,
       attack: 0.004,
-      decay: 0.04,
+      decay: 0.035,
       sustain: 0.55,
       gain: 0.09,
-      delay: 0.12,
+      delay: 0.11,
+    }));
+    trackFirst(this.triggerVoice({
+      freq: Gs4,
+      wave: 'triangle',
+      duration: 0.14,
+      gain: 0.062,
+      delay: 0.11,
+    }));
+    trackFirst(this.triggerVoice({
+      freq: Gs5,
+      endFreq: B5,
+      wave: 'pulse25',
+      duration: 0.19,
+      attack: 0.005,
+      decay: 0.045,
+      sustain: 0.52,
+      gain: 0.088,
+      delay: 0.21,
+    }));
+    return { played: Boolean(firstVoice), muted: this.muted, mode: resolvedMode };
+  }
+
+  playDiscoveryChime(kind = 'starfall') {
+    const raw = typeof kind === 'string' ? kind.trim().toLowerCase() : 'starfall';
+    const resolvedKind = raw === 'shimmer' || raw === 'mystery_cry' ? raw : 'starfall';
+    let firstVoice = null;
+    const trackFirst = (v) => {
+      if (!firstVoice && v) firstVoice = v;
+      return v;
+    };
+
+    if (resolvedKind === 'shimmer') {
+      // Prismatic dewdrop harmonic bloom
+      trackFirst(this.playNoise({
+        duration: 0.18,
+        gain: 0.042,
+        filterType: 'bandpass',
+        startFreq: 1600,
+        endFreq: 3200,
+        q: 1.8,
+        delay: 0,
+      }));
+      [
+        { freq: G5, delay: 0, dur: 0.18, gain: 0.075 },
+        { freq: B5, delay: 0.06, dur: 0.20, gain: 0.078 },
+        { freq: D6, delay: 0.12, dur: 0.24, gain: 0.072 },
+        { freq: E6, delay: 0.18, dur: 0.30, gain: 0.076 },
+      ].forEach((n) => {
+        trackFirst(this.triggerVoice({
+          freq: n.freq,
+          wave: 'sine',
+          duration: n.dur,
+          attack: 0.012,
+          decay: 0.06,
+          sustain: 0.52,
+          gain: n.gain,
+          delay: n.delay,
+        }));
+      });
+      [G4, D5].forEach((freq, i) => {
+        trackFirst(this.triggerVoice({
+          freq,
+          wave: 'triangle',
+          duration: 0.34,
+          attack: 0.016,
+          decay: 0.09,
+          sustain: 0.45,
+          gain: 0.058,
+          delay: i * 0.06,
+        }));
+      });
+      return { played: Boolean(firstVoice), muted: this.muted, kind: resolvedKind };
+    }
+
+    if (resolvedKind === 'mystery_cry') {
+      // Curious echoing woodland mystery call
+      trackFirst(this.playNoise({
+        duration: 0.16,
+        gain: 0.04,
+        filterType: 'bandpass',
+        startFreq: 900,
+        endFreq: 1800,
+        q: 2.0,
+        delay: 0,
+      }));
+      trackFirst(this.triggerVoice({
+        freq: Fs5,
+        midFreq: Ds5,
+        endFreq: Fs5,
+        wave: 'sine',
+        duration: 0.22,
+        attack: 0.015,
+        decay: 0.07,
+        sustain: 0.52,
+        gain: 0.082,
+        delay: 0,
+      }));
+      trackFirst(this.triggerVoice({
+        freq: Fs5 * 0.5,
+        midFreq: Ds5 * 0.5,
+        endFreq: Fs5 * 0.5,
+        wave: 'triangle',
+        duration: 0.22,
+        attack: 0.015,
+        decay: 0.07,
+        sustain: 0.44,
+        gain: 0.056,
+        delay: 0.01,
+      }));
+      trackFirst(this.triggerVoice({
+        freq: Fs5,
+        midFreq: Gs5,
+        endFreq: A5,
+        wave: 'pulse12',
+        duration: 0.24,
+        attack: 0.014,
+        decay: 0.06,
+        sustain: 0.5,
+        gain: 0.068,
+        delay: 0.17,
+      }));
+      trackFirst(this.triggerVoice({
+        freq: B4,
+        wave: 'sine',
+        duration: 0.28,
+        attack: 0.02,
+        decay: 0.08,
+        sustain: 0.42,
+        gain: 0.052,
+        delay: 0.18,
+      }));
+      return { played: Boolean(firstVoice), muted: this.muted, kind: resolvedKind };
+    }
+
+    // Default 'starfall': cascading celestial starfall chime
+    trackFirst(this.playNoise({
+      duration: 0.18,
+      gain: 0.045,
+      filterType: 'bandpass',
+      startFreq: 2000,
+      endFreq: 3800,
+      q: 1.6,
+      delay: 0,
+    }));
+    [
+      { freq: E6, delay: 0, dur: 0.11, wave: 'sine', gain: 0.076 },
+      { freq: D6, delay: 0.055, dur: 0.11, wave: 'sine', gain: 0.074 },
+      { freq: B5, delay: 0.11, dur: 0.12, wave: 'pulse12', gain: 0.068 },
+      { freq: G5, delay: 0.165, dur: 0.13, wave: 'sine', gain: 0.076 },
+      { freq: B5, delay: 0.225, dur: 0.14, wave: 'sine', gain: 0.08 },
+      { freq: E6, delay: 0.29, dur: 0.30, wave: 'sine', gain: 0.086 },
+    ].forEach((n) => {
+      trackFirst(this.triggerVoice({
+        freq: n.freq,
+        wave: n.wave,
+        duration: n.dur,
+        attack: 0.006,
+        decay: 0.04,
+        sustain: 0.54,
+        gain: n.gain,
+        delay: n.delay,
+      }));
     });
+    trackFirst(this.triggerVoice({
+      freq: G4,
+      endFreq: E5,
+      wave: 'triangle',
+      duration: 0.36,
+      attack: 0.015,
+      decay: 0.1,
+      sustain: 0.46,
+      gain: 0.065,
+      delay: 0.02,
+    }));
+    return { played: Boolean(firstVoice), muted: this.muted, kind: resolvedKind };
   }
 
   playPhysicalImpact(power = 45) {
@@ -3315,6 +3645,24 @@ export class AudioEngine {
         delay: chordDelay,
       });
     });
+
+    // Warm celebratory sparkle harmonic tail
+    [
+      { freq: C6, delay: 0.56, dur: 0.24, gain: 0.062 },
+      { freq: E6, delay: 0.64, dur: 0.3, gain: 0.064 },
+      { freq: 1567.98, delay: 0.72, dur: 0.38, gain: 0.056 },
+    ].forEach((tail) => {
+      this.triggerVoice({
+        freq: tail.freq,
+        wave: 'sine',
+        duration: tail.dur,
+        attack: 0.014,
+        decay: 0.08,
+        sustain: 0.48,
+        gain: tail.gain,
+        delay: tail.delay,
+      });
+    });
   }
 
   playLevelUp() {
@@ -3345,6 +3693,24 @@ export class AudioEngine {
       duration: 0.42,
       gain: 0.11,
       delay: 0.285,
+    });
+
+    // Radiant ascending harmonic tail resolve
+    [
+      { freq: G5, delay: 0.42, dur: 0.24, gain: 0.058 },
+      { freq: C6, delay: 0.48, dur: 0.30, gain: 0.064 },
+      { freq: E6, delay: 0.54, dur: 0.36, gain: 0.056 },
+    ].forEach((tail) => {
+      this.triggerVoice({
+        freq: tail.freq,
+        wave: 'sine',
+        duration: tail.dur,
+        attack: 0.012,
+        decay: 0.07,
+        sustain: 0.48,
+        gain: tail.gain,
+        delay: tail.delay,
+      });
     });
   }
 
@@ -3390,10 +3756,32 @@ export class AudioEngine {
         delay,
       });
     });
+
+    // Regal triumphant resolution chord tail
+    [
+      { freq: C4, wave: 'triangle', delay: 0.52, dur: 0.48, gain: 0.085 },
+      { freq: G5, wave: 'sine', delay: 0.54, dur: 0.42, gain: 0.062 },
+      { freq: C6, wave: 'sine', delay: 0.58, dur: 0.44, gain: 0.065 },
+      { freq: 1567.98, wave: 'sine', delay: 0.62, dur: 0.46, gain: 0.056 },
+    ].forEach((tail) => {
+      this.triggerVoice({
+        freq: tail.freq,
+        wave: tail.wave,
+        duration: tail.dur,
+        attack: 0.015,
+        decay: 0.09,
+        sustain: 0.52,
+        gain: tail.gain,
+        delay: tail.delay,
+      });
+    });
   }
 
   playHoldTick(progress) {
-    const freq = 310 + Math.round(progress * 440);
+    const safeProgress = Number.isFinite(Number(progress))
+      ? Math.max(0, Math.min(1, Number(progress)))
+      : 0;
+    const freq = 310 + Math.round(safeProgress * 440);
     this.triggerVoice({
       freq,
       wave: 'sine',
@@ -3733,6 +4121,23 @@ export class AudioEngine {
         delay: 0.29,
       });
     });
+    // Shimmering treasure bell tail
+    [
+      { freq: 1318.51, delay: 0.46, dur: 0.28, gain: 0.056 },
+      { freq: 1567.98, delay: 0.53, dur: 0.34, gain: 0.058 },
+      { freq: 2093.0, delay: 0.60, dur: 0.40, gain: 0.048 },
+    ].forEach((tail) => {
+      this.triggerVoice({
+        freq: tail.freq,
+        wave: 'sine',
+        duration: tail.dur,
+        attack: 0.012,
+        decay: 0.08,
+        sustain: 0.46,
+        gain: tail.gain,
+        delay: tail.delay,
+      });
+    });
   }
 
   playQuestCompleteFanfare() {
@@ -3762,6 +4167,24 @@ export class AudioEngine {
         sustain: 0.55,
         gain: 0.078,
         delay: 0.41,
+      });
+    });
+    // Heroic radiant tail sparkle
+    [
+      { freq: G5, delay: 0.57, dur: 0.26, gain: 0.056 },
+      { freq: C6, delay: 0.64, dur: 0.32, gain: 0.062 },
+      { freq: E6, delay: 0.71, dur: 0.38, gain: 0.058 },
+      { freq: 1567.98, delay: 0.78, dur: 0.42, gain: 0.05 },
+    ].forEach((tail) => {
+      this.triggerVoice({
+        freq: tail.freq,
+        wave: 'sine',
+        duration: tail.dur,
+        attack: 0.014,
+        decay: 0.08,
+        sustain: 0.48,
+        gain: tail.gain,
+        delay: tail.delay,
       });
     });
   }

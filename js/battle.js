@@ -381,6 +381,21 @@ function consumeUsableBagItem(storage, itemKey) {
   return Boolean(storage?.useItem?.(itemKey));
 }
 
+function createStruggleMove() {
+  return {
+    id: 'tackle',
+    name: 'Struggle',
+    type: 'normal',
+    power: 35,
+    accuracy: 100,
+    pp: 99,
+    damageClass: 'physical',
+    category: 'attack',
+    fx: 'impact',
+    _isStruggle: true,
+  };
+}
+
 export function resolveMoveParticleShape(move) {
   if (!move) return 'circle';
   if (move.id === 'star_melody') return 'note';
@@ -592,6 +607,7 @@ export class BattleEngine {
   bindUI() {
     const signal = this._uiAbort.signal;
     const handleTapToSkip = (event, isPointerUp = false) => {
+      if (!this.active) return;
       if (this.teamDrawerEl && !this.teamDrawerEl.hidden) return;
       if (event?.target?.closest?.('#battle-team-drawer, button, input, select, a')) return;
       if (isPointerUp && event?.pointerType === 'mouse' && event.button !== 0) return;
@@ -728,7 +744,7 @@ export class BattleEngine {
   }
 
   canAcceptPlayerAction() {
-    if (!this.active || this.busy || this.state !== BATTLE_STATES.PLAYER_INPUT) return false;
+    if (!this.active || this.busy || this.mustSwitchForced || this.state !== BATTLE_STATES.PLAYER_INPUT) return false;
     if (this.teamDrawerEl && !this.teamDrawerEl.hidden) return false;
     const now = performance.now();
     if (now - this.lastActionAt < ACTION_COOLDOWN_MS) return false;
@@ -788,6 +804,7 @@ export class BattleEngine {
   returnToPlayerInput(sid = this.sessionId) {
     if (!this.isSessionValid(sid) || !this.player || !this.enemy) return;
     if (this.player.isFainted || this.enemy.isFainted) return;
+    if (this.mustSwitchForced) return;
 
     this.state = BATTLE_STATES.RETURN_TO_INPUT;
     this.finishTypewriter();
@@ -797,7 +814,14 @@ export class BattleEngine {
 
     this.renderStatusCards();
     this.renderMoveButtons();
-    this.setIdlePrompt(`What will ${this.player.displayName || this.player.name} do?`);
+    const moves = typeof this.player.getMoveObjects === 'function' ? this.player.getMoveObjects() : [];
+    const hasAnyPp = moves.some((m) => this.player.getMovePp?.(m.id)?.current > 0);
+    const pName = this.player.displayName || this.player.name;
+    this.setIdlePrompt(
+      hasAnyPp
+        ? `What will ${pName} do?`
+        : `${pName} is out of PP! Choose any move to Struggle!`,
+    );
     this.unlockPlayerInput();
   }
 
@@ -812,11 +836,14 @@ export class BattleEngine {
       state: this.state,
       sessionId: this.sessionId,
       turnToken: this.turnToken,
+      mustSwitchForced: this.mustSwitchForced,
       fxRafActive: this.fxRaf !== null,
       fxLoopCount: this.fxLoopCount,
       pendingTimers: this.pendingTimers.size,
       activeHpRafs: Number(this.hpRafs.enemy !== null) + Number(this.hpRafs.player !== null),
       ballRafActive: this.ballRafId !== null,
+      xpRafActive: this.xpRaf !== null,
+      typingActive: this.typingTimer !== null || this.typingHoldTimer !== null || this.typingResolve !== null,
       particleCount: this.particles.length,
       popupCount: this.popups.length,
       actionLockedClass: Boolean(this.screenEl?.classList.contains('is-action-locked')),
@@ -853,7 +880,10 @@ export class BattleEngine {
       return;
     }
 
-    // Clear any leftover timers/RAFs before establishing new session
+    // Invalidate any prior session before clearing timers/loops so stale awaits exit cleanly
+    const sid = ++this.sessionId;
+    this.turnToken += 1;
+    this.active = false;
     this.clearAllTimersAndLoops();
 
     const firstHealthy = profile.team.findIndex((m) => !m.isFainted);
@@ -863,7 +893,6 @@ export class BattleEngine {
       this.player.healFull();
     }
 
-    const sid = ++this.sessionId;
     this.turnToken = 0;
     this.lastActionAt = -ACTION_COOLDOWN_MS;
     this.selectedMoveIndex = 0;
@@ -909,6 +938,8 @@ export class BattleEngine {
 
     this._resetSpriteClasses('enemy');
     this._resetSpriteClasses('player');
+    this.enemySpriteEl?.classList.add('is-sendout-pending');
+    this.playerSpriteEl?.classList.add('is-sendout-pending');
     this.displayedEnemyHp = leadEnemy.hp;
     this.displayedPlayerHp = this.player.hp;
 
@@ -935,12 +966,14 @@ export class BattleEngine {
     this.enemySpriteEl?.classList.toggle('is-shiny-sprite', Boolean(leadEnemy.isShiny));
     this.enemySpriteEl?.classList.toggle('is-elite-sprite', Boolean(leadEnemy.isElite));
     this.playerSpriteEl?.classList.toggle('is-shiny-sprite', Boolean(this.player.isShiny));
-    this.enemySpriteEl?.classList.remove('is-idle', 'enemy-sendout');
-    this.playerSpriteEl?.classList.remove('is-idle', 'player-sendout');
+    this.enemySpriteEl?.classList.remove('is-idle', 'enemy-sendout', 'is-sendout-pending');
+    this.playerSpriteEl?.classList.remove('is-idle', 'player-sendout', 'is-sendout-pending');
     if (this.enemySpriteEl) void this.enemySpriteEl.offsetWidth;
     if (this.playerSpriteEl) void this.playerSpriteEl.offsetWidth;
     this.enemySpriteEl?.classList.add('enemy-sendout');
     this.playerSpriteEl?.classList.add('player-sendout');
+    this.spawnSendoutEnergy('enemy', leadEnemy);
+    this.spawnSendoutEnergy('player', this.player);
     this.audio?.playPokemonCry?.(leadEnemy);
 
     if (leadEnemy.isShiny) {
@@ -1056,6 +1089,7 @@ export class BattleEngine {
     this.state = BATTLE_STATES.INACTIVE;
     this.mustSwitchForced = false;
     this.playerBuddyEndured = false;
+    this.forceBuddyEndure = false;
     this.isShrine = false;
     this.shrineData = null;
     this.isTrainer = false;
@@ -1081,7 +1115,7 @@ export class BattleEngine {
       this.enemySpriteEl.classList.remove(
         'is-idle', 'windup', 'lunge-right', 'lunge-left', 'quick-lunge-right', 'quick-lunge-left',
         'hit-stop', 'hit-shake', 'evo-glow', 'evo-flash',
-        'enemy-sendout', 'player-sendout', 'faint-drop',
+        'enemy-sendout', 'player-sendout', 'is-sendout-pending', 'faint-drop',
         'capture-energize', 'capture-pull', 'capture-shrink',
         'is-shiny-sprite', 'is-elite-sprite', 'ability-pulse', ...ALL_MOVE_FX_CLASSES,
       );
@@ -1091,16 +1125,21 @@ export class BattleEngine {
       this.playerSpriteEl.classList.remove(
         'is-idle', 'windup', 'lunge-right', 'lunge-left', 'quick-lunge-right', 'quick-lunge-left',
         'hit-stop', 'hit-shake', 'evo-glow', 'evo-flash',
-        'enemy-sendout', 'player-sendout', 'faint-drop',
+        'enemy-sendout', 'player-sendout', 'is-sendout-pending', 'faint-drop',
         'capture-energize', 'capture-pull', 'capture-shrink',
         'is-shiny-sprite', 'is-elite-sprite', 'ability-pulse', ...ALL_MOVE_FX_CLASSES,
       );
     }
     const enemyCard = this.enemyStatusCardEl || this.enemyNameEl?.closest('.status-card-enemy') || document.querySelector('.status-card-enemy');
     enemyCard?.classList.remove('is-elite-card');
+    if (this.enemyPartyPipsEl) {
+      this.enemyPartyPipsEl.innerHTML = '';
+      this.enemyPartyPipsEl.hidden = true;
+    }
 
     this.closeTeamDrawer();
     this.clearAllTimersAndLoops();
+    this.typingFullText = '';
 
     if (this.screenEl) {
       this.screenEl.classList.remove('is-action-locked');
@@ -1125,7 +1164,12 @@ export class BattleEngine {
 
   triggerCancelAction() {
     if (!this.active) return;
-    if (this.teamDrawerEl && !this.teamDrawerEl.hidden && !this.mustSwitchForced) {
+    if (this.teamDrawerEl && !this.teamDrawerEl.hidden) {
+      if (this.mustSwitchForced) {
+        this.audio?.playMenuBlip?.(280);
+        return;
+      }
+      this.audio?.playMenuBlip?.(480);
       this.closeTeamDrawer();
     }
   }
@@ -1411,6 +1455,7 @@ export class BattleEngine {
       else return false;
     }
 
+    if (cards[next]?.disabled) return false;
     this.selectMoveCard(next, true);
     return next !== cur;
   }
@@ -1432,8 +1477,9 @@ export class BattleEngine {
 
   renderMoveButtons() {
     if (!this.movesEl || !this.player || !this.enemy) return;
-    const moves = this.player.getMoveObjects();
-    const hasAnyPp = this.player.hasAnyMovePp();
+    const rawMoves = typeof this.player.getMoveObjects === 'function' ? this.player.getMoveObjects() : [];
+    const moves = Array.isArray(rawMoves) && rawMoves.length > 0 ? rawMoves : [createStruggleMove()];
+    const hasAnyPp = moves.some((m) => (m?._isStruggle ? false : (this.player.getMovePp?.(m.id)?.current ?? 0) > 0));
     this.movesEl.innerHTML = '';
 
     if (this.selectedMoveIndex < 0 || this.selectedMoveIndex >= moves.length) {
@@ -1458,8 +1504,9 @@ export class BattleEngine {
         || move.damageClass === 'status'
         || (Number(move.power) || 0) <= 0;
       const eff = isNonAttack || !this.enemy ? 1 : computeTypeEffectiveness(move.type, this.enemy.type);
-      const pp = this.player.getMovePp(move.id);
+      const pp = move._isStruggle ? { current: 0, max: 1 } : this.player.getMovePp(move.id);
       const outOfPp = pp.current <= 0 && hasAnyPp;
+      const isStruggleFallback = !hasAnyPp;
       const ppRatio = pp.max > 0 ? pp.current / pp.max : 0;
       const ppStateClass = pp.current === 0 || ppRatio <= 0.25 ? 'is-critical' : ppRatio <= 0.5 ? 'is-low' : '';
       const filledPips = pp.current <= 0 ? 0 : Math.max(1, Math.min(5, Math.round(ppRatio * 5)));
@@ -1471,13 +1518,15 @@ export class BattleEngine {
 
       const btn = document.createElement('button');
       btn.type = 'button';
-      btn.className = `move-btn move-card move-card--${move.type}${idx === this.selectedMoveIndex ? ' is-selected' : ''}`;
+      btn.className = `move-btn move-card move-card--${move.type}${idx === this.selectedMoveIndex ? ' is-selected' : ''}${isStruggleFallback ? ' is-struggle-fallback' : ''}`;
       btn.dataset.moveId = move.id;
       btn.dataset.moveType = move.type;
       btn.dataset.outOfPp = outOfPp ? '1' : '0';
 
       let effBadgeHtml = '';
-      if (move.category === 'heal') {
+      if (isStruggleFallback) {
+        effBadgeHtml = '<span class="move-eff-tag is-struggle" title="All PP depleted — uses Struggle!">⭐ STRUGGLE</span>';
+      } else if (move.category === 'heal') {
         effBadgeHtml = '<span class="move-eff-tag is-heal" title="Restores partner HP">♥ RECOVER</span>';
       } else if (move.category === 'buff') {
         effBadgeHtml = '<span class="move-eff-tag is-buff" title="Boosts partner stats">⚡ STAT UP</span>';
@@ -1563,7 +1612,16 @@ export class BattleEngine {
     const starBalls = toNonNegIntSafe(profile.bag?.starBalls);
     const potions = toNonNegIntSafe(profile.bag?.potions);
     if (this.btnBall) {
-      this.btnBall.textContent = this.isShrine ? '🛡️ Guardian' : '🔴 Poké Ball ∞';
+      this.btnBall.textContent = this.isShrine
+        ? '🛡️ Guardian'
+        : this.isTrainer
+          ? '🤝 Rival Team'
+          : '🔴 Poké Ball ∞';
+      this.btnBall.title = this.isShrine
+        ? "Shrine Guardians can't be caught"
+        : this.isTrainer
+          ? "You can't catch another trainer's Pokémon"
+          : 'Throw a Poké Ball';
       this.btnBall.disabled = locked;
     }
     if (this.btnGreat) {
@@ -5848,38 +5906,90 @@ export class BattleEngine {
     return false;
   }
 
-  spawnStarBurst(center) {
-    const colors = ['#fde047', '#f472b6', '#38bdf8', '#4ade80', '#ffffff'];
+  spawnSendoutEnergy(side = 'enemy', mon = null) {
+    const center = this.getSpriteCenter(side);
+    const pedestal = this.getPedestalPoint(side);
+    const typeCol = resolveTypeMeta(mon?.type).color || '#38bdf8';
+    const isElite = Boolean(mon?.isElite);
+    const isShiny = Boolean(mon?.isShiny);
+    const palette = isElite
+      ? ['#fde047', '#c084fc', '#fb923c', '#ffffff']
+      : isShiny
+        ? ['#fde047', '#f472b6', '#67e8f9', '#ffffff']
+        : [typeCol, '#fde047', '#ffffff', '#e0f2fe'];
+
     this.particles.push({
-      x: center.x,
-      y: center.y,
+      x: pedestal.x,
+      y: pedestal.y,
       vx: 0,
       vy: 0,
       gravity: 0,
       life: 0,
-      maxLife: 0.45,
-      color: '#fde047',
+      maxLife: 0.52,
+      color: isElite ? '#c084fc' : typeCol,
       size: 14,
-      maxRadius: 112,
-      shape: 'ring',
+      maxRadius: isElite ? 104 : 84,
+      lineWidth: 3.4,
+      shape: 'halo',
     });
 
-    for (let i = 0; i < 40; i++) {
-      const angle = (Math.PI * 2 * i) / 40 + Math.random() * 0.25;
-      const speed = 95 + Math.random() * 175;
+    for (let i = 0; i < 20; i++) {
+      const ang = (Math.PI * 2 * i) / 20 + (Math.random() - 0.5) * 0.25;
+      const speed = 56 + Math.random() * 98;
+      this.particles.push({
+        x: center.x + (Math.random() - 0.5) * 20,
+        y: center.y + 8 + (Math.random() - 0.5) * 18,
+        vx: Math.cos(ang) * speed,
+        vy: Math.sin(ang) * speed * 0.65 - 46,
+        gravity: 40,
+        drag: 0.96,
+        life: -(i * 0.008),
+        maxLife: 0.62 + Math.random() * 0.24,
+        color: palette[i % palette.length],
+        size: i % 2 === 0 ? 4.4 : 3.6,
+        rotation: ang,
+        spin: 8,
+        shape: i % 3 === 0 ? 'diamond' : 'star',
+      });
+    }
+  }
+
+  spawnStarBurst(center) {
+    const colors = ['#fde047', '#f472b6', '#38bdf8', '#4ade80', '#c084fc', '#ffffff'];
+    ['#fde047', '#38bdf8'].forEach((col, idx) => {
       this.particles.push({
         x: center.x,
         y: center.y,
+        vx: 0,
+        vy: 0,
+        gravity: 0,
+        life: -(idx * 0.07),
+        maxLife: 0.56,
+        color: col,
+        size: 16,
+        maxRadius: 118 + idx * 34,
+        lineWidth: 4.0 - idx * 0.8,
+        shape: idx === 0 ? 'ring' : 'halo',
+      });
+    });
+
+    for (let i = 0; i < 64; i++) {
+      const angle = (Math.PI * 2 * i) / 64 + Math.random() * 0.24;
+      const speed = (i % 2 === 0 ? 110 : 75) + Math.random() * 185;
+      this.particles.push({
+        x: center.x + (Math.random() - 0.5) * 14,
+        y: center.y + (Math.random() - 0.5) * 14,
         vx: Math.cos(angle) * speed,
-        vy: Math.sin(angle) * speed - 48,
-        gravity: 165,
-        life: 0,
-        maxLife: 0.72 + Math.random() * 0.38,
+        vy: Math.sin(angle) * speed - 54,
+        gravity: 155,
+        drag: 0.98,
+        life: -(i * 0.003),
+        maxLife: 0.78 + Math.random() * 0.42,
         color: colors[i % colors.length],
         size: 4.5 + Math.random() * 4.5,
         rotation: angle,
         spin: 8,
-        shape: 'star',
+        shape: i % 4 === 0 ? 'diamond' : 'star',
       });
     }
   }
@@ -5889,9 +5999,9 @@ export class BattleEngine {
     colors = null,
     ringColors = null,
     rings = true,
-    waves = 2,
-    countPerWave = 28,
-    spreadX = 140,
+    waves = 3,
+    countPerWave = 44,
+    spreadX = 164,
   } = {}) {
     const fallbackW = this.fxCanvas?.width || 480;
     const fallbackH = this.fxCanvas?.height || 260;
@@ -5902,6 +6012,7 @@ export class BattleEngine {
       ? colors
       : ['#fde047', '#38bdf8', '#f472b6', '#4ade80', '#c084fc', '#ffffff'];
 
+    let spawned = 0;
     if (rings) {
       const rPalette = Array.isArray(ringColors) && ringColors.length > 0
         ? ringColors
@@ -5913,45 +6024,49 @@ export class BattleEngine {
           vx: 0,
           vy: 0,
           gravity: 0,
-          life: -(idx * 0.085),
-          maxLife: 0.58,
+          life: -(idx * 0.075),
+          maxLife: 0.68,
           color: col,
-          size: 16,
-          maxRadius: 96 + idx * 38,
-          lineWidth: 4.0 - idx * 0.7,
-          shape: 'ring',
+          size: 18,
+          maxRadius: 108 + idx * 42,
+          lineWidth: 4.4 - idx * 0.65,
+          shape: idx % 2 === 1 ? 'halo' : 'ring',
         });
+        spawned += 1;
       });
     }
 
-    const totalWaves = Math.max(1, Math.min(3, Math.round(waves)));
+    const totalWaves = Math.max(1, Math.min(4, Math.round(waves)));
     for (let wave = 0; wave < totalWaves; wave++) {
-      const waveDelay = wave * 0.19;
-      const count = Math.max(8, countPerWave);
+      const waveDelay = wave * 0.16;
+      const count = Math.max(10, Math.round(countPerWave));
       for (let i = 0; i < count; i++) {
-        const angle = (Math.PI * 2 * i) / count + (Math.random() - 0.5) * 0.35;
-        const speed = (wave === 0 ? 105 : 135) + Math.random() * 145;
-        const offsetX = wave === 0 ? (Math.random() - 0.5) * 18 : (Math.random() - 0.5) * spreadX;
-        const offsetY = wave === 0 ? (Math.random() - 0.5) * 14 : -12 + (Math.random() - 0.5) * 28;
-        const isStar = i % 3 === 0;
+        const angle = (Math.PI * 2 * i) / count + (Math.random() - 0.5) * 0.36;
+        const speed = (wave === 0 ? 115 : 145) + Math.random() * 155;
+        const offsetX = wave === 0 ? (Math.random() - 0.5) * 22 : (Math.random() - 0.5) * spreadX;
+        const offsetY = wave === 0 ? (Math.random() - 0.5) * 16 : -14 + (Math.random() - 0.5) * 32;
+        const shape = i % 4 === 0 ? 'star' : i % 4 === 2 ? 'diamond' : 'confetti';
+        const isSparkle = shape !== 'confetti';
         this.particles.push({
           x: origin.x + offsetX,
           y: origin.y + offsetY,
           vx: Math.cos(angle) * speed,
-          vy: Math.sin(angle) * speed - (wave === 0 ? 75 : 105),
-          gravity: isStar ? 140 : 185,
+          vy: Math.sin(angle) * speed - (wave === 0 ? 82 : 112),
+          gravity: isSparkle ? 132 : 178,
           drag: 0.975,
-          life: -(waveDelay + i * 0.004),
-          maxLife: (isStar ? 0.85 : 1.05) + Math.random() * 0.3,
+          life: -(waveDelay + i * 0.0035),
+          maxLife: (isSparkle ? 0.92 : 1.15) + Math.random() * 0.34,
           color: palette[(i + wave) % palette.length],
-          size: isStar ? 4.5 + Math.random() * 3.5 : 4.2 + Math.random() * 2.8,
+          size: isSparkle ? 4.6 + Math.random() * 3.6 : 4.4 + Math.random() * 3.0,
           rotation: Math.random() * Math.PI * 2,
           spin: (i % 2 === 0 ? 1 : -1) * (6 + Math.random() * 6),
           flutterSpeed: 10 + Math.random() * 8,
-          shape: isStar ? 'star' : 'confetti',
+          shape,
         });
+        spawned += 1;
       }
     }
+    return spawned;
   }
 
   spawnBuddyEndureBurst(side = 'player') {
@@ -6131,6 +6246,19 @@ export class BattleEngine {
         ctx.beginPath();
         ctx.arc(0, 0, radius, 0, Math.PI * 2);
         ctx.stroke();
+      } else if (p.shape === 'halo') {
+        const radius = Math.max(4, p.size + (p.maxRadius - p.size) * (1 - Math.pow(1 - progress, 2)));
+        ctx.strokeStyle = p.color || '#fde047';
+        ctx.globalAlpha = alpha * 0.72;
+        ctx.lineWidth = Math.max(2, (p.lineWidth || 5) * (1 - progress * 0.8));
+        ctx.beginPath();
+        ctx.arc(0, 0, radius, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.globalAlpha = alpha * 0.2;
+        ctx.fillStyle = p.color || '#fde047';
+        ctx.beginPath();
+        ctx.arc(0, 0, radius * 0.78, 0, Math.PI * 2);
+        ctx.fill();
       } else if (p.shape === 'crescent') {
         ctx.rotate(p.rotation || 0);
         const r = p.size * (1 + progress * 0.25);
@@ -6465,6 +6593,25 @@ export class BattleEngine {
         ctx.fillRect(-w * 0.5, -h * 0.5, w, h);
         ctx.fillStyle = 'rgba(255, 255, 255, 0.35)';
         ctx.fillRect(-w * 0.5, -h * 0.5, w, Math.max(1, h * 0.35));
+      } else if (p.shape === 'diamond') {
+        ctx.rotate((p.rotation || 0) + p.life * (p.spin || 7));
+        const s = p.size * 1.25;
+        ctx.fillStyle = p.color || '#38bdf8';
+        ctx.beginPath();
+        ctx.moveTo(0, -s);
+        ctx.lineTo(s * 0.72, 0);
+        ctx.lineTo(0, s);
+        ctx.lineTo(-s * 0.72, 0);
+        ctx.closePath();
+        ctx.fill();
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.45)';
+        ctx.beginPath();
+        ctx.moveTo(0, -s * 0.55);
+        ctx.lineTo(s * 0.36, 0);
+        ctx.lineTo(0, s * 0.55);
+        ctx.lineTo(-s * 0.36, 0);
+        ctx.closePath();
+        ctx.fill();
       } else if (p.shape === 'star' || p.star) {
         ctx.rotate(p.rotation || p.life * 6);
         ctx.fillStyle = p.color;
@@ -7864,24 +8011,15 @@ export class BattleEngine {
     if (!this.enemy || this.enemy.isFainted || !this.player || this.player.isFainted) {
       return null;
     }
-    const allMoves = this.enemy.getMoveObjects();
-    if (allMoves.length === 0) return null;
+    const allMoves = typeof this.enemy.getMoveObjects === 'function' ? this.enemy.getMoveObjects() : [];
+    if (allMoves.length === 0) {
+      return createStruggleMove();
+    }
     const moves = typeof this.enemy.getMovePp === 'function'
       ? allMoves.filter((m) => this.enemy.getMovePp(m.id).current > 0)
       : allMoves;
     if (moves.length === 0) {
-      return {
-        id: 'tackle',
-        name: 'Struggle',
-        type: 'normal',
-        power: 35,
-        accuracy: 100,
-        pp: 99,
-        damageClass: 'physical',
-        category: 'attack',
-        fx: 'impact',
-        _isStruggle: true,
-      };
+      return createStruggleMove();
     }
     const attacks = moves.filter((m) => m.category === 'attack' || !m.category);
     let chosen = moves[Math.floor(Math.random() * moves.length)];
@@ -7900,28 +8038,20 @@ export class BattleEngine {
   }
 
   async handlePlayerMove(move) {
-    if (!this.canAcceptPlayerAction()) return;
+    if (!move || !this.canAcceptPlayerAction()) return;
     if (!this.player || this.player.isFainted || !this.enemy || this.enemy.isFainted) return;
 
     let activeMove = move;
-    const ppInfo = this.player.getMovePp(move.id);
-    if (ppInfo.current <= 0) {
-      if (this.player.hasAnyMovePp()) {
+    const moves = typeof this.player.getMoveObjects === 'function' ? this.player.getMoveObjects() : [];
+    const anyRenderedPp = moves.some((m) => (this.player.getMovePp?.(m.id)?.current ?? 0) > 0);
+    const ppInfo = move._isStruggle ? { current: 0, max: 1 } : this.player.getMovePp(move.id);
+    if (move._isStruggle || ppInfo.current <= 0) {
+      if (!move._isStruggle && (anyRenderedPp || this.player.hasAnyMovePp?.())) {
         this.audio?.playMenuBlip?.(300);
+        this.renderMoveButtons();
         return;
       }
-      activeMove = {
-        id: 'tackle',
-        name: 'Struggle',
-        type: 'normal',
-        power: 35,
-        accuracy: 100,
-        pp: 99,
-        damageClass: 'physical',
-        category: 'attack',
-        fx: 'impact',
-        _isStruggle: true,
-      };
+      activeMove = createStruggleMove();
     }
 
     const sid = this.sessionId;
@@ -8003,14 +8133,27 @@ export class BattleEngine {
     if (!isPlayer && !move?._isStruggle) {
       attacker.consumeMovePp?.(move.id);
     }
+    if (move?._isStruggle) {
+      const atkCenter = this.getSpriteCenter(side);
+      this.spawnFloatingText(atkCenter.x, atkCenter.y - 34, '0 PP → STRUGGLE!', '#fde047', 16, 0, 1.25);
+    }
 
     const attackerLabel = isPlayer ? (attacker.displayName || attacker.name) : attacker.name;
     await this.say(`${attackerLabel} used ${move.name}!`);
     if (!this.isSessionValid(sid) || attacker.isFainted || defender.isFainted) return true;
 
-    const result = PokemonMod.calculateDamage(attacker, defender, move, {
+    const rawResult = PokemonMod.calculateDamage(attacker, defender, move, {
       applyAbilities: this.abilitiesEnabled !== false,
     });
+    const result = move?._isStruggle
+      ? {
+          ...rawResult,
+          effectiveness: 1,
+          damage: rawResult.effectiveness === 0
+            ? Math.max(Number(rawResult.damage) || 1, Math.max(2, Math.round(((attacker.level || 5) + 4) * 0.45)))
+            : Math.max(1, Number(rawResult.damage) || 1),
+        }
+      : rawResult;
 
     if (!result.missed && result.attackerAbilityTrigger && this.abilitiesEnabled !== false) {
       const atkTrig = result.attackerAbilityTrigger;
@@ -8276,7 +8419,11 @@ export class BattleEngine {
     if (this.isShrine) {
       const token = this.lockPlayerAction(BATTLE_STATES.ACTION_ANIMATING);
       this.audio?.playMenuBlip?.(340);
-      await this.say("Shrine Guardians can't be caught! Defeat it to win the Elemental Badge!");
+      await this.say(
+        this.shrineData?.isAstralTrial
+          ? "Shrine Guardians can't be caught! Defeat it to clear the Astral Trial!"
+          : "Shrine Guardians can't be caught! Defeat it to win the Elemental Badge!",
+      );
       if (!this.isSessionValid(sid) || this.turnToken !== token) return;
       this.returnToPlayerInput(sid);
       return;
@@ -8399,12 +8546,20 @@ export class BattleEngine {
           shadowAlpha: 0.45,
         };
         this.audio?.playCaptureSuccess?.();
-        this.triggerCelebrationGlow('capture', 850);
+        this.triggerCelebrationGlow('capture', 920);
         this.spawnStarBurst({ x: hoverPos.x, y: restY });
         this.spawnCelebrationConfetti({
           center: { x: hoverPos.x, y: restY },
-          colors: ['#fde047', '#38bdf8', '#f472b6', '#4ade80', '#ffffff'],
+          countPerWave: 48,
+          colors: ['#fde047', '#38bdf8', '#f472b6', '#4ade80', '#c084fc', '#ffffff'],
           ringColors: ['#fde047', '#38bdf8', '#f472b6'],
+        });
+        this.spawnCelebrationConfetti({
+          center: this.getSpriteCenter('player'),
+          waves: 1,
+          countPerWave: 20,
+          rings: false,
+          colors: ['#fde047', '#38bdf8', '#4ade80', '#ffffff'],
         });
         this.spawnFloatingText(hoverPos.x, restY - 38, '✨ GOTCHA!', '#fde047', 25, 0, 1.55);
 
@@ -8681,6 +8836,9 @@ export class BattleEngine {
 
   async handleEnemyDefeated(sid = this.sessionId) {
     const pace = this.getPaceConfig();
+    if (this.enemy && this.enemy.hp > 0) {
+      this.enemy.hp = 0;
+    }
     const nextEnemyIdx = this.isTrainer
       ? this.enemyParty.findIndex((mon, idx) => idx > this.enemyPartyIndex && !mon.isFainted)
       : -1;
@@ -8711,7 +8869,7 @@ export class BattleEngine {
       this.storage.recordSeen(this.enemy.speciesId);
 
       this._resetSpriteClasses('enemy');
-      this.enemySpriteEl?.classList.remove('faint-drop');
+      this.enemySpriteEl?.classList.add('is-sendout-pending');
       this.renderStatusCards();
       await PokemonMod.attachPokemonSprite(this.enemySpriteEl, this.enemy.speciesId, {
         back: false,
@@ -8722,11 +8880,12 @@ export class BattleEngine {
 
       this.enemySpriteEl?.classList.toggle('is-shiny-sprite', Boolean(this.enemy.isShiny));
       this.enemySpriteEl?.classList.toggle('is-elite-sprite', Boolean(this.enemy.isElite));
-      this.enemySpriteEl?.classList.remove('is-idle', 'enemy-sendout');
+      this.enemySpriteEl?.classList.remove('is-idle', 'enemy-sendout', 'is-sendout-pending');
       if (this.enemySpriteEl) void this.enemySpriteEl.offsetWidth;
       this.enemySpriteEl?.classList.add('enemy-sendout');
       this.audio?.playPokeballThrow?.();
       this.audio?.playPokemonCry?.(this.enemy);
+      this.spawnSendoutEnergy('enemy', this.enemy);
       this.spawnImpactFX('enemy', this.enemy.type, '', '#ffffff', {
         ring: true,
         ringRadius: 84,
@@ -8786,11 +8945,11 @@ export class BattleEngine {
       } else {
         (this.audio?.playQuestCompleteFanfare || this.audio?.playLevelUp)?.call(this.audio);
       }
-      this.triggerCelebrationGlow('victory', 900);
+      this.triggerCelebrationGlow('victory', 960);
       this.spawnStarBurst(enemyCenter);
       this.spawnCelebrationConfetti({
         center: playerCenter,
-        countPerWave: 32,
+        countPerWave: 44,
         colors: isAstralTrial
           ? ['#fde047', '#c084fc', '#38bdf8', '#f472b6', '#ffffff']
           : ['#fde047', '#4ade80', '#38bdf8', '#f472b6', '#ffffff'],
@@ -8813,6 +8972,16 @@ export class BattleEngine {
         );
         if (!this.isSessionValid(sid)) return;
       }
+    } else {
+      const playerCenter = this.getSpriteCenter('player');
+      this.triggerCelebrationGlow('victory', 760);
+      this.spawnCelebrationConfetti({
+        center: playerCenter,
+        waves: 2,
+        countPerWave: 28,
+        colors: ['#fde047', '#4ade80', '#38bdf8', '#ffffff'],
+        ringColors: ['#fde047', '#4ade80'],
+      });
     }
 
     const evoBadges = await this.awardVictoryXp(1.0, sid, { deferBadges: true });
@@ -9142,6 +9311,15 @@ export class BattleEngine {
     if (benchReceivers.length > 0 && this.isSessionValid(sid)) {
       if (benchLevelUps.length > 0 && !levelResult.leveledUp) {
         this.audio?.playLevelUp?.();
+        this.triggerCelebrationGlow('levelup', 660);
+        const playerCenter = this.getSpriteCenter('player');
+        this.spawnCelebrationConfetti({
+          center: playerCenter,
+          waves: 2,
+          countPerWave: 24,
+          colors: ['#fde047', '#fbbf24', '#38bdf8', '#ffffff'],
+          ringColors: ['#fde047', '#38bdf8'],
+        });
       }
       const lvlSummary = benchLevelUps.length > 0
         ? ` (${benchLevelUps.map((u) => `${u.name} → Lv.${u.newLevel}!`).join(', ')})`
@@ -9179,24 +9357,39 @@ export class BattleEngine {
     this.playerSpriteEl?.classList.remove('is-idle');
     this.playerSpriteEl?.classList.add('evo-glow');
 
-    const spiralColors = ['#fde047', '#f472b6', '#38bdf8', '#c084fc', '#ffffff'];
-    for (let i = 0; i < 24; i++) {
-      const startAngle = (Math.PI * 2 * i) / 24;
+    const spiralColors = ['#fde047', '#f472b6', '#38bdf8', '#c084fc', '#67e8f9', '#ffffff'];
+    this.particles.push({
+      x: center.x,
+      y: center.y,
+      vx: 0,
+      vy: 0,
+      gravity: 0,
+      life: 0,
+      maxLife: 0.92,
+      color: '#f472b6',
+      size: 14,
+      maxRadius: 112,
+      lineWidth: 3.4,
+      shape: 'halo',
+    });
+    for (let i = 0; i < 36; i++) {
+      const startAngle = (Math.PI * 2 * i) / 36;
+      const isOuter = i % 2 === 0;
       this.particles.push({
-        x: center.x + Math.cos(startAngle) * 78,
-        y: center.y + Math.sin(startAngle) * 56,
+        x: center.x + Math.cos(startAngle) * (isOuter ? 88 : 66),
+        y: center.y + Math.sin(startAngle) * (isOuter ? 64 : 46),
         orbitCenter: center,
         orbitAngle: startAngle,
-        orbitRadius: 72 + (i % 3) * 14,
-        orbitRadialVel: -52,
-        orbitAngVel: 7.5,
-        life: -(i * 0.025),
-        maxLife: 1.05,
+        orbitRadius: (isOuter ? 82 : 60) + (i % 3) * 12,
+        orbitRadialVel: isOuter ? -58 : -44,
+        orbitAngVel: isOuter ? 8.2 : -6.8,
+        life: -(i * 0.018),
+        maxLife: 1.08,
         color: spiralColors[i % spiralColors.length],
         size: 4.5 + (i % 3) * 1.5,
         rotation: startAngle,
-        spin: 9,
-        shape: 'star',
+        spin: 9.5,
+        shape: i % 3 === 0 ? 'diamond' : 'star',
       });
     }
 
@@ -9207,9 +9400,13 @@ export class BattleEngine {
     await this.wait(420, sid);
     if (!this.isSessionValid(sid)) return [];
 
-    const evoRes = typeof this.storage.evolvePokemon === 'function'
-      ? this.storage.evolvePokemon(this.player.uid, pendingEvo.toId)
-      : { evolution: this.player.evolve?.(pendingEvo.toId), newBadges: [] };
+    const rawEvoRes = typeof this.storage?.evolvePokemon === 'function'
+      ? this.storage.evolvePokemon(this.player.uid || this.player, pendingEvo.toId)
+      : null;
+    const evoRes = rawEvoRes || { evolution: this.player.evolve?.(pendingEvo.toId), newBadges: [] };
+    if (this.player.speciesId !== pendingEvo.toId && typeof this.player.evolve === 'function') {
+      this.player.evolve(pendingEvo.toId);
+    }
 
     await PokemonMod.attachPokemonSprite(this.playerSpriteEl, pendingEvo.toId, {
       back: true,
@@ -9218,7 +9415,7 @@ export class BattleEngine {
     });
     if (!this.isSessionValid(sid)) return [];
 
-    this.playerSpriteEl?.classList.remove('evo-glow', 'evo-flash');
+    this.playerSpriteEl?.classList.remove('evo-glow', 'evo-flash', 'is-sendout-pending');
     this._resetSpriteClasses('player');
     this.displayedPlayerHp = this.player.hp;
     this.renderStatusCards();
@@ -9227,11 +9424,12 @@ export class BattleEngine {
 
     this.audio?.playEvolutionFanfare?.();
     this.audio?.playPokemonCry?.(this.player);
-    this.triggerCelebrationGlow('evo', 960);
+    this.triggerCelebrationGlow('evo', 1100);
     this.spawnStarBurst(center);
     this.spawnCelebrationConfetti({
       center,
-      countPerWave: 34,
+      countPerWave: 46,
+      spreadX: 185,
       colors: ['#fde047', '#f472b6', '#38bdf8', '#c084fc', '#ffffff'],
       ringColors: ['#fde047', '#c084fc', '#38bdf8'],
     });
@@ -9256,6 +9454,9 @@ export class BattleEngine {
 
   async handlePlayerFainted(sid = this.sessionId) {
     const pace = this.getPaceConfig();
+    if (this.player && this.player.hp > 0) {
+      this.player.hp = 0;
+    }
     this.audio?.playFaint?.();
     this.playerSpriteEl?.classList.remove('is-idle');
     this.playerSpriteEl?.classList.add('faint-drop');
@@ -9265,16 +9466,17 @@ export class BattleEngine {
     if (!this.isSessionValid(sid)) return;
 
     const profile = this.storage.getActiveProfile();
-    const healthyIdx = profile?.team?.findIndex((mon) => !mon.isFainted) ?? -1;
+    const healthyIdx = profile?.team?.findIndex((mon) => mon && !mon.isFainted) ?? -1;
     if (healthyIdx >= 0) {
       this.state = BATTLE_STATES.FORCED_SWITCH;
-      this.busy = false;
       this.mustSwitchForced = true;
+      this.busy = false;
       this.screenEl?.classList.remove('is-action-locked');
       this.openTeamDrawer(true);
       return;
     }
 
+    this.mustSwitchForced = false;
     this.state = BATTLE_STATES.BATTLE_END;
     await this.say('Your team needs a quick rest! Returning to Starlight Fountain...');
     if (!this.isSessionValid(sid)) return;
@@ -9301,7 +9503,14 @@ export class BattleEngine {
     if (!this.active) return;
     if (!forced && !this.canAcceptPlayerAction()) return;
     const profile = this.storage.getActiveProfile();
-    if (!profile || !this.teamDrawerEl || !this.teamListEl) return;
+    if (!profile || !this.teamDrawerEl || !this.teamListEl) {
+      if (forced) {
+        this.mustSwitchForced = false;
+        this.state = BATTLE_STATES.BATTLE_END;
+        this.stop({ outcome: 'fainted', faintedAll: true });
+      }
+      return;
+    }
 
     if (!forced) {
       this.audio?.playMenuBlip?.(640);
@@ -9309,15 +9518,26 @@ export class BattleEngine {
 
     this.mustSwitchForced = forced;
     if (this.teamCloseBtn) this.teamCloseBtn.hidden = forced;
+    const headerTitle = this.teamDrawerEl.querySelector('.battle-team-header span');
+    if (headerTitle) {
+      headerTitle.textContent = forced
+        ? 'Choose your next Pokémon! (Required)'
+        : 'Choose a Pokémon to send out!';
+    }
     this.teamDrawerEl.hidden = false;
     this.teamListEl.innerHTML = '';
 
+    let enabledCount = 0;
     profile.team.forEach((mon, idx) => {
+      if (!mon) return;
       const card = document.createElement('button');
       card.type = 'button';
       card.className = 'battle-switch-card';
-      const isCurrent = idx === this.playerIndex;
-      card.disabled = mon.isFainted || isCurrent;
+      const isSameMon = mon === this.player || (this.player?.uid && mon.uid === this.player.uid);
+      const isCurrent = forced ? isSameMon : (idx === this.playerIndex || isSameMon);
+      const disabled = Boolean(mon.isFainted || isCurrent);
+      card.disabled = disabled;
+      if (!disabled) enabledCount += 1;
 
       const img = document.createElement('img');
       PokemonMod.attachPokemonSprite(img, mon.speciesId, {
@@ -9326,20 +9546,41 @@ export class BattleEngine {
         timeoutMs: 1500,
       });
 
-      const rankBadge = (mon.upgradeTier || 0) > 0
-        ? ` <span class="rank-pill">★${mon.upgradeTier}</span>`
-        : '';
       const info = document.createElement('div');
-      info.innerHTML = `
-        <strong>${mon.isShiny ? '✨ ' : ''}${mon.displayName || mon.name}</strong>${rankBadge} <span style="color:#fde047">Lv.${mon.level}</span>
-        <div style="font-size:0.75rem;color:#cbd5e1">HP ${mon.hp}/${mon.maxHp} ${isCurrent ? '• Active' : mon.isFainted ? '• Fainted' : ''}</div>
-      `;
+      const titleRow = document.createElement('div');
+      const nameEl = document.createElement('strong');
+      nameEl.textContent = `${mon.isShiny ? '✨ ' : ''}${mon.displayName || mon.name}`;
+      titleRow.appendChild(nameEl);
+      if ((mon.upgradeTier || 0) > 0) {
+        const rankEl = document.createElement('span');
+        rankEl.className = 'rank-pill';
+        rankEl.textContent = `★${mon.upgradeTier}`;
+        titleRow.append(' ', rankEl);
+      }
+      const lvEl = document.createElement('span');
+      lvEl.style.color = '#fde047';
+      lvEl.textContent = ` Lv.${mon.level}`;
+      titleRow.appendChild(lvEl);
 
+      const metaEl = document.createElement('div');
+      metaEl.style.fontSize = '0.75rem';
+      metaEl.style.color = '#cbd5e1';
+      metaEl.textContent = `HP ${mon.hp}/${mon.maxHp} ${isCurrent ? '• Active' : mon.isFainted ? '• Fainted' : ''}`;
+
+      info.appendChild(titleRow);
+      info.appendChild(metaEl);
       card.appendChild(img);
       card.appendChild(info);
       card.addEventListener('click', () => this.switchPlayerPokemon(idx));
       this.teamListEl.appendChild(card);
     });
+
+    if (forced && enabledCount === 0) {
+      this.closeTeamDrawer();
+      this.mustSwitchForced = false;
+      this.state = BATTLE_STATES.BATTLE_END;
+      this.stop({ outcome: 'fainted', faintedAll: true });
+    }
   }
 
   closeTeamDrawer() {
@@ -9352,8 +9593,10 @@ export class BattleEngine {
     if (!this.active || this.busy) return;
     if (this.state !== BATTLE_STATES.PLAYER_INPUT && this.state !== BATTLE_STATES.FORCED_SWITCH) return;
     const profile = this.storage.getActiveProfile();
-    if (!profile || !profile.team[teamIdx] || profile.team[teamIdx].isFainted) return;
-    if (teamIdx === this.playerIndex) return;
+    const targetMon = profile?.team?.[teamIdx];
+    if (!targetMon || targetMon.isFainted) return;
+    const isSameMon = targetMon === this.player || (this.player?.uid && targetMon.uid === this.player.uid);
+    if (isSameMon || (!this.mustSwitchForced && teamIdx === this.playerIndex)) return;
 
     const sid = this.sessionId;
     const pace = this.getPaceConfig();
@@ -9365,11 +9608,12 @@ export class BattleEngine {
 
     try {
       this.playerIndex = teamIdx;
-      this.player = profile.team[teamIdx];
+      this.player = targetMon;
       this.player.resetBattleState?.();
       this.selectedMoveIndex = 0;
       this.displayedPlayerHp = this.player.hp;
       this._resetSpriteClasses('player');
+      this.playerSpriteEl?.classList.add('is-sendout-pending');
 
       this.renderStatusCards();
       this.renderMoveButtons();
@@ -9382,17 +9626,22 @@ export class BattleEngine {
       });
       if (!this.isSessionValid(sid) || this.turnToken !== token) return;
       this.playerSpriteEl?.classList.toggle('is-shiny-sprite', Boolean(this.player.isShiny));
-      this.playerSpriteEl?.classList.remove('is-idle', 'player-sendout');
+      this.playerSpriteEl?.classList.remove('is-idle', 'player-sendout', 'is-sendout-pending');
       if (this.playerSpriteEl) void this.playerSpriteEl.offsetWidth;
       this.playerSpriteEl?.classList.add('player-sendout');
       this.audio?.playPokeballThrow?.();
       this.audio?.playPokemonCry?.(this.player);
+      this.spawnSendoutEnergy('player', this.player);
       this.spawnImpactFX('player', this.player.type, '', '#ffffff', {
         ring: true,
         ringRadius: 72,
         count: 14,
         lifeScale: pace.particleLifeScale,
       });
+      if (this.player.isShiny) {
+        this.audio?.playShinySparkle?.();
+        this.spawnShinyIntroSparkles('player');
+      }
       await this.say(`Go, ${this.player.displayName || this.player.name}!`);
       if (!this.isSessionValid(sid) || this.turnToken !== token) return;
 

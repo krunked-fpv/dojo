@@ -2659,28 +2659,41 @@
   transition: transform 300ms cubic-bezier(0.55, 0.06, 0.68, 0.19), opacity 280ms ease;
 }
 
+.fighter-sprite.is-sendout-pending {
+  opacity: 0 !important;
+  transform: scale(0.24) translateY(20px);
+  filter: brightness(3.2);
+  transition: none !important;
+  animation: none !important;
+}
+
 .fighter-sprite.faint-drop {
   animation: faint-dissolve 420ms cubic-bezier(0.4, 0, 0.85, 0.6) forwards;
 }
 
 .fighter-sprite.enemy-sendout {
-  animation: enemy-sendout 380ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  animation: enemy-sendout 420ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
 }
 
 .fighter-sprite.player-sendout {
-  animation: player-sendout 380ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  animation: player-sendout 420ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
 }
 
 @keyframes enemy-sendout {
   0% {
-    transform: scale(0.22) translateY(20px);
-    opacity: 0.15;
-    filter: brightness(4.2) drop-shadow(0 0 24px #fde047);
+    transform: scale(0.2) translateY(22px);
+    opacity: 0.12;
+    filter: brightness(4.5) drop-shadow(0 0 28px #fde047);
   }
-  55% {
-    transform: scale(1.09) translateY(-5px);
+  48% {
+    transform: scale(1.11) translateY(-7px);
     opacity: 1;
-    filter: brightness(1.75) drop-shadow(0 0 18px #ffffff);
+    filter: brightness(1.85) drop-shadow(0 0 22px #ffffff);
+  }
+  76% {
+    transform: scale(0.97) translateY(2px);
+    opacity: 1;
+    filter: brightness(1.18) drop-shadow(0 0 12px rgba(253, 224, 71, 0.65));
   }
   100% {
     transform: scale(1) translateY(0);
@@ -2691,14 +2704,19 @@
 
 @keyframes player-sendout {
   0% {
-    transform: scale(0.24) translateY(22px);
-    opacity: 0.15;
-    filter: brightness(4.2) drop-shadow(0 0 24px #38bdf8);
+    transform: scale(0.22) translateY(24px);
+    opacity: 0.12;
+    filter: brightness(4.5) drop-shadow(0 0 28px #38bdf8);
   }
-  55% {
-    transform: scale(1.09) translateY(-5px);
+  48% {
+    transform: scale(1.11) translateY(-7px);
     opacity: 1;
-    filter: brightness(1.75) drop-shadow(0 0 18px #e0f2fe);
+    filter: brightness(1.85) drop-shadow(0 0 22px #e0f2fe);
+  }
+  76% {
+    transform: scale(0.97) translateY(2px);
+    opacity: 1;
+    filter: brightness(1.16) drop-shadow(0 0 12px rgba(56, 189, 248, 0.65));
   }
   100% {
     transform: scale(1) translateY(0);
@@ -3484,6 +3502,22 @@
   border-color: rgba(148, 163, 184, 0.48);
 }
 
+.move-eff-tag.is-struggle {
+  background: linear-gradient(90deg, #f59e0b, #fbbf24);
+  color: #1e1b4b;
+  border-color: #fef08a;
+  box-shadow: 0 0 8px rgba(251, 191, 36, 0.45);
+}
+
+.move-card.is-struggle-fallback {
+  border-color: rgba(251, 191, 36, 0.78);
+  background: linear-gradient(155deg, #332514 0%, #1c1926 58%, #362238 100%);
+  box-shadow:
+    0 4px 0 rgba(2, 6, 23, 0.88),
+    0 0 12px rgba(251, 191, 36, 0.24),
+    inset 0 1px 0 rgba(254, 240, 138, 0.24);
+}
+
 .battle-actions {
   display: grid;
   grid-template-columns: repeat(6, minmax(0, 1fr));
@@ -3690,40 +3724,62 @@
   inset: 0;
   z-index: 11;
   pointer-events: none;
-  animation: battle-stage-celebrate-pulse 760ms ease-out forwards;
+  animation: battle-stage-celebrate-pulse 860ms ease-out forwards;
+}
+
+.battle-stage.is-celebrating:not([data-ability-aura])::after {
+  content: '';
+  position: absolute;
+  inset: -12% -25%;
+  z-index: 11;
+  pointer-events: none;
+  background: linear-gradient(
+    115deg,
+    transparent 28%,
+    rgba(255, 255, 255, 0.12) 44%,
+    rgba(253, 224, 71, 0.24) 50%,
+    rgba(56, 189, 248, 0.14) 56%,
+    transparent 72%
+  );
+  animation: battle-stage-celebrate-sweep 920ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
 }
 
 .battle-stage.is-celebrating-capture::before {
   background:
-    radial-gradient(circle at 74% 38%, rgba(253, 224, 71, 0.36), transparent 52%),
-    radial-gradient(ellipse 90% 70% at 50% 50%, rgba(56, 189, 248, 0.24), transparent 72%);
-  box-shadow: inset 0 0 42px rgba(253, 224, 71, 0.42), inset 0 0 18px rgba(56, 189, 248, 0.38);
+    radial-gradient(circle at 74% 38%, rgba(253, 224, 71, 0.4), transparent 54%),
+    radial-gradient(ellipse 90% 70% at 50% 50%, rgba(56, 189, 248, 0.28), transparent 72%);
+  box-shadow: inset 0 0 46px rgba(253, 224, 71, 0.46), inset 0 0 20px rgba(56, 189, 248, 0.42);
 }
 
 .battle-stage.is-celebrating-levelup::before {
   background:
-    radial-gradient(circle at 26% 68%, rgba(253, 224, 71, 0.4), transparent 52%),
-    radial-gradient(ellipse 90% 70% at 50% 50%, rgba(251, 146, 60, 0.2), transparent 72%);
-  box-shadow: inset 0 0 44px rgba(250, 204, 21, 0.48), inset 0 0 18px rgba(255, 255, 255, 0.32);
+    radial-gradient(circle at 26% 68%, rgba(253, 224, 71, 0.44), transparent 54%),
+    radial-gradient(ellipse 90% 70% at 50% 50%, rgba(251, 146, 60, 0.24), transparent 72%);
+  box-shadow: inset 0 0 48px rgba(250, 204, 21, 0.52), inset 0 0 20px rgba(255, 255, 255, 0.36);
 }
 
 .battle-stage.is-celebrating-evo::before {
   background:
-    radial-gradient(circle at 28% 64%, rgba(244, 114, 182, 0.38), transparent 54%),
-    radial-gradient(circle at 52% 46%, rgba(103, 232, 249, 0.32), transparent 64%),
-    radial-gradient(ellipse 90% 75% at 50% 50%, rgba(192, 132, 252, 0.28), transparent 76%);
-  box-shadow: inset 0 0 54px rgba(244, 114, 182, 0.52), inset 0 0 24px rgba(253, 224, 71, 0.46);
+    radial-gradient(circle at 28% 64%, rgba(244, 114, 182, 0.44), transparent 56%),
+    radial-gradient(circle at 52% 46%, rgba(103, 232, 249, 0.36), transparent 64%),
+    radial-gradient(ellipse 90% 75% at 50% 50%, rgba(192, 132, 252, 0.34), transparent 76%);
+  box-shadow: inset 0 0 58px rgba(244, 114, 182, 0.56), inset 0 0 26px rgba(253, 224, 71, 0.5);
 }
 
 .battle-stage.is-celebrating-victory::before {
   background:
-    radial-gradient(circle at 50% 45%, rgba(253, 224, 71, 0.32), transparent 58%),
-    radial-gradient(ellipse 95% 75% at 50% 50%, rgba(52, 211, 153, 0.22), transparent 74%);
-  box-shadow: inset 0 0 46px rgba(253, 224, 71, 0.46), inset 0 0 20px rgba(74, 222, 128, 0.34);
+    radial-gradient(circle at 50% 45%, rgba(253, 224, 71, 0.38), transparent 58%),
+    radial-gradient(ellipse 95% 75% at 50% 50%, rgba(52, 211, 153, 0.26), transparent 74%);
+  box-shadow: inset 0 0 50px rgba(253, 224, 71, 0.5), inset 0 0 22px rgba(74, 222, 128, 0.38);
 }
 
 .battle-stage.is-celebrating .fighter-sprite-player {
   filter: brightness(1.12) drop-shadow(0 0 14px rgba(253, 224, 71, 0.65)) drop-shadow(0 8px 10px rgba(0, 0, 0, 0.42));
+}
+
+.battle-stage.is-celebrating .fighter-mount-player .fighter-pedestal-ring {
+  filter: brightness(1.45);
+  box-shadow: 0 0 18px rgba(253, 224, 71, 0.6);
 }
 
 @keyframes battle-stage-celebrate-pulse {
@@ -3731,6 +3787,12 @@
   22% { opacity: 1; }
   75% { opacity: 0.82; }
   100% { opacity: 0.35; }
+}
+
+@keyframes battle-stage-celebrate-sweep {
+  0% { opacity: 0; transform: translateX(-35%); }
+  25% { opacity: 0.95; }
+  100% { opacity: 0; transform: translateX(40%); }
 }
 
 /* --- Reduced Motion Accessibility --- */
@@ -3745,6 +3807,9 @@
   .battle-stage[data-biome='marsh'] .scenery-celestial::after,
   .battle-stage[data-biome='ruins'] .scenery-celestial::before,
   .fighter-shadow,
+  .fighter-sprite.is-sendout-pending,
+  .fighter-sprite.enemy-sendout,
+  .fighter-sprite.player-sendout,
   .fighter-sprite.is-idle:not(.windup):not(.hit-stop):not(.hit-shake):not(.enemy-sendout):not(.player-sendout):not(.faint-drop):not(.evo-glow):not(.evo-flash):not(.lunge-right):not(.lunge-left):not(.quick-lunge-right):not(.quick-lunge-left):not(.ability-pulse),
   .fighter-sprite.is-idle[data-motion]:not(.windup):not(.hit-stop):not(.hit-shake):not(.enemy-sendout):not(.player-sendout):not(.faint-drop):not(.evo-glow):not(.evo-flash):not(.lunge-right):not(.lunge-left):not(.quick-lunge-right):not(.quick-lunge-left):not(.ability-pulse),
   .fighter-sprite.is-elite-sprite.is-idle:not(.windup):not(.hit-stop):not(.hit-shake):not(.enemy-sendout):not(.player-sendout):not(.faint-drop):not(.evo-glow):not(.evo-flash):not(.lunge-right):not(.lunge-left):not(.quick-lunge-right):not(.quick-lunge-left):not(.ability-pulse),
@@ -3761,7 +3826,8 @@
   .battle-ability-banner,
   .battle-ability-banner::before,
   .battle-stage[data-ability-aura]::after,
-  .battle-stage.is-celebrating::before {
+  .battle-stage.is-celebrating::before,
+  .battle-stage.is-celebrating:not([data-ability-aura])::after {
     animation: none;
   }
 
