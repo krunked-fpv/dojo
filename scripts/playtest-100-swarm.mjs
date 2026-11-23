@@ -41,9 +41,12 @@ import {
   SECRET_ARCADE_SPOT,
   SHRINES,
   SIGNPOSTS,
+  SPECIES,
   WORLD_COLS,
   WORLD_MAP,
   WORLD_ROWS,
+  getBiomeAt,
+  getTileDepthInfo,
   isTileWalkableAt,
 } from '../js/config.js';
 
@@ -456,9 +459,12 @@ function parseCliArgs(argv) {
   return { ...opts, seeds };
 }
 
+const FOREST_BRUISER_IDS = new Set([83, 114, 123, 127, 143, 214, 234, 352, 446]);
+const OUTER_GEN_6_9_BIOMES = new Set(['faeveldt', 'atoll', 'highlands', 'crater', 'ruins', 'rift']);
+
 function getCohortForSeed(seed) {
   if (seed >= 1 && seed <= 100) return Math.ceil(seed / 10);
-  return ((seed - 1) % 10) + 1;
+  return Math.floor(((seed - 1) % 100) / 10) + 1;
 }
 
 function getAgentSpec(seed) {
@@ -466,6 +472,8 @@ function getAgentSpec(seed) {
   return {
     seed,
     cohort,
+    cohortOffset: (seed - 1) % 10,
+    isWave2: seed >= 101,
     cohortName: COHORT_NAMES[cohort],
     trainerId: seed % 2 === 1 ? 'violet' : 'ozias',
     viewport: VIEWPORTS[(seed - 1) % VIEWPORTS.length],
@@ -534,11 +542,52 @@ function attachRunTelemetry(page, baseUrl, spec) {
       viewportsAudited: 0,
       lastBattleResult: null,
     },
+    experience: {
+      delights: [],
+      frictions: [],
+    },
+    round2: {
+      isWave2: Boolean(spec.isWave2),
+      starterName: spec.starterName,
+      compassStepsObserved: [],
+      compassProgressionOk: null,
+      forestOutskirtsDepthOk: null,
+      forestOutskirtsBannerText: null,
+      forestShrineLevelObserved: null,
+      forestShrineReadinessTier: null,
+      forestShrineReadinessBadge: null,
+      forestShrinePivotLabel: null,
+      farmPivotClicked: false,
+      farmPivotLandedOk: null,
+      forestOutskirtsEncounters: [],
+      forestOutskirtsRareElites: 0,
+      forestOutskirtsBruisers: 0,
+      forestOutskirtsNidoranF: 0,
+      forestOutskirtsNincada: 0,
+      forestOutskirtsCatchesAttempted: 0,
+      forestOutskirtsCatchesSucceeded: 0,
+      skyHopUnattunedDialogue: null,
+      skyHopUnattunedCountersOk: null,
+      skyHopAttunedUnlocked: null,
+      evoToastObserved: false,
+      badgeToastObserved: false,
+      outerBiomesVisited: [],
+      shrineTrialTested: false,
+      shrineTrialBriefingTitle: null,
+      rivalRematchTested: false,
+      rivalRematchBriefingTitle: null,
+      measuredFpsSamples: [],
+      measuredFpsAvg: null,
+      measuredFpsMin: null,
+    },
     allowOfflineRemoteNoise: false,
     allowOfflineLocalRunner: false,
   };
 
   const seenAnomalyKeys = new Set();
+  const seenDelightKeys = new Set();
+  const seenFrictionKeys = new Set();
+
   const recordAnomaly = (severity, category, code, message, extra = {}) => {
     const key = `${severity}|${code}|${extra.stage || ''}|${extra.viewport || spec.viewport.name}`;
     if (seenAnomalyKeys.has(key)) return;
@@ -552,6 +601,20 @@ function attachRunTelemetry(page, baseUrl, spec) {
       stage: extra.stage || 'runtime',
       ...extra,
     });
+  };
+
+  const addDelight = (code, category, stage, message) => {
+    const key = `${code}|${stage}`;
+    if (seenDelightKeys.has(key)) return;
+    seenDelightKeys.add(key);
+    telemetry.experience.delights.push({ code, category, stage, message });
+  };
+
+  const addFriction = (code, severity, stage, message) => {
+    const key = `${code}|${stage}`;
+    if (seenFrictionKeys.has(key)) return;
+    seenFrictionKeys.add(key);
+    telemetry.experience.frictions.push({ code, severity, stage, message });
   };
 
   page.on('pageerror', (err) => {
@@ -588,7 +651,7 @@ function attachRunTelemetry(page, baseUrl, spec) {
     }
   });
 
-  return { telemetry, recordAnomaly };
+  return { telemetry, recordAnomaly, addDelight, addFriction };
 }
 
 async function getGameState(page) {
@@ -636,7 +699,7 @@ async function getGameState(page) {
       pos: profile?.pos ? { ...profile.pos } : null,
       savedPos,
       savedPartyHp,
-      biome: ow?.getCurrentBiomeId?.() || null,
+      biome: ow?.currentBiomeId || null,
       playerLevel: storageMgr?.getPlayerLevel?.() ?? null,
       shards: profile?.bag?.starShards ?? 0,
       cheerCharges: profile?.bag?.cheerCharges ?? 0,
@@ -689,7 +752,9 @@ async function getGameState(page) {
         turn: bat?.turnToken || 0,
         mode: bat?.active ? (bat.isShrine ? 'shrine' : bat.isTrainer ? 'rival' : 'wild') : null,
         enemySpeciesId: bat?.enemy?.speciesId || null,
+        enemyName: bat?.enemy?.name || null,
         enemyLevel: bat?.enemy?.level || null,
+        enemyIsElite: Boolean(bat?.enemy?.isElite),
         enemyHp: bat?.enemy?.hp ?? null,
         enemyMaxHp: bat?.enemy?.maxHp ?? null,
         playerHp: bat?.player?.hp ?? null,
@@ -701,6 +766,30 @@ async function getGameState(page) {
         screenVisible: isVis(document.getElementById('battle-screen')),
         teamDrawerVisible: isVis(document.getElementById('battle-team-drawer')),
       },
+      compassGoal: document.getElementById('compass-goal')?.textContent?.trim() || '',
+      compassSub: document.getElementById('compass-biome-progress')?.textContent?.trim() || '',
+      biomeBanner: {
+        visible: isVis(document.getElementById('biome-banner')),
+        text: document.getElementById('biome-banner')?.textContent?.trim() || '',
+        readiness: document.getElementById('biome-banner')?.dataset?.readiness || null,
+      },
+      briefingInfo: isVis(document.getElementById('encounter-briefing-modal')) ? {
+        title: document.getElementById('briefing-title')?.textContent?.trim() || '',
+        tier: document.getElementById('briefing-readiness-pill')?.dataset?.tier || null,
+        badgeText: document.getElementById('briefing-readiness-pill')?.textContent?.trim() || '',
+        levelText: document.querySelector('#briefing-opponent-meta .briefing-lv-badge')?.textContent?.trim() || '',
+        pivotVisible: isVis(document.getElementById('briefing-pivot-btn')),
+        pivotLabel: document.getElementById('briefing-pivot-btn')?.textContent?.trim() || '',
+      } : null,
+      celebration: {
+        visible: isVis(document.getElementById('celebration-layer')),
+        text: document.getElementById('celebration-layer')?.textContent?.trim() || '',
+      },
+      badgeToast: {
+        visible: isVis(document.getElementById('badge-toast')),
+        name: document.getElementById('badge-toast-name')?.textContent?.trim() || '',
+      },
+      measuredFps: Number(app.measuredFps || 0),
       modals: {
         dialogue: isVis(document.getElementById('world-dialogue')),
         dialogueText: document.getElementById('world-dialogue-text')?.textContent?.trim() || '',
@@ -1004,6 +1093,9 @@ async function installAppHooks(page) {
     if (!app || app._playtestHooked) return;
     app._playtestHooked = true;
     app._playtestComposureCount = app._playtestComposureCount || 0;
+    app._playtestWildLog = app._playtestWildLog || [];
+    app._playtestCelebrations = app._playtestCelebrations || [];
+    app._playtestBadgeToasts = app._playtestBadgeToasts || [];
     const origHandleBattleEnd = app.handleBattleEnd?.bind(app);
     if (origHandleBattleEnd) {
       app.handleBattleEnd = (res) => {
@@ -1018,7 +1110,222 @@ async function installAppHooks(page) {
         return origBrace(...args);
       };
     }
+    const origStartWild = app.startWildEncounter?.bind(app);
+    if (origStartWild) {
+      app.startWildEncounter = async (biomeId, encounterMeta = {}) => {
+        const prof = app.overworld?.getProfile?.();
+        const badgesAtStart = Array.isArray(prof?.badges) ? prof.badges.length : 0;
+        const posAtStart = prof?.pos ? { x: prof.pos.x, y: prof.pos.y } : null;
+        await origStartWild(biomeId, encounterMeta);
+        if (app.battle?.active && app.battle?.enemy) {
+          app._playtestWildLog.push({
+            biomeId,
+            badgesCount: badgesAtStart,
+            pos: posAtStart,
+            depthTier: encounterMeta?.depthTier ?? null,
+            isRarePatch: Boolean(encounterMeta?.isRarePatch),
+            nodeKind: encounterMeta?.nodeKind || null,
+            speciesId: app.battle.enemy.speciesId,
+            name: app.battle.enemy.name,
+            level: app.battle.enemy.level,
+            isElite: Boolean(app.battle.enemy.isElite),
+          });
+        }
+      };
+    }
+    const origCelebrate = app.triggerCelebration?.bind(app);
+    if (origCelebrate) {
+      app.triggerCelebration = (opts = {}) => {
+        app._playtestCelebrations.push({
+          icon: opts?.icon || '',
+          title: opts?.title || '',
+          subtitle: opts?.subtitle || '',
+        });
+        return origCelebrate(opts);
+      };
+    }
+    const origBadgeToast = app.showBadgeToast?.bind(app);
+    if (origBadgeToast) {
+      app.showBadgeToast = (badges) => {
+        if (Array.isArray(badges)) {
+          app._playtestBadgeToasts.push(...badges.map((b) => b?.id || b?.name || String(b)));
+        }
+        return origBadgeToast(badges);
+      };
+    }
   });
+}
+
+function recordDelight(telemetry, code, category, stage, message) {
+  if (!telemetry?.experience?.delights) return;
+  if (telemetry.experience.delights.some((d) => d.code === code && d.stage === stage)) return;
+  telemetry.experience.delights.push({ code, category, stage, message });
+}
+
+function recordFriction(telemetry, code, severity, stage, message) {
+  if (!telemetry?.experience?.frictions) return;
+  if (telemetry.experience.frictions.some((f) => f.code === code && f.stage === stage)) return;
+  telemetry.experience.frictions.push({ code, severity, stage, message });
+}
+
+async function sampleFps(page, telemetry) {
+  if (!telemetry?.round2?.isWave2) return;
+  const fps = await page.evaluate(() => Number(window.__starlightApp?.measuredFps || 0)).catch(() => 0);
+  if (fps > 0 && Number.isFinite(fps)) {
+    const arr = telemetry.round2.measuredFpsSamples;
+    arr.push(Number(fps.toFixed(1)));
+    const sum = arr.reduce((a, b) => a + b, 0);
+    telemetry.round2.measuredFpsAvg = Number((sum / arr.length).toFixed(1));
+    telemetry.round2.measuredFpsMin = Number(Math.min(...arr).toFixed(1));
+  }
+}
+
+async function syncRound2HooksTelemetry(page, telemetry, recordAnomaly, stage = 'r2-sync') {
+  if (!telemetry?.round2?.isWave2) return;
+  const data = await page.evaluate((sinceIdx) => {
+    const app = window.__starlightApp;
+    if (!app) return null;
+    const wilds = (app._playtestWildLog || []).slice(sinceIdx);
+    const celebrations = app._playtestCelebrations || [];
+    const badgeToasts = app._playtestBadgeToasts || [];
+    return {
+      nextIdx: (app._playtestWildLog || []).length,
+      wilds,
+      celebrations,
+      badgeToasts,
+      fps: Number(app.measuredFps || 0),
+    };
+  }, telemetry._wildSyncedCount || 0).catch(() => null);
+  if (!data) return;
+
+  telemetry._wildSyncedCount = data.nextIdx;
+  for (const w of data.wilds) {
+    if (w.biomeId === 'forest' && w.badgesCount === 0 && w.depthTier === 0) {
+      const isBruiser = FOREST_BRUISER_IDS.has(w.speciesId);
+      telemetry.round2.forestOutskirtsEncounters.push({
+        speciesId: w.speciesId,
+        name: w.name,
+        level: w.level,
+        isRarePatch: w.isRarePatch,
+        isElite: w.isElite,
+        isBruiser,
+      });
+      if (isBruiser) telemetry.round2.forestOutskirtsBruisers++;
+      if (w.speciesId === 29) telemetry.round2.forestOutskirtsNidoranF++;
+      if (w.speciesId === 290) telemetry.round2.forestOutskirtsNincada++;
+      if (w.isRarePatch && w.isElite) {
+        telemetry.round2.forestOutskirtsRareElites++;
+        recordAnomaly('P1', 'Gameplay/Mechanic', 'NOVICE_RARE_PATCH_ELITE', `0-badge Whispering Forest Outskirts rare patch rolled Elite ${w.name} Lv.${w.level}`, { stage });
+      }
+    }
+  }
+  if (data.celebrations.some((c) => /EVOLVED INTO/i.test(c.title || ''))) {
+    telemetry.round2.evoToastObserved = true;
+  }
+  if (data.badgeToasts.length > 0) {
+    telemetry.round2.badgeToastObserved = true;
+  }
+  if (data.fps > 0 && Number.isFinite(data.fps)) {
+    const arr = telemetry.round2.measuredFpsSamples;
+    arr.push(Number(data.fps.toFixed(1)));
+    const sum = arr.reduce((a, b) => a + b, 0);
+    telemetry.round2.measuredFpsAvg = Number((sum / arr.length).toFixed(1));
+    telemetry.round2.measuredFpsMin = Number(Math.min(...arr).toFixed(1));
+  }
+}
+
+function recordCompassGoalSnapshot(st, telemetry) {
+  if (!telemetry?.round2?.isWave2 || !st?.compassGoal) return;
+  const list = telemetry.round2.compassStepsObserved;
+  const label = st.compassGoal;
+  if (list[list.length - 1] !== label) {
+    list.push(label);
+  }
+}
+
+async function verifyForestOutskirtsDepth(page, telemetry, recordAnomaly, stage) {
+  const depthAtEntrance = getTileDepthInfo(9, 6);
+  const st = await getGameState(page);
+  const ok = depthAtEntrance.biomeId === 'forest' && depthAtEntrance.depthTier === 0 && depthAtEntrance.zoneLabel === 'Outskirts';
+  telemetry.round2.forestOutskirtsDepthOk = ok;
+  telemetry.round2.forestOutskirtsBannerText = st.biomeBanner?.text || null;
+  if (!ok) {
+    recordAnomaly('P1', 'Gameplay/Mechanic', 'FOREST_OUTSKIRTS_DEPTH_MISMATCH', `Expected (9,6) forest depthTier=0 Outskirts, got ${JSON.stringify(depthAtEntrance)}`, { stage });
+  } else if (st.biomeBanner?.readiness === 'challenging' || st.biomeBanner?.readiness === 'danger') {
+    recordFriction(telemetry, 'OUTSKIRTS_BANNER_ALARMING', 'P3', stage, `Forest Outskirts banner showed ${st.biomeBanner.readiness} for fresh starter: "${st.biomeBanner.text}"`);
+  } else {
+    recordDelight(telemetry, 'FOREST_OUTSKIRTS_GENTLE_ENTRY', 'Gameplay/Mechanic', stage, `Whispering Forest entrance (9,6) resolved cleanly as Outskirts (${st.biomeBanner?.text || 'Whispering Forest'})`);
+  }
+}
+
+async function triggerOutskirtsRarePatchEncounter(page, telemetry, recordAnomaly, stage, { maxWaitMs = 9000 } = {}) {
+  const deadline = Date.now() + maxWaitMs;
+  const patrol = [[9, 6], [8, 6], [8, 7], [9, 7]];
+  let stepIdx = 0;
+  while (Date.now() < deadline) {
+    const st = await getGameState(page);
+    if (st.battle.active) {
+      await playActiveBattleToEnd(page, { strategy: 'run', telemetry, recordAnomaly, rng: Math.random, stage: `${stage}-clear` });
+      continue;
+    }
+    const patch = await page.evaluate(() => {
+      const patches = window.__starlightApp?.overworld?.rarePatches || [];
+      return patches.map((p) => ({ x: p.x, y: p.y, biomeId: p.biomeId, kind: p.kind }));
+    });
+    const outskirtPatch = patch.find((p) => p.biomeId === 'forest' && getTileDepthInfo(p.x, p.y).depthTier === 0);
+    if (outskirtPatch) {
+      await navigateToCoord(page, outskirtPatch.x, outskirtPatch.y, { telemetry, recordAnomaly, rng: Math.random, maxDistance: 0, maxMs: 7000, fightWilds: 'win', stage });
+      const post = await getGameState(page);
+      if (post.modals.dialogue) await dismissDialogue(page, telemetry, recordAnomaly, stage);
+      await syncRound2HooksTelemetry(page, telemetry, recordAnomaly, stage);
+      if (telemetry.round2.forestOutskirtsEncounters.some((e) => e.isRarePatch)) {
+        return true;
+      }
+    }
+    const [nx, ny] = patrol[stepIdx % patrol.length];
+    stepIdx++;
+    await page.evaluate(({ x, y }) => {
+      window.__starlightApp?.overworld?.walkToTile?.(x, y);
+    }, { x: nx, y: ny });
+    await page.waitForTimeout(320);
+  }
+  return telemetry.round2.forestOutskirtsEncounters.some((e) => e.isRarePatch);
+}
+
+async function tryInspectShrineTrialBriefing(page, shrine, telemetry, recordAnomaly, stage) {
+  await triggerInteractAtTarget(page, shrine.x, shrine.y, telemetry, recordAnomaly, stage);
+  const st = await getGameState(page);
+  if (st.modals.briefing) {
+    telemetry.metrics.briefingsOpened++;
+    telemetry.round2.shrineTrialTested = true;
+    telemetry.round2.shrineTrialBriefingTitle = st.briefingInfo?.title || null;
+    await auditLayout(page, telemetry, recordAnomaly, `${stage}-layout`);
+    if (!/Trial #/i.test(st.briefingInfo?.title || '')) {
+      recordAnomaly('P2', 'Gameplay/Mechanic', 'SHRINE_TRIAL_BRIEFING_MISSING_LABEL', `Cleared shrine briefing missing Trial # label: "${st.briefingInfo?.title}"`, { stage });
+    } else {
+      recordDelight(telemetry, 'SHRINE_TRIAL_BRIEFING_CLEAR', 'Polish/UX', stage, `Astral Trial briefing displayed "${st.briefingInfo.title}" (${st.briefingInfo.badgeText}) cleanly`);
+    }
+    await page.click('#briefing-cancel-btn').catch(() => {});
+    await page.waitForTimeout(160);
+  }
+}
+
+async function tryInspectRivalRematchBriefing(page, rival, telemetry, recordAnomaly, stage) {
+  await triggerInteractAtTarget(page, rival.x, rival.y, telemetry, recordAnomaly, stage);
+  const st = await getGameState(page);
+  if (st.modals.briefing) {
+    telemetry.metrics.briefingsOpened++;
+    telemetry.round2.rivalRematchTested = true;
+    telemetry.round2.rivalRematchBriefingTitle = st.briefingInfo?.title || null;
+    await auditLayout(page, telemetry, recordAnomaly, `${stage}-layout`);
+    if (!/Rematch/i.test(st.briefingInfo?.title || '')) {
+      recordAnomaly('P2', 'Gameplay/Mechanic', 'RIVAL_REMATCH_BRIEFING_MISSING_LABEL', `Defeated rival briefing missing Rematch label: "${st.briefingInfo?.title}"`, { stage });
+    } else {
+      recordDelight(telemetry, 'RIVAL_REMATCH_BRIEFING_CLEAR', 'Polish/UX', stage, `Rival Rematch briefing displayed "${st.briefingInfo.title}" (${st.briefingInfo.badgeText}) cleanly`);
+    }
+    await page.click('#briefing-cancel-btn').catch(() => {});
+    await page.waitForTimeout(160);
+  }
 }
 
 async function bootAndStartGame(page, baseUrl, spec, rng, telemetry, recordAnomaly) {
@@ -1230,35 +1537,73 @@ async function navigateToCoord(page, targetX, targetY, {
 }
 
 async function triggerInteractAtTarget(page, tx, ty, telemetry, recordAnomaly, stage) {
-  await page.evaluate(({ x, y }) => {
-    const app = window.__starlightApp;
-    const ow = app?.overworld;
-    const prof = ow?.getProfile?.();
-    if (!ow || !prof?.pos) return;
-    const dx = x - prof.pos.x;
-    const dy = y - prof.pos.y;
-    if (Math.abs(dx) >= Math.abs(dy)) {
-      prof.pos.dir = dx >= 0 ? 'right' : 'left';
-    } else {
-      prof.pos.dir = dy >= 0 ? 'down' : 'up';
+  for (let attempt = 0; attempt < 2; attempt++) {
+    for (let w = 0; w < 12; w++) {
+      const busy = await page.evaluate(() => {
+        const app = window.__starlightApp;
+        const flash = document.getElementById('encounter-flash');
+        const flashVis = Boolean(flash && !flash.hidden && flash.offsetWidth > 0);
+        return Boolean(app?.overworld?.moving || app?.encounterTransitioning || flashVis);
+      }).catch(() => false);
+      if (!busy) break;
+      await page.waitForTimeout(80);
     }
-    ow.refreshInteractHint?.();
-  }, { x: tx, y: ty });
-  await page.waitForTimeout(80);
-  const pillVisible = await page.evaluate(() => {
-    const el = document.getElementById('interact-pill');
-    return Boolean(el && !el.hidden && el.offsetWidth > 0);
-  });
-  if (pillVisible) {
-    await page.click('#interact-pill', { force: true }).catch(() => {});
-  } else {
-    await page.keyboard.press('Space').catch(() => {});
+    const pre = await getGameState(page);
+    if (pre.battle.active) {
+      await playActiveBattleToEnd(page, { strategy: 'run', telemetry, recordAnomaly, rng: Math.random, stage: `${stage}-wild-clear` });
+      await dismissDialogue(page, telemetry, recordAnomaly, `${stage}-wild-dlg`);
+      continue;
+    }
+    if (pre.modals.dialogue) {
+      await dismissDialogue(page, telemetry, recordAnomaly, `${stage}-pre-dlg`);
+    }
+    await page.evaluate(({ x, y }) => {
+      const app = window.__starlightApp;
+      const ow = app?.overworld;
+      const prof = ow?.getProfile?.();
+      if (!ow || !prof?.pos) return;
+      const dx = x - prof.pos.x;
+      const dy = y - prof.pos.y;
+      if (Math.abs(dx) >= Math.abs(dy)) {
+        prof.pos.dir = dx >= 0 ? 'right' : 'left';
+      } else {
+        prof.pos.dir = dy >= 0 ? 'down' : 'up';
+      }
+      ow.refreshInteractHint?.();
+    }, { x: tx, y: ty });
+    await page.waitForTimeout(90);
+    const pillVisible = await page.evaluate(() => {
+      const el = document.getElementById('interact-pill');
+      return Boolean(el && !el.hidden && el.offsetWidth > 0);
+    });
+    if (pillVisible) {
+      await page.click('#interact-pill', { force: true }).catch(() => {});
+    } else {
+      await page.keyboard.press('Space').catch(() => {});
+    }
+    await page.waitForTimeout(260);
+    const st = await getGameState(page);
+    if (st.battle.active || st.modals.encounterFlash) {
+      await playActiveBattleToEnd(page, { strategy: 'run', telemetry, recordAnomaly, rng: Math.random, stage: `${stage}-post-wild` });
+      await dismissDialogue(page, telemetry, recordAnomaly, `${stage}-post-wild-dlg`);
+      continue;
+    }
+    if (st.modals.dialogue) {
+      await dismissDialogue(page, telemetry, recordAnomaly, stage);
+    }
+    return;
   }
-  await page.waitForTimeout(260);
-  const st = await getGameState(page);
-  if (st.modals.dialogue) {
-    await dismissDialogue(page, telemetry, recordAnomaly, stage);
+}
+
+async function waitForBriefingBattleStart(page, telemetry, recordAnomaly, stage, maxWaitMs = 3600) {
+  const deadline = Date.now() + maxWaitMs;
+  while (Date.now() < deadline) {
+    const cur = await getGameState(page);
+    if (cur.battle.active) return true;
+    if (cur.modals.dialogue) await dismissDialogue(page, telemetry, recordAnomaly, stage);
+    await page.waitForTimeout(160);
   }
+  return Boolean((await getGameState(page)).battle.active);
 }
 
 async function playActiveBattleToEnd(page, {
@@ -1278,6 +1623,7 @@ async function playActiveBattleToEnd(page, {
   let didLayoutAudit = false;
   let didChaosHook = false;
   let usedStruggleTest = false;
+  let weakenedWildOnce = false;
   let switchedOnce = false;
   let usedPotionOnce = false;
 
@@ -1379,17 +1725,40 @@ async function playActiveBattleToEnd(page, {
       if ((strategy === 'catch' || strategy === 'catch_new') && st.battle.mode === 'wild') {
         if (strategy === 'catch_new' && (
           (st.battle.enemySpeciesId && st.caughtSpeciesIds.includes(st.battle.enemySpeciesId)) ||
-          observedTurns >= 4
+          observedTurns >= 3
         )) {
           await page.click('#battle-btn-run').catch(() => {});
           await page.waitForTimeout(240);
           continue;
         }
         telemetry.metrics.catchesAttempted++;
-        if (observedTurns < 2 && st.battle.enemyHp > st.battle.enemyMaxHp * 0.6 && (st.battle.enemyLevel > 7 || st.battle.enemyMaxHp > 48)) {
-          const moveCards = page.locator('#battle-moves .move-card:not([disabled])');
-          if (await moveCards.count()) await moveCards.first().click().catch(() => {});
-        } else if (strategy === 'catch_new' && st.greatBalls > 0) {
+        if (telemetry.round2.isWave2 && st.biome === 'forest' && st.badgesCount === 0 && st.pos && getTileDepthInfo(st.pos.x, st.pos.y).depthTier === 0) {
+          telemetry.round2.forestOutskirtsCatchesAttempted++;
+        }
+        const shouldWeaken = !weakenedWildOnce
+          && st.battle.enemyHp > st.battle.enemyMaxHp * 0.65
+          && (st.battle.enemyLevel >= 3 || st.battle.enemyMaxHp > 35);
+        if (shouldWeaken) {
+          weakenedWildOnce = true;
+          const weakIdx = await page.evaluate(() => {
+            const mon = window.__starlightApp?.battle?.player;
+            const moveObjs = typeof mon?.getMoveObjects === 'function' ? mon.getMoveObjects() : [];
+            const btns = Array.from(document.querySelectorAll('#battle-moves .move-card'));
+            const ranked = btns.map((b, i) => ({
+              i,
+              disabled: b.disabled,
+              power: moveObjs[i]?.power ?? 0,
+            })).filter((x) => !x.disabled && x.power > 0);
+            ranked.sort((a, b) => a.power - b.power);
+            return ranked[0]?.i ?? -1;
+          });
+          if (weakIdx >= 0) {
+            await page.locator('#battle-moves .move-card').nth(weakIdx).click().catch(() => {});
+            await page.waitForTimeout(260);
+            continue;
+          }
+        }
+        if (strategy === 'catch_new' && st.greatBalls > 0) {
           await page.click('#battle-btn-great').catch(() => {});
         } else {
           await page.click('#battle-btn-ball').catch(() => {});
@@ -1465,22 +1834,29 @@ async function playActiveBattleToEnd(page, {
         continue;
       }
 
-      // Default 'win' or 'struggle': pick highest power or super-effective move (or lowest-PP move for struggle test)
+      // Default 'win' / 'potion_win' / 'struggle': pick highest expected-damage move (power * eff * STAB), never spam 0-power/weak moves!
       const bestMoveIdx = await page.evaluate((preferStruggle) => {
+        const mon = window.__starlightApp?.battle?.player;
+        const moveObjs = typeof mon?.getMoveObjects === 'function' ? mon.getMoveObjects() : [];
+        const myType = mon?.species?.type || null;
         const btns = Array.from(document.querySelectorAll('#battle-moves .move-card'));
         const candidates = btns.map((b, i) => {
           const txt = b.textContent || '';
-          const effScore = txt.includes('SUPER') ? 3 : txt.includes('NOT VERY') ? 0.5 : txt.includes('IMMUNE') ? 0 : 1;
+          const effScore = txt.includes('SUPER') ? 2.0 : txt.includes('NOT VERY') ? 0.5 : txt.includes('IMMUNE') ? 0 : 1.0;
           const m = txt.match(/(\d+)\s*\/\s*(\d+)/);
           const pp = m ? Number(m[1]) : 10;
-          return { i, disabled: b.disabled, effScore, pp };
+          const mo = moveObjs[i];
+          const power = Number(mo?.power) || 0;
+          const stab = (myType && mo?.type === myType) ? 1.25 : 1.0;
+          const dmgScore = power > 0 ? power * effScore * stab : -1;
+          return { i, disabled: b.disabled, effScore, pp, dmgScore };
         }).filter((c) => !c.disabled);
         if (!candidates.length) return 0;
         if (preferStruggle) {
           candidates.sort((a, b) => a.pp - b.pp);
           return candidates[0].i;
         }
-        candidates.sort((a, b) => (b.effScore - a.effScore) || (b.pp - a.pp));
+        candidates.sort((a, b) => (b.dmgScore - a.dmgScore) || (b.effScore - a.effScore) || (b.pp - a.pp));
         return candidates[0].i;
       }, strategy === 'struggle' && !usedStruggleTest);
 
@@ -1499,8 +1875,14 @@ async function playActiveBattleToEnd(page, {
   const res = endSt.battle.lastResult;
   telemetry.metrics.lastBattleResult = res;
   if (res?.outcome === 'won') telemetry.metrics.battlesWon++;
-  if (res?.outcome === 'caught') telemetry.metrics.catchesSucceeded++;
+  if (res?.outcome === 'caught') {
+    telemetry.metrics.catchesSucceeded++;
+    if (telemetry.round2.isWave2 && endSt.biome === 'forest' && endSt.badgesCount <= 1 && endSt.pos && getTileDepthInfo(endSt.pos.x, endSt.pos.y).depthTier === 0) {
+      telemetry.round2.forestOutskirtsCatchesSucceeded++;
+    }
+  }
   if (res?.faintedAll) telemetry.metrics.battlesFaintedAll++;
+  await syncRound2HooksTelemetry(page, telemetry, recordAnomaly, stage);
   return endSt;
 }
 
@@ -1542,13 +1924,13 @@ async function runMandatoryDefeatAndResetVerify(page, spec, rng, telemetry, reco
     recordAnomaly,
     rng,
     maxDistance: 1,
-    maxMs: 45000,
+    maxMs: 65000,
     fightWilds: 'run',
     stage,
   });
 
   if (!arrived) {
-    recordAnomaly('P1', 'Gameplay/Mechanic', 'DEFEAT_NAVIGATION_TIMEOUT', `Could not reach (${target.x},${target.y}) within 45s`, { stage });
+    recordAnomaly('P1', 'Gameplay/Mechanic', 'DEFEAT_NAVIGATION_TIMEOUT', `Could not reach (${target.x},${target.y}) within 65s`, { stage });
   }
 
   // Trigger interaction at target if not already in briefing/battle
@@ -1703,6 +2085,21 @@ async function runCohort1(page, spec, rng, telemetry, recordAnomaly) {
   await page.keyboard.press('h').catch(() => {});
   await page.waitForTimeout(250);
 
+  if (spec.isWave2) {
+    // Rapid Round 2 hotkey + multi-touch fuzzing during warp & HUD transitions
+    for (const k of ['t', 'p', 'Escape', 'm', 'm', 'h', 'Escape', 'Space']) {
+      await page.keyboard.press(k).catch(() => {});
+      await page.waitForTimeout(45);
+    }
+    await dismissDialogue(page, telemetry, recordAnomaly, 'c1-r2-hotkey-fuzz');
+    if (await page.locator('#pokedex-close-btn').isVisible().catch(() => false)) {
+      await page.click('#pokedex-close-btn', { force: true }).catch(() => {});
+    }
+    await auditLayout(page, telemetry, recordAnomaly, 'c1-r2-post-fuzz');
+    await sampleFps(page, telemetry);
+    recordDelight(telemetry, 'RAPID_HOTKEY_FUZZ_RESILIENT', 'Code', 'c1-r2-post-fuzz', 'Rapid T/P/M/H/Escape/Space hotkey storm left clean responsive overworld');
+  }
+
   // Trigger wild encounter in Forest grass (9, 6)
   await navigateToCoord(page, 9, 6, { telemetry, recordAnomaly, rng, maxDistance: 0, maxMs: 22000, fightWilds: 'win', stage: 'c1-grass' });
   await triggerWildEncounterAtGrass(page, 9, 6, { maxSteps: 36 });
@@ -1715,6 +2112,13 @@ async function runCohort1(page, spec, rng, telemetry, recordAnomaly) {
       rng,
       stage: 'c1-chaos-wild',
       chaosMidBattle: async () => {
+        if (spec.isWave2) {
+          // Fuzz battle hotkeys 1-4 + Space during mid-turn input
+          for (const bk of ['1', '2', '3', 'Space']) {
+            await page.keyboard.press(bk).catch(() => {});
+            await page.waitForTimeout(30);
+          }
+        }
         // Test pressing Escape + attempting #hud-btn-settings & openSettings() mid-battle
         await page.keyboard.press('Escape').catch(() => {});
         const settingsBtn = page.locator('#hud-btn-settings');
@@ -1785,34 +2189,162 @@ async function runCohort1(page, spec, rng, telemetry, recordAnomaly) {
       }
     },
   });
+  await sampleFps(page, telemetry);
 }
 
 async function runCohort2(page, spec, rng, telemetry, recordAnomaly) {
-  // Boss & Shrine Rusher: rushes underleveled into Shrines & Rivals via #encounter-briefing-modal
-  // 1) Rush Forest Ranger Leo (11,5) or Forest Shrine (15,3) within <= +8 level gap for Composure check
-  const nearTarget = spec.seed % 2 === 1
-    ? WORLD_INDEX.rivals.find((r) => r.key === '11,5')
-    : WORLD_INDEX.shrines.find((s) => s.key === '15,3');
+  if (!spec.isWave2) {
+    // Round 1 Boss & Shrine Rusher behavior (deterministic for seeds 11..20)
+    const nearTarget = spec.seed % 2 === 1
+      ? WORLD_INDEX.rivals.find((r) => r.key === '11,5')
+      : WORLD_INDEX.shrines.find((s) => s.key === '15,3');
 
-  await navigateToCoord(page, nearTarget.x, nearTarget.y, { telemetry, recordAnomaly, rng, maxDistance: 1, maxMs: 25000, fightWilds: 'run', stage: 'c2-near-boss' });
-  await triggerInteractAtTarget(page, nearTarget.x, nearTarget.y, telemetry, recordAnomaly, 'c2-near-briefing');
+    await navigateToCoord(page, nearTarget.x, nearTarget.y, { telemetry, recordAnomaly, rng, maxDistance: 1, maxMs: 25000, fightWilds: 'run', stage: 'c2-near-boss' });
+    await triggerInteractAtTarget(page, nearTarget.x, nearTarget.y, telemetry, recordAnomaly, 'c2-near-briefing');
+    const st = await getGameState(page);
+    if (st.modals.briefing) {
+      telemetry.metrics.briefingsOpened++;
+      await auditLayout(page, telemetry, recordAnomaly, 'c2-briefing-near');
+      await page.click('#briefing-cancel-btn').catch(() => {});
+      await page.waitForTimeout(150);
+      await triggerInteractAtTarget(page, nearTarget.x, nearTarget.y, telemetry, recordAnomaly, 'c2-near-reopen');
+      await page.click('#briefing-battle-btn').catch(() => {});
+      await page.waitForTimeout(350);
+    }
+    if ((await getGameState(page)).battle.active) {
+      await playActiveBattleToEnd(page, { strategy: 'win', telemetry, recordAnomaly, rng, stage: 'c2-near-combat' });
+      await dismissDialogue(page, telemetry, recordAnomaly, 'c2-post-near');
+    }
+    const hardTarget = spec.seed % 2 === 1
+      ? WORLD_INDEX.shrines.find((s) => s.key === '23,13')
+      : WORLD_INDEX.rivals.find((r) => r.key === '45,14');
+    await runMandatoryDefeatAndResetVerify(page, spec, rng, telemetry, recordAnomaly, {
+      targetOverride: hardTarget,
+      stage: 'c2-boss-wipe',
+    });
+    return;
+  }
+
+  // Round 2 Onboarding + Starter Parity + Forest Shrine + Astral Trial Arc
+  recordCompassGoalSnapshot(await getGameState(page), telemetry);
+
+  // 1) Talk to Professor Willow (9, 12) -> verify Compass -> Meet Ranger Fern
+  await navigateToCoord(page, 9, 12, { telemetry, recordAnomaly, rng, maxDistance: 1, maxMs: 12000, fightWilds: 'run', stage: 'c2-r2-willow' });
+  await triggerInteractAtTarget(page, 9, 12, telemetry, recordAnomaly, 'c2-r2-willow-talk');
+  recordCompassGoalSnapshot(await getGameState(page), telemetry);
+
+  // 2) Step to Forest Outskirts entrance (9, 6) -> verify depthTier 0 Outskirts
+  await navigateToCoord(page, 9, 6, { telemetry, recordAnomaly, rng, maxDistance: 0, maxMs: 14000, fightWilds: 'run', stage: 'c2-r2-outskirts' });
+  await verifyForestOutskirtsDepth(page, telemetry, recordAnomaly, 'c2-r2-outskirts');
+
+  // 3) Meet Ranger Fern (10, 7) -> verify Compass -> Catch Forest Friends
+  await navigateToCoord(page, 10, 7, { telemetry, recordAnomaly, rng, maxDistance: 1, maxMs: 14000, fightWilds: 'run', stage: 'c2-r2-fern' });
+  await triggerInteractAtTarget(page, 10, 7, telemetry, recordAnomaly, 'c2-r2-fern-talk');
+  recordCompassGoalSnapshot(await getGameState(page), telemetry);
+
+  // Heal starter to 100% HP at fountain if chipped while approaching Fern so solo Lv.5 readiness is pure
+  const preRushSt = await getGameState(page);
+  if (preRushSt.party[0] && preRushSt.party[0].hp < preRushSt.party[0].maxHp) {
+    await page.keyboard.press('h').catch(() => {});
+    await page.waitForTimeout(450);
+    await navigateToCoord(page, 7, 13, { telemetry, recordAnomaly, rng, maxDistance: 1, maxMs: 12000, fightWilds: 'run', stage: 'c2-r2-fountain' });
+    await triggerInteractAtTarget(page, 7, 13, telemetry, recordAnomaly, 'c2-r2-fountain-heal');
+  }
+
+  // 4) Rush Forest Shrine (15, 3) with solo Lv.5 starter -> verify Lv.6 + Squirtle vs Bulbasaur/Charmander readiness
+  await navigateToCoord(page, 15, 3, { telemetry, recordAnomaly, rng, maxDistance: 1, maxMs: 20000, fightWilds: 'run', stage: 'c2-r2-forest-shrine' });
+  await triggerInteractAtTarget(page, 15, 3, telemetry, recordAnomaly, 'c2-r2-forest-shrine-briefing');
   let st = await getGameState(page);
-  if (st.modals.briefing) {
+  const bInfo = st.briefingInfo;
+  if (bInfo) {
     telemetry.metrics.briefingsOpened++;
-    await auditLayout(page, telemetry, recordAnomaly, 'c2-briefing-near');
-    // Test cancel once then re-open and fight
-    await page.click('#briefing-cancel-btn').catch(() => {});
-    await page.waitForTimeout(150);
-    await triggerInteractAtTarget(page, nearTarget.x, nearTarget.y, telemetry, recordAnomaly, 'c2-near-reopen');
-    await page.click('#briefing-battle-btn').catch(() => {});
-    await page.waitForTimeout(350);
-  }
-  if ((await getGameState(page)).battle.active) {
-    await playActiveBattleToEnd(page, { strategy: 'win', telemetry, recordAnomaly, rng, stage: 'c2-near-combat' });
-    await dismissDialogue(page, telemetry, recordAnomaly, 'c2-post-near');
+    telemetry.round2.forestShrineLevelObserved = bInfo.levelText;
+    telemetry.round2.forestShrineReadinessTier = bInfo.tier;
+    telemetry.round2.forestShrineReadinessBadge = bInfo.badgeText;
+    telemetry.round2.forestShrinePivotLabel = bInfo.pivotLabel || null;
+    await auditLayout(page, telemetry, recordAnomaly, 'c2-r2-forest-shrine-briefing');
+
+    if (bInfo.levelText !== 'Lv.6') {
+      recordAnomaly('P1', 'Gameplay/Mechanic', 'FOREST_SHRINE_LEVEL_NOT_6', `Expected Forest Shrine Lv.6 for fresh starter, got "${bInfo.levelText}"`, { stage: 'c2-r2-forest-shrine-briefing' });
+    }
+    if (spec.starterName === 'Squirtle') {
+      if (bInfo.tier !== 'challenging' || !bInfo.pivotVisible || !/Farm Zone/i.test(bInfo.pivotLabel)) {
+        recordAnomaly('P1', 'Gameplay/Mechanic', 'SQUIRTLE_SHRINE_READINESS_MISMATCH', `Expected solo Lv.5 Squirtle vs Lv.6 Pikachu to show challenging (⚠️ Tough) + ✨ Farm Zone, got tier=${bInfo.tier}, pivot="${bInfo.pivotLabel}"`, { stage: 'c2-r2-forest-shrine-briefing' });
+      } else {
+        recordDelight(telemetry, 'SQUIRTLE_TOUGH_FARM_PIVOT', 'Polish/UX', 'c2-r2-forest-shrine-briefing', `Solo Lv.5 Squirtle saw "${bInfo.badgeText}" with "${bInfo.pivotLabel}" pivot before Lv.6 Pikachu`);
+        await page.click('#briefing-pivot-btn').catch(() => {});
+        telemetry.round2.farmPivotClicked = true;
+        await page.waitForTimeout(750);
+        const afterPivot = await getGameState(page);
+        telemetry.round2.farmPivotLandedOk = afterPivot.biome === 'forest';
+        if (!telemetry.round2.farmPivotLandedOk) {
+          recordAnomaly('P1', 'Gameplay/Mechanic', 'FARM_ZONE_PIVOT_WRONG_BIOME', `Expected Farm Zone pivot to land in Whispering Forest, landed in "${afterPivot.biome}"`, { stage: 'c2-r2-farm-pivot' });
+        }
+      }
+    } else {
+      if (bInfo.tier !== 'balanced' && bInfo.tier !== 'favored') {
+        recordAnomaly('P1', 'Gameplay/Mechanic', 'STARTER_SHRINE_TOO_HARSH', `Expected Lv.5 ${spec.starterName} vs Lv.6 Pikachu to be balanced/favored, got tier=${bInfo.tier} ("${bInfo.badgeText}")`, { stage: 'c2-r2-forest-shrine-briefing' });
+      } else {
+        recordDelight(telemetry, 'STARTER_SHRINE_BALANCED', 'Gameplay/Mechanic', 'c2-r2-forest-shrine-briefing', `Solo Lv.5 ${spec.starterName} saw fair "${bInfo.badgeText}" at Forest Shrine Lv.6`);
+      }
+      await page.click('#briefing-battle-btn').catch(() => {});
+      if (await waitForBriefingBattleStart(page, telemetry, recordAnomaly, 'c2-r2-shrine-start')) {
+        const postShrine = await playActiveBattleToEnd(page, { strategy: 'potion_win', telemetry, recordAnomaly, rng, stage: 'c2-r2-shrine-combat' });
+        await dismissDialogue(page, telemetry, recordAnomaly, 'c2-r2-post-shrine');
+        if (postShrine.battle?.lastResult?.outcome === 'won') {
+          await tryInspectShrineTrialBriefing(page, { x: 15, y: 3 }, telemetry, recordAnomaly, 'c2-r2-shrine-trial');
+        }
+      }
+    }
   }
 
-  // 2) Now rush underleveled (+9/+ level gap) into Twilight Eclipse Shrine (23,13) Lv.16 or Caldera Blaze (45,14) Lv.14-16 & die naturally
+  // Catch early friends + claim Ranger Supplies (3,3) + finish Squirtle Shrine clear
+  if (telemetry.round2.farmPivotClicked || (await getGameState(page)).caughtCount < 3) {
+    await navigateToCoord(page, 8, 6, { telemetry, recordAnomaly, rng, maxDistance: 0, maxMs: 16000, fightWilds: 'run', stage: 'c2-r2-friends-walk' });
+    for (let i = 0; i < 6 && (await getGameState(page)).caughtCount < 3; i++) {
+      if (!(await triggerWildEncounterAtGrass(page, 8, 6, { maxSteps: 22 }))) break;
+      await playActiveBattleToEnd(page, { strategy: 'catch_new', telemetry, recordAnomaly, rng, stage: 'c2-r2-friends-catch' });
+      await dismissDialogue(page, telemetry, recordAnomaly, 'c2-r2-friends-dlg');
+    }
+    recordCompassGoalSnapshot(await getGameState(page), telemetry);
+
+    await navigateToCoord(page, 3, 3, { telemetry, recordAnomaly, rng, maxDistance: 1, maxMs: 16000, fightWilds: 'run', stage: 'c2-r2-supplies-walk' });
+    await triggerInteractAtTarget(page, 3, 3, telemetry, recordAnomaly, 'c2-r2-supplies-open');
+    recordCompassGoalSnapshot(await getGameState(page), telemetry);
+
+    if (spec.starterName === 'Squirtle') {
+      await navigateToCoord(page, 15, 3, { telemetry, recordAnomaly, rng, maxDistance: 1, maxMs: 18000, fightWilds: 'run', stage: 'c2-r2-squirtle-shrine-return' });
+      await triggerInteractAtTarget(page, 15, 3, telemetry, recordAnomaly, 'c2-r2-squirtle-shrine-brief');
+      if ((await getGameState(page)).modals.briefing) {
+        await page.click('#briefing-battle-btn').catch(() => {});
+        if (await waitForBriefingBattleStart(page, telemetry, recordAnomaly, 'c2-r2-squirtle-shrine-start')) {
+          const postSq = await playActiveBattleToEnd(page, { strategy: 'potion_win', telemetry, recordAnomaly, rng, stage: 'c2-r2-squirtle-shrine-fight' });
+          await dismissDialogue(page, telemetry, recordAnomaly, 'c2-r2-squirtle-shrine-win');
+          if (postSq.battle?.lastResult?.outcome === 'won') {
+            await tryInspectShrineTrialBriefing(page, { x: 15, y: 3 }, telemetry, recordAnomaly, 'c2-r2-squirtle-trial');
+          }
+        }
+      }
+    }
+  }
+
+  const compassList = telemetry.round2.compassStepsObserved;
+  const sawFern = compassList.some((s) => /Fern/i.test(s));
+  const sawFriends = compassList.some((s) => /Forest Friends/i.test(s));
+  telemetry.round2.compassProgressionOk = sawFern && sawFriends;
+  if (!telemetry.round2.compassProgressionOk) {
+    recordAnomaly('P2', 'Polish/UX', 'COMPASS_NOVICE_PROGRESSION_INCOMPLETE', `Expected Fern -> Forest Friends in novice compass steps, saw: ${JSON.stringify(compassList)}`, { stage: 'c2-r2-compass' });
+  } else {
+    recordDelight(telemetry, 'COMPASS_NOVICE_GUIDANCE', 'Polish/UX', 'c2-r2-compass', `Novice Compass cleanly walked ${compassList.join(' -> ')}`);
+  }
+
+  await syncRound2HooksTelemetry(page, telemetry, recordAnomaly, 'c2-r2-sync');
+  await sampleFps(page, telemetry);
+
+  // Return to Starlight Village Safe Zone so long cross-biome boss navigation uses main road
+  await page.click('#warp-safe-btn').catch(() => page.keyboard.press('h'));
+  await page.waitForTimeout(550);
+
   const hardTarget = spec.seed % 2 === 1
     ? WORLD_INDEX.shrines.find((s) => s.key === '23,13')
     : WORLD_INDEX.rivals.find((r) => r.key === '45,14');
@@ -1823,19 +2355,52 @@ async function runCohort2(page, spec, rng, telemetry, recordAnomaly) {
 }
 
 async function runCohort3(page, spec, rng, telemetry, recordAnomaly) {
+  const c3Start = Date.now();
   // Collector & 1,025-Dex Explorer: catch wilds, search/filter Dex (including regex/punctuation), cries, Team/Box, Shard upgrade, Cheer
   await navigateToCoord(page, 9, 6, { telemetry, recordAnomaly, rng, maxDistance: 0, maxMs: 20000, fightWilds: 'run', stage: 'c3-catch-walk' });
-  for (let attempt = 0; attempt < 6 && (await getGameState(page)).party.length < 2; attempt++) {
+  const targetPartyOrCatches = spec.isWave2 ? 4 : 2;
+  for (let attempt = 0; attempt < (spec.isWave2 ? 7 : 6) && (await getGameState(page)).caughtCount < targetPartyOrCatches; attempt++) {
     const triggered = await triggerWildEncounterAtGrass(page, 9, 6, { maxSteps: 22 });
     if (!triggered) break;
-    await playActiveBattleToEnd(page, { strategy: 'catch', telemetry, recordAnomaly, rng, stage: 'c3-catch-wild' });
+    await playActiveBattleToEnd(page, { strategy: spec.isWave2 ? 'catch_new' : 'catch', telemetry, recordAnomaly, rng, stage: 'c3-catch-wild' });
     await dismissDialogue(page, telemetry, recordAnomaly, 'c3-after-catch');
+    const curCatch = await getGameState(page);
+    if (curCatch.party[0] && curCatch.party[0].hp < curCatch.party[0].maxHp * 0.45) {
+      await page.keyboard.press('h').catch(() => {});
+      await page.waitForTimeout(420);
+      await navigateToCoord(page, 7, 13, { telemetry, recordAnomaly, rng, maxDistance: 1, maxMs: 12000, fightWilds: 'run', stage: 'c3-heal' });
+      await triggerInteractAtTarget(page, 7, 13, telemetry, recordAnomaly, 'c3-heal-fountain');
+      await navigateToCoord(page, 9, 6, { telemetry, recordAnomaly, rng, maxDistance: 0, maxMs: 14000, fightWilds: 'run', stage: 'c3-return-grass' });
+    }
   }
 
-  // Open Chest 26,1 or 4,24 for real Star Shards before upgrading
-  const shardChest = WORLD_INDEX.chests.find((c) => c.key === '4,24');
+  if (spec.isWave2) {
+    // Verify 0-badge Forest Outskirts Rare Patch rolls 0 random Elites
+    await triggerOutskirtsRarePatchEncounter(page, telemetry, recordAnomaly, 'c3-r2-rare-patch', { maxWaitMs: 6500 });
+    // Open Chest (17,1) Emerald Canopy Chest (Verdant Gem) & fight Ranger Leo (11,5) when budget allows
+    await navigateToCoord(page, 17, 1, { telemetry, recordAnomaly, rng, maxDistance: 1, maxMs: 15000, fightWilds: 'run', stage: 'c3-r2-leaf-chest' });
+    await triggerInteractAtTarget(page, 17, 1, telemetry, recordAnomaly, 'c3-r2-leaf-chest-open');
+    if (Date.now() - c3Start < 140000) {
+      await navigateToCoord(page, 11, 5, { telemetry, recordAnomaly, rng, maxDistance: 1, maxMs: 12000, fightWilds: 'run', stage: 'c3-r2-leo' });
+      await triggerInteractAtTarget(page, 11, 5, telemetry, recordAnomaly, 'c3-r2-leo-brief');
+      if ((await getGameState(page)).modals.briefing) {
+        await page.click('#briefing-battle-btn').catch(() => {});
+        if (await waitForBriefingBattleStart(page, telemetry, recordAnomaly, 'c3-r2-leo-start')) {
+          await playActiveBattleToEnd(page, { strategy: 'potion_win', telemetry, recordAnomaly, rng, stage: 'c3-r2-leo-fight' });
+          await dismissDialogue(page, telemetry, recordAnomaly, 'c3-r2-leo-win');
+        }
+      }
+    }
+    await page.click('#warp-safe-btn').catch(() => page.keyboard.press('h'));
+    await page.waitForTimeout(450);
+  }
+
+  // Open Chest 26,1 or 4,24 for real Star Shards before upgrading (skip slow Lagoon detour if C3 elapsed > 165s)
+  const shardChest = (!spec.isWave2 || Date.now() - c3Start < 165000)
+    ? WORLD_INDEX.chests.find((c) => c.key === '4,24')
+    : null;
   if (shardChest) {
-    await navigateToCoord(page, shardChest.x, shardChest.y, { telemetry, recordAnomaly, rng, maxDistance: 1, maxMs: 25000, fightWilds: 'run', stage: 'c3-chest' });
+    await navigateToCoord(page, shardChest.x, shardChest.y, { telemetry, recordAnomaly, rng, maxDistance: 1, maxMs: 22000, fightWilds: 'run', stage: 'c3-chest' });
     await triggerInteractAtTarget(page, shardChest.x, shardChest.y, telemetry, recordAnomaly, 'c3-chest-open');
   }
 
@@ -1866,7 +2431,7 @@ async function runCohort3(page, spec, rng, telemetry, recordAnomaly) {
     if (await cryBtn.count()) await cryBtn.click().catch(() => {});
   }
 
-  // Switch to Team & Box tab -> test Cheer, Star Shard Upgrade, Deposit/Lead guards
+  // Switch to Team & Box tab -> test Cheer, Star Shard Upgrade, Evolution, Deposit/Lead guards
   await page.click('#pokedex-tab-team');
   await page.waitForTimeout(200);
   await auditLayout(page, telemetry, recordAnomaly, 'c3-team-tab');
@@ -1875,7 +2440,22 @@ async function runCohort3(page, spec, rng, telemetry, recordAnomaly) {
   const upgradeBtn = page.locator('#pokedex-body button', { hasText: /Upgrade|Star Power/i }).first();
   if (await upgradeBtn.count()) await upgradeBtn.click().catch(() => {});
   const cheerBtn = page.locator('#pokedex-body button', { hasText: /Cheer/i }).first();
-  if (await cheerBtn.count()) await cheerBtn.click().catch(() => {});
+  if (await cheerBtn.count()) {
+    await cheerBtn.click().catch(() => {});
+    await page.waitForTimeout(150);
+  }
+  if (spec.isWave2) {
+    const evoBtn = page.locator('#pokedex-body .evolve-btn').first();
+    if (await evoBtn.count()) {
+      await evoBtn.click().catch(() => {});
+      await page.waitForTimeout(260);
+      await auditLayout(page, telemetry, recordAnomaly, 'c3-r2-post-evo');
+      await syncRound2HooksTelemetry(page, telemetry, recordAnomaly, 'c3-r2-evo');
+      if (telemetry.round2.evoToastObserved) {
+        recordDelight(telemetry, 'EVO_CELEBRATION_TOAST', 'Polish/UX', 'c3-r2-evo', 'In-modal evolution triggered Starlight celebration banner & toast cleanly');
+      }
+    }
+  }
   const leadBtn = page.locator('#pokedex-body button', { hasText: /Set Lead|Make Lead/i }).first();
   if (await leadBtn.count()) await leadBtn.click().catch(() => {});
 
@@ -1888,23 +2468,28 @@ async function runCohort3(page, spec, rng, telemetry, recordAnomaly) {
 
   await page.click('#pokedex-close-btn');
   await page.waitForTimeout(150);
+  await syncRound2HooksTelemetry(page, telemetry, recordAnomaly, 'c3-end');
+  await sampleFps(page, telemetry);
+  if (spec.isWave2) {
+    await page.click('#warp-safe-btn').catch(() => page.keyboard.press('h'));
+    await page.waitForTimeout(450);
+  }
 
   await runMandatoryDefeatAndResetVerify(page, spec, rng, telemetry, recordAnomaly, { stage: 'c3-mandatory-defeat' });
 }
 
 async function runCohort4(page, spec, rng, telemetry, recordAnomaly) {
   // Overworld Pathfind Torturer: long BFS walkToTile, tapping solid adjacent tiles, hold-and-drag steering, chests/signs/landmarks/NPCs/fountain/discovery nodes
-  // 1) Heal fountain (7,13), signpost (10,14), Willow (9,12), Stylist Celeste (5,16)
   for (const pt of [{ x: 7, y: 13 }, { x: 10, y: 14 }, { x: 9, y: 12 }, { x: 5, y: 16 }]) {
     await navigateToCoord(page, pt.x, pt.y, { telemetry, recordAnomaly, rng, maxDistance: 1, maxMs: 12000, fightWilds: 'run', stage: `c4-village-${pt.x}-${pt.y}` });
     await triggerInteractAtTarget(page, pt.x, pt.y, telemetry, recordAnomaly, `c4-interact-${pt.x}-${pt.y}`);
   }
 
-  // 2) Deliberately tap a solid tile near walkable land (11,12 or 12,12) to verify snap
+  // Deliberately tap a solid tile near walkable land (12,12) to verify snap
   await clickWorldTile(page, 12, 12);
   await page.waitForTimeout(400);
 
-  // 3) Hold-and-drag touch/mouse steering test across overworld canvas
+  // Hold-and-drag touch/mouse steering test across overworld canvas
   const dragBox = await page.locator('#overworld-canvas').boundingBox();
   if (dragBox) {
     const cx = dragBox.x + dragBox.width * 0.5;
@@ -1918,7 +2503,7 @@ async function runCohort4(page, spec, rng, telemetry, recordAnomaly) {
     await page.mouse.up();
   }
 
-  // 4) Trigger rare discovery node if present, plus Chest (17,1) & Landmark (15,15 / nearby)
+  // Trigger rare discovery node if present
   const rareSpot = await page.evaluate(() => {
     const spots = window.__starlightApp?.overworld?.rarePatches || [];
     return spots[0] ? { x: spots[0].x, y: spots[0].y, kind: spots[0].kind } : null;
@@ -1928,7 +2513,38 @@ async function runCohort4(page, spec, rng, telemetry, recordAnomaly) {
     await dismissDialogue(page, telemetry, recordAnomaly, 'c4-discovery-dlg');
   }
 
-  // 5) Long cross-biome walk east -> Twilight Eclipse Shrine (23, 13) -> Sunstone Dunes (56, 15) / Rival Blaze (45, 14) -> mandatory defeat
+  if (spec.isWave2) {
+    // March to Outer Gen 6-9 Biome (odd -> Pixie Faeveldt Glade 84,14 -> 92,4 Shrine; even -> Sunburst Alola Atoll 8,73 -> 6,76 Shrine)
+    const isOdd = spec.seed % 2 === 1;
+    const biomeSpot = isOdd ? { id: 'faeveldt', x: 84, y: 14, shrineKey: '92,4' } : { id: 'atoll', x: 8, y: 73, shrineKey: '6,76' };
+    const reachedOuter = await navigateToCoord(page, biomeSpot.x, biomeSpot.y, {
+      telemetry,
+      recordAnomaly,
+      rng,
+      maxDistance: 2,
+      maxMs: 55000,
+      fightWilds: 'run',
+      stage: `c4-r2-outer-${biomeSpot.id}`,
+    });
+    const outerSt = await getGameState(page);
+    if (reachedOuter || OUTER_GEN_6_9_BIOMES.has(outerSt.biome)) {
+      const visitedId = outerSt.biome || biomeSpot.id;
+      if (!telemetry.round2.outerBiomesVisited.includes(visitedId)) {
+        telemetry.round2.outerBiomesVisited.push(visitedId);
+      }
+      await auditLayout(page, telemetry, recordAnomaly, `c4-r2-outer-${visitedId}`);
+      await sampleFps(page, telemetry);
+      recordDelight(telemetry, 'OUTER_GEN6_9_BIOME_TRAVERSAL', 'World/Overworld', `c4-r2-outer-${visitedId}`, `Reached outer biome ${visitedId} cleanly via long road BFS`);
+    }
+    const outerShrine = WORLD_INDEX.shrines.find((s) => s.key === biomeSpot.shrineKey) || WORLD_INDEX.rivals.find((r) => r.key === '45,14');
+    await runMandatoryDefeatAndResetVerify(page, spec, rng, telemetry, recordAnomaly, {
+      targetOverride: outerShrine,
+      stage: 'c4-r2-outer-defeat',
+    });
+    return;
+  }
+
+  // Round 1 Long cross-biome walk east -> Rival Blaze (45, 14) -> mandatory defeat
   const longGoal = WORLD_INDEX.rivals.find((r) => r.key === '45,14') || WORLD_INDEX.shrines[3];
   await runMandatoryDefeatAndResetVerify(page, spec, rng, telemetry, recordAnomaly, {
     targetOverride: longGoal,
@@ -1937,9 +2553,39 @@ async function runCohort4(page, spec, rng, telemetry, recordAnomaly) {
 }
 
 async function runCohort5(page, spec, rng, telemetry, recordAnomaly) {
+  if (spec.isWave2) {
+    // Round 2 Sky-Hop Un-attuned Progress Counter Check BEFORE earning 1 Badge or 5 Dex species!
+    await navigateToCoord(page, 11, 13, { telemetry, recordAnomaly, rng, maxDistance: 0, maxMs: 12000, fightWilds: 'run', stage: 'c5-r2-unattuned-walk' });
+    await page.evaluate(({ x, y }) => {
+      const app = window.__starlightApp;
+      const ow = app?.overworld;
+      const prof = ow?.getProfile?.();
+      if (!ow || !prof?.pos) return;
+      prof.pos.dir = y < prof.pos.y ? 'up' : 'down';
+      ow.refreshInteractHint?.();
+    }, { x: SECRET_ARCADE_SPOT.x, y: SECRET_ARCADE_SPOT.y });
+    await page.waitForTimeout(90);
+    await page.click('#interact-pill', { force: true }).catch(() => page.keyboard.press('Space'));
+    await page.waitForTimeout(240);
+    const dlgSt = await getGameState(page);
+    const dlgText = dlgSt.modals.dialogueText || '';
+    telemetry.round2.skyHopUnattunedDialogue = dlgText;
+    const expectedBadge = `1 Island Badge (${Math.min(1, dlgSt.badgesCount)}/1)`;
+    const expectedDex = `5 Pokédex species (${Math.min(5, dlgSt.caughtCount)}/5)`;
+    const countersOk = dlgText.includes(expectedBadge) && dlgText.includes(expectedDex);
+    telemetry.round2.skyHopUnattunedCountersOk = countersOk;
+    await auditLayout(page, telemetry, recordAnomaly, 'c5-r2-unattuned-dialogue');
+    if (!countersOk) {
+      recordAnomaly('P1', 'Polish/UX', 'SKYHOP_UNATTUNED_COUNTERS_MISSING', `Un-attuned wall dialogue missing "${expectedBadge}" or "${expectedDex}": "${dlgText}"`, { stage: 'c5-r2-unattuned' });
+    } else {
+      recordDelight(telemetry, 'SKYHOP_UNATTUNED_LIVE_COUNTERS', 'Polish/UX', 'c5-r2-unattuned', `Un-attuned cottage wall clearly showed "${expectedBadge}" and "${expectedDex}" without clipping`);
+    }
+    await dismissDialogue(page, telemetry, recordAnomaly, 'c5-r2-unattuned-dismiss');
+  }
+
   // Sky-Hop Arcade Grinder: attune Starlight (5 species or 1 Badge), 3-knock (11,12), play Flight Charges, pause/resume, Star Dash, results replay, 5-Shard buy-in, non-village BGM restore
   await navigateToCoord(page, 9, 6, { telemetry, recordAnomaly, rng, maxDistance: 0, maxMs: 18000, fightWilds: 'run', stage: 'c5-attune-walk' });
-  for (let k = 0; k < 20 && (await getGameState(page)).caughtCount < 5; k++) {
+  for (let k = 0; k < (spec.isWave2 ? 11 : 20) && (await getGameState(page)).caughtCount < 5; k++) {
     const cur = await getGameState(page);
     if (cur.party[0] && cur.party[0].hp < cur.party[0].maxHp * 0.4) {
       await navigateToCoord(page, 7, 13, { telemetry, recordAnomaly, rng, maxDistance: 0, maxMs: 12000, fightWilds: 'run', stage: 'c5-fountain-heal' });
@@ -1949,6 +2595,19 @@ async function runCohort5(page, spec, rng, telemetry, recordAnomaly) {
     if (!(await triggerWildEncounterAtGrass(page, 9, 6, { maxSteps: 22 }))) break;
     await playActiveBattleToEnd(page, { strategy: 'catch_new', telemetry, recordAnomaly, rng, stage: 'c5-attune-wild' });
     await dismissDialogue(page, telemetry, recordAnomaly, 'c5-attune-dlg');
+  }
+
+  if (spec.isWave2 && (await getGameState(page)).caughtCount < 5 && (await getGameState(page)).badgesCount < 1) {
+    // Fallback attunement via Meadow Badge (Forest Shrine 15,3) if 15 catch loops hit bad RNG
+    await navigateToCoord(page, 15, 3, { telemetry, recordAnomaly, rng, maxDistance: 1, maxMs: 18000, fightWilds: 'run', stage: 'c5-r2-shrine-attune' });
+    await triggerInteractAtTarget(page, 15, 3, telemetry, recordAnomaly, 'c5-r2-shrine-brief');
+    if ((await getGameState(page)).modals.briefing) {
+      await page.click('#briefing-battle-btn').catch(() => {});
+      if (await waitForBriefingBattleStart(page, telemetry, recordAnomaly, 'c5-r2-shrine-start')) {
+        await playActiveBattleToEnd(page, { strategy: 'potion_win', telemetry, recordAnomaly, rng, stage: 'c5-r2-shrine-fight' });
+        await dismissDialogue(page, telemetry, recordAnomaly, 'c5-r2-shrine-win');
+      }
+    }
   }
 
   // Return to Starlight Village (or warp safe) & 3-knock SECRET_ARCADE_SPOT (11, 12) from (11, 13)
@@ -1967,6 +2626,10 @@ async function runCohort5(page, spec, rng, telemetry, recordAnomaly) {
     await page.waitForTimeout(250);
     await dismissDialogue(page, telemetry, recordAnomaly, 'c5-arcade-hud');
     st = await getGameState(page);
+  }
+
+  if (spec.isWave2) {
+    telemetry.round2.skyHopAttunedUnlocked = Boolean(st.arcadeUnlocked && st.modals.minigame);
   }
 
   if (st.modals.minigame) {
@@ -2024,6 +2687,7 @@ async function runCohort5(page, spec, rng, telemetry, recordAnomaly) {
     }
   }
 
+  await sampleFps(page, telemetry);
   await runMandatoryDefeatAndResetVerify(page, spec, rng, telemetry, recordAnomaly, {
     targetOverride: WORLD_INDEX.rivals.find((r) => r.key === '45,14'),
     stage: 'c5-mandatory-defeat',
@@ -2129,8 +2793,8 @@ async function runCohort6(page, baseUrl, spec, rng, telemetry, recordAnomaly) {
     }
   }
 
-  // On seeds 56..60 test full 3s hold reset on #reset-trainer-btn
-  if (spec.seed >= 56 && box) {
+  // On seeds 56..60 (or 156..160 in Wave 2) test full 3s hold reset on #reset-trainer-btn
+  if (spec.cohortOffset >= 5 && box) {
     await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
     await page.mouse.down();
     await page.waitForTimeout(3300);
@@ -2158,6 +2822,7 @@ async function runCohort6(page, baseUrl, spec, rng, telemetry, recordAnomaly) {
     await dismissDialogue(page, telemetry, recordAnomaly, 'c6-switched-trainer');
   }
 
+  await sampleFps(page, telemetry);
   await runMandatoryDefeatAndResetVerify(page, spec, rng, telemetry, recordAnomaly, { stage: 'c6-mandatory-defeat' });
 }
 
@@ -2217,6 +2882,7 @@ async function runCohort7(page, context, spec, rng, telemetry, recordAnomaly) {
     recordAnomaly('P2', 'Audio/Assets', 'AUDIO_STUCK_PAUSED_AFTER_VISIBLE', '_pausedByVisibility remained true after visibility restored', { stage: 'c7-visibility' });
   }
 
+  await sampleFps(page, telemetry);
   await runMandatoryDefeatAndResetVerify(page, spec, rng, telemetry, recordAnomaly, { stage: 'c7-mandatory-defeat' });
   await context.setOffline(false).catch(() => {});
 }
@@ -2236,6 +2902,32 @@ async function runCohort8(page, spec, rng, telemetry, recordAnomaly) {
     await dismissDialogue(page, telemetry, recordAnomaly, 'c8-post-tactical');
   }
 
+  if (spec.isWave2) {
+    // Heal up cleanly before challenging Forest Ranger Leo (11,5) so Rival Rematch is tested reliably
+    const preLeo = await getGameState(page);
+    if (preLeo.party.some((p) => p.hp < p.maxHp * 0.85)) {
+      await page.keyboard.press('h').catch(() => {});
+      await page.waitForTimeout(450);
+      await navigateToCoord(page, 7, 13, { telemetry, recordAnomaly, rng, maxDistance: 1, maxMs: 12000, fightWilds: 'run', stage: 'c8-r2-leo-heal' });
+      await triggerInteractAtTarget(page, 7, 13, telemetry, recordAnomaly, 'c8-r2-leo-fountain');
+    }
+    const leo = WORLD_INDEX.rivals.find((r) => r.key === '11,5');
+    if (leo) {
+      await navigateToCoord(page, leo.x, leo.y, { telemetry, recordAnomaly, rng, maxDistance: 1, maxMs: 18000, fightWilds: 'run', stage: 'c8-r2-leo-walk' });
+      await triggerInteractAtTarget(page, leo.x, leo.y, telemetry, recordAnomaly, 'c8-r2-leo-brief');
+      if ((await getGameState(page)).modals.briefing) {
+        await page.click('#briefing-battle-btn').catch(() => {});
+        if (await waitForBriefingBattleStart(page, telemetry, recordAnomaly, 'c8-r2-leo-start')) {
+          const postLeo = await playActiveBattleToEnd(page, { strategy: 'potion_win', telemetry, recordAnomaly, rng, stage: 'c8-r2-leo-fight' });
+          await dismissDialogue(page, telemetry, recordAnomaly, 'c8-r2-leo-win');
+          if (postLeo.battle?.lastResult?.outcome === 'won') {
+            await tryInspectRivalRematchBriefing(page, leo, telemetry, recordAnomaly, 'c8-r2-leo-rematch');
+          }
+        }
+      }
+    }
+  }
+
   // Test Briefing Pivot button (`#briefing-pivot-btn`) on Twilight Eclipse Shrine (23, 13)
   await navigateToCoord(page, 23, 13, { telemetry, recordAnomaly, rng, maxDistance: 1, maxMs: 28000, fightWilds: 'run', stage: 'c8-pivot-approach' });
   await triggerInteractAtTarget(page, 23, 13, telemetry, recordAnomaly, 'c8-pivot-briefing');
@@ -2251,6 +2943,7 @@ async function runCohort8(page, spec, rng, telemetry, recordAnomaly) {
   await page.keyboard.press('h').catch(() => {});
   await page.waitForTimeout(450);
 
+  await sampleFps(page, telemetry);
   await runMandatoryDefeatAndResetVerify(page, spec, rng, telemetry, recordAnomaly, { stage: 'c8-mandatory-defeat' });
 }
 
@@ -2276,6 +2969,17 @@ async function runCohort9(page, spec, rng, telemetry, recordAnomaly) {
     await page.setViewportSize({ width: vp.width, height: vp.height });
     await page.waitForTimeout(120);
     await auditLayout(page, telemetry, recordAnomaly, `c9-overworld-${vp.name}`, vp.name);
+  }
+  if (spec.isWave2) {
+    // Also flip #world-dialogue (un-attuned wall progress / Willow greeting) across landscape & portrait
+    await page.click('#interact-pill', { force: true }).catch(() => page.keyboard.press('Space'));
+    await page.waitForTimeout(180);
+    for (const vp of [VIEWPORTS[2], VIEWPORTS[0], VIEWPORTS[5]]) {
+      await page.setViewportSize({ width: vp.width, height: vp.height });
+      await page.waitForTimeout(90);
+      await auditLayout(page, telemetry, recordAnomaly, `c9-r2-dialogue-${vp.name}`, vp.name);
+    }
+    await dismissDialogue(page, telemetry, recordAnomaly, 'c9-r2-dialogue-close');
   }
   // Test HUD Install App group visible at 390x844 & 667x375
   await page.evaluate(() => {
@@ -2377,12 +3081,14 @@ async function runCohort9(page, spec, rng, telemetry, recordAnomaly) {
       const moved = await getGameState(page);
       if (moved.pos && (moved.pos.x !== GAME_META.spawn.x || moved.pos.y !== GAME_META.spawn.y)) {
         telemetry.metrics.resetsVerified++;
+        await sampleFps(page, telemetry);
         return;
       }
     }
   }
 
   // Fallback if Blaze wasn't active/reached
+  await sampleFps(page, telemetry);
   await runMandatoryDefeatAndResetVerify(page, spec, rng, telemetry, recordAnomaly, { stage: 'c9-mandatory-defeat' });
 }
 
@@ -2441,6 +3147,7 @@ async function runCohort10(page, spec, rng, telemetry, recordAnomaly) {
       recordAnomaly('P0', 'Gameplay/Mechanic', 'C10_FINAL_POS_INVALID', `Expected (8,15) after 3rd wipe, got ${JSON.stringify(finalSt.pos)}`, { stage: 'c10-final' });
     }
   }
+  await sampleFps(page, telemetry);
 }
 
 async function runSinglePlaytester(browser, baseUrl, seed, timeoutMs) {
@@ -2566,6 +3273,170 @@ function summarizeSwarmResults(runs) {
     (a, b) => (sevRank[a.severity] - sevRank[b.severity]) || (b.count - a.count),
   );
 
+  const wave2Runs = runs.filter((r) => r.round2?.isWave2);
+  let round2Summary = null;
+  if (wave2Runs.length > 0) {
+    const delightsByCode = new Map();
+    const frictionsByCode = new Map();
+    const fpsAll = [];
+    const outerBiomesSet = new Set();
+
+    let totalEncounters = 0;
+    let totalBruisers = 0;
+    let totalRarePatches = 0;
+    let totalRareElites = 0;
+    let totalNidF = 0;
+    let totalNincada = 0;
+    let totalCatchAtt = 0;
+    let totalCatchSuc = 0;
+
+    let depthChecked = 0;
+    let depthOk = 0;
+    let shrineChecked = 0;
+    let shrineLv6Ok = 0;
+    let squirtleTotal = 0;
+    let squirtleToughPivot = 0;
+    let farmPivotLanded = 0;
+    let bulbaTotal = 0;
+    let bulbaBalanced = 0;
+    let charTotal = 0;
+    let charBalanced = 0;
+    let compassChecked = 0;
+    let compassOk = 0;
+
+    let skyHopUnattunedChecked = 0;
+    let skyHopUnattunedOk = 0;
+    let skyHopAttunedChecked = 0;
+    let skyHopAttunedOk = 0;
+
+    let evoToastsCount = 0;
+    let badgeToastsCount = 0;
+    let shrineTrialsTested = 0;
+    let rivalRematchesTested = 0;
+
+    for (const r of wave2Runs) {
+      const r2 = r.round2;
+      for (const e of r2.forestOutskirtsEncounters || []) {
+        totalEncounters++;
+        if (e.isBruiser) totalBruisers++;
+        if (e.isRarePatch) totalRarePatches++;
+        if (e.isRarePatch && e.isElite) totalRareElites++;
+        if (e.speciesId === 29) totalNidF++;
+        if (e.speciesId === 290) totalNincada++;
+      }
+      totalCatchAtt += r2.forestOutskirtsCatchesAttempted || 0;
+      totalCatchSuc += r2.forestOutskirtsCatchesSucceeded || 0;
+
+      if (r2.forestOutskirtsDepthOk !== null) {
+        depthChecked++;
+        if (r2.forestOutskirtsDepthOk) depthOk++;
+      }
+      if (r2.forestShrineLevelObserved !== null) {
+        shrineChecked++;
+        if (r2.forestShrineLevelObserved === 'Lv.6') shrineLv6Ok++;
+        if (r2.starterName === 'Squirtle') {
+          squirtleTotal++;
+          if (r2.forestShrineReadinessTier === 'challenging' && /Farm Zone/i.test(r2.forestShrinePivotLabel || '')) {
+            squirtleToughPivot++;
+          }
+          if (r2.farmPivotLandedOk) farmPivotLanded++;
+        } else if (r2.starterName === 'Bulbasaur') {
+          bulbaTotal++;
+          if (r2.forestShrineReadinessTier === 'balanced' || r2.forestShrineReadinessTier === 'favored') bulbaBalanced++;
+        } else if (r2.starterName === 'Charmander') {
+          charTotal++;
+          if (r2.forestShrineReadinessTier === 'balanced' || r2.forestShrineReadinessTier === 'favored') charBalanced++;
+        }
+      }
+      if (r2.compassProgressionOk !== null) {
+        compassChecked++;
+        if (r2.compassProgressionOk) compassOk++;
+      }
+      if (r2.skyHopUnattunedCountersOk !== null) {
+        skyHopUnattunedChecked++;
+        if (r2.skyHopUnattunedCountersOk) skyHopUnattunedOk++;
+      }
+      if (r2.skyHopAttunedUnlocked !== null) {
+        skyHopAttunedChecked++;
+        if (r2.skyHopAttunedUnlocked) skyHopAttunedOk++;
+      }
+      if (r2.evoToastObserved) evoToastsCount++;
+      if (r2.badgeToastObserved) badgeToastsCount++;
+      if (r2.shrineTrialTested) shrineTrialsTested++;
+      if (r2.rivalRematchTested) rivalRematchesTested++;
+      for (const b of r2.outerBiomesVisited || []) outerBiomesSet.add(b);
+      for (const fps of r2.measuredFpsSamples || []) fpsAll.push(fps);
+
+      for (const d of r.experience?.delights || []) {
+        if (!delightsByCode.has(d.code)) {
+          delightsByCode.set(d.code, { code: d.code, category: d.category, sampleMessage: d.message, count: 0, seeds: [] });
+        }
+        const agg = delightsByCode.get(d.code);
+        agg.count++;
+        if (!agg.seeds.includes(r.seed)) agg.seeds.push(r.seed);
+      }
+      for (const f of r.experience?.frictions || []) {
+        if (!frictionsByCode.has(f.code)) {
+          frictionsByCode.set(f.code, { code: f.code, severity: f.severity, sampleMessage: f.message, count: 0, seeds: [] });
+        }
+        const agg = frictionsByCode.get(f.code);
+        agg.count++;
+        if (!agg.seeds.includes(r.seed)) agg.seeds.push(r.seed);
+      }
+    }
+
+    round2Summary = {
+      wave2RunsCount: wave2Runs.length,
+      forestOutskirts: {
+        totalEncounters,
+        bruisers: totalBruisers,
+        bruiserPct: totalEncounters > 0 ? Number(((totalBruisers / totalEncounters) * 100).toFixed(1)) : 0,
+        rarePatches: totalRarePatches,
+        rareElites: totalRareElites,
+        nidoranF: totalNidF,
+        nincada: totalNincada,
+        catchesAttempted: totalCatchAtt,
+        catchesSucceeded: totalCatchSuc,
+        catchRatePct: totalCatchAtt > 0 ? Number(((totalCatchSuc / totalCatchAtt) * 100).toFixed(1)) : 0,
+      },
+      onboarding: {
+        depthChecked,
+        depthOk,
+        shrineChecked,
+        shrineLv6Ok,
+        squirtleTotal,
+        squirtleToughPivot,
+        farmPivotLanded,
+        bulbaTotal,
+        bulbaBalanced,
+        charTotal,
+        charBalanced,
+        compassChecked,
+        compassOk,
+      },
+      skyHop: {
+        unattunedChecked: skyHopUnattunedChecked,
+        unattunedOk: skyHopUnattunedOk,
+        attunedChecked: skyHopAttunedChecked,
+        attunedOk: skyHopAttunedOk,
+      },
+      midLate: {
+        evoToastsCount,
+        badgeToastsCount,
+        outerBiomesVisited: [...outerBiomesSet],
+        shrineTrialsTested,
+        rivalRematchesTested,
+      },
+      fps: {
+        samplesCount: fpsAll.length,
+        avg: fpsAll.length ? Number((fpsAll.reduce((a, b) => a + b, 0) / fpsAll.length).toFixed(1)) : null,
+        min: fpsAll.length ? Number(Math.min(...fpsAll).toFixed(1)) : null,
+      },
+      delights: [...delightsByCode.values()].sort((a, b) => b.count - a.count),
+      frictions: [...frictionsByCode.values()].sort((a, b) => b.count - a.count),
+    };
+  }
+
   return {
     totalRuns: runs.length,
     totalResetsVerified,
@@ -2575,6 +3446,7 @@ function summarizeSwarmResults(runs) {
     totalBrokenImages,
     cohorts: Object.values(byCohort).sort((a, b) => a.cohort - b.cohort),
     groupedFindings,
+    round2Summary,
   };
 }
 
@@ -2625,6 +3497,21 @@ async function main() {
   console.log(`Total agents: ${summary.totalRuns}, verified resets: ${summary.totalResetsVerified}, pageErrors: ${summary.totalPageErrors}, consoleErrors: ${summary.totalConsoleErrors}, localHttpErrors: ${summary.totalLocalHttpErrors}, brokenImages: ${summary.totalBrokenImages}`);
   for (const f of summary.groupedFindings) {
     console.log(`[${f.severity}] ${f.code} (x${f.count}, seeds=${f.seeds.slice(0, 8).join(',')}${f.seeds.length > 8 ? '...' : ''}, viewports=${f.viewports.join(',')}): ${f.sampleMessage}`);
+  }
+  if (summary.round2Summary) {
+    const r2 = summary.round2Summary;
+    console.log('\n=== Round 2 Experience & Telemetry ===');
+    console.log(`Forest Outskirts (0-badge): encounters=${r2.forestOutskirts.totalEncounters}, bruisers=${r2.forestOutskirts.bruisers} (${r2.forestOutskirts.bruiserPct}%), rarePatches=${r2.forestOutskirts.rarePatches}, 0-badgeRareElites=${r2.forestOutskirts.rareElites}, NidoranF=${r2.forestOutskirts.nidoranF}, Nincada=${r2.forestOutskirts.nincada}, catches=${r2.forestOutskirts.catchesSucceeded}/${r2.forestOutskirts.catchesAttempted} (${r2.forestOutskirts.catchRatePct}%)`);
+    console.log(`Onboarding: depth0=${r2.onboarding.depthOk}/${r2.onboarding.depthChecked}, shrineLv6=${r2.onboarding.shrineLv6Ok}/${r2.onboarding.shrineChecked}, squirtleToughPivot=${r2.onboarding.squirtleToughPivot}/${r2.onboarding.squirtleTotal} (landed=${r2.onboarding.farmPivotLanded}), bulbaFair=${r2.onboarding.bulbaBalanced}/${r2.onboarding.bulbaTotal}, charmanderFair=${r2.onboarding.charBalanced}/${r2.onboarding.charTotal}, compassOk=${r2.onboarding.compassOk}/${r2.onboarding.compassChecked}`);
+    console.log(`Sky-Hop Counters: unattunedOk=${r2.skyHop.unattunedOk}/${r2.skyHop.unattunedChecked}, attunedUnlock=${r2.skyHop.attunedOk}/${r2.skyHop.attunedChecked}`);
+    console.log(`Mid/Late: evoToasts=${r2.midLate.evoToastsCount}, badgeToasts=${r2.midLate.badgeToastsCount}, shrineTrials=${r2.midLate.shrineTrialsTested}, rivalRematches=${r2.midLate.rivalRematchesTested}, outerBiomes=${r2.midLate.outerBiomesVisited.join(',') || 'none'}`);
+    console.log(`FPS: avg=${r2.fps.avg}, min=${r2.fps.min} (samples=${r2.fps.samplesCount})`);
+    for (const d of r2.delights) {
+      console.log(`[DELIGHT] ${d.code} (x${d.count}): ${d.sampleMessage}`);
+    }
+    for (const fr of r2.frictions) {
+      console.log(`[FRICTION ${fr.severity}] ${fr.code} (x${fr.count}): ${fr.sampleMessage}`);
+    }
   }
 
   if (opts.outFile) {
