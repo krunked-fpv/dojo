@@ -53,12 +53,26 @@ import {
   resolveTrainerLook,
 } from '../js/config.js';
 import {
+  BALANCE,
+  applyComposureGuardrail,
+  applyOffenseSoftCap,
+  assessEncounterReadiness,
+  computeBattleXpReward,
+  computeBenchXpShare,
+  getPartyReadinessLevel,
+  getXpDeltaMultiplier,
+  resolveEffectivenessDamageMult,
+  softenStatRatio,
+} from '../js/balance.js';
+import {
+  BALANCE as POKEMON_BALANCE,
   BIOME_SCALING_OFFSETS as POKEMON_BIOME_SCALING_OFFSETS,
   MAX_RECENT_ENCOUNTERS,
   MAX_UPGRADE_TIER,
   Pokemon,
   SPECIES_ARCHETYPES,
   TRAINER_XP_WEIGHTS as POKEMON_TRAINER_XP_WEIGHTS,
+  assessEncounterReadiness as pokemonAssessEncounterReadiness,
   attachPokemonSprite,
   calculateCatchAttempt,
   calculateDamage,
@@ -232,6 +246,7 @@ function buildTestSuites() {
     clearTimeout(app.biomeBannerTimer);
     if (app.biomeBannerEl) app.biomeBannerEl.hidden = true;
     app.cancelWarpTransition?.();
+    app.closeEncounterBriefing?.({ silent: true });
     app.minigame?.close?.();
     app.pokedex?.close?.();
     app.closeSettings?.();
@@ -239,6 +254,7 @@ function buildTestSuites() {
     app.clearCelebration?.();
     if (app.battle?.active) app.battle.stop({ outcome: 'escaped', faintedAll: false });
     app.encounterTransitioning = false;
+    app.overworld.encounterGraceSteps = 0;
     app.overworld.rarePatches = snap.prevRarePatches;
     app.overworld.setActive(snap.wasOverworldActive);
     if (snap.prevRawSave === null) window.localStorage.removeItem(STORAGE_KEY);
@@ -2690,7 +2706,12 @@ function buildTestSuites() {
             }
             assertEqual(baseMon.upgradeTier, 5, 'reached tier 5');
             assertEqual(baseMon.getUpgradeCost(), null, 'tier 5 getUpgradeCost returns null');
-            assertEqual(baseMon.maxHp, Math.round((Math.floor(((baseMon.species.baseStats.hp * 2) * baseMon.level) / 35) + baseMon.level + 18) * 1.25), 'tier 5 scales maxHp +25%');
+            const tier5Mult = 1 + MAX_UPGRADE_TIER * BALANCE.progression.upgradeStatBonusPerTier;
+            assertEqual(
+              baseMon.maxHp,
+              Math.round((Math.floor(((baseMon.species.baseStats.hp * 2) * baseMon.level) / 35) + baseMon.level + 18) * tier5Mult),
+              `tier 5 scales maxHp +${Math.round(MAX_UPGRADE_TIER * BALANCE.progression.upgradeStatBonusPerTier * 100)}%`,
+            );
             const cappedRes = baseMon.applyUpgrade();
             assertEqual(cappedRes.upgraded, false, 'cannot upgrade past tier 5');
 
@@ -2725,7 +2746,8 @@ function buildTestSuites() {
                 store.recordCaught(createPokemon(id, 5));
               }
               const boxSpheal = createPokemon(363, 13, 'water');
-              boxSpheal.gainXp(Math.ceil(boxSpheal.xpToNext * 0.45));
+              const boxSeedRatio = Math.max(0.56, 1 - BALANCE.progression.upgradeXpRatio + 0.05);
+              boxSpheal.gainXp(Math.ceil(boxSpheal.xpToNext * boxSeedRatio));
               store.recordCaught(boxSpheal);
               assertEqual(profile.box.length, 1, 'Spheal placed in Reserve Box');
 
@@ -2738,7 +2760,7 @@ function buildTestSuites() {
               assert(profile.badges.includes('stardust'), 'stardust badge unlocked');
               assert(up1.newBadges.some((b) => b.id === 'stardust'), 'stardust returned in newBadges');
 
-              // Upgrade Box Spheal (cost 2) -> Lv.13 + 65% XP -> Lv.14 -> pendingEvo Sealeo #364
+              // Upgrade Box Spheal (cost 2) -> Lv.13 + BALANCE.progression.upgradeXpRatio -> Lv.14 -> pendingEvo Sealeo #364
               const upBox = store.upgradePokemon(boxSpheal.uid);
               assertEqual(upBox.upgraded, true, 'Box upgrade succeeded');
               assertEqual(upBox.remainingShards, 0, '0 starShards remaining');
@@ -3694,11 +3716,13 @@ function buildTestSuites() {
               assertEqual(struggleMove.name, 'Struggle', '0-PP fallback move is Struggle');
               assertEqual(struggleMove._isStruggle, true, '0-PP fallback marks _isStruggle: true');
 
-              // Bond XP multiplier & conscious bench +2 bond on victory
+              // Bond XP multiplier & conscious bench +2 bond on victory (aligned with BALANCE XP rubber-banding)
               const highBondLead = createPokemon(475, 30, 'grove', { bond: 90 }); // Best Buddy 1.20x
+              const lowBondLead = createPokemon(475, 30, 'grove', { bond: 20 }); // Baseline 1.00x
+              const xpEnemy = createPokemon(175, 10, 'grove');
               const benchBefore = benchMate.bond;
               engine.player = highBondLead;
-              engine.enemy = createPokemon(175, 10, 'grove');
+              engine.enemy = xpEnemy;
               vp.team = [highBondLead, benchMate];
               const xpTimer = setInterval(() => engine.finishTypewriter(), 15);
               try {
@@ -3706,8 +3730,26 @@ function buildTestSuites() {
               } finally {
                 clearInterval(xpTimer);
               }
-              const expectedXp = Math.round((10 * 14 + 12) * 1.0 * 1.20);
-              assertEqual(highBondLead.xp, expectedXp, `bond 90 applies 1.20x XP mult (${expectedXp})`);
+              const expectedHighBond = computeBattleXpReward(highBondLead, xpEnemy, {
+                scale: 1.0,
+                bondMult: getBondTier(90).xpMult,
+                traitMult: 1.0,
+              });
+              const expectedLowBond = computeBattleXpReward(lowBondLead, xpEnemy, {
+                scale: 1.0,
+                bondMult: getBondTier(20).xpMult,
+                traitMult: 1.0,
+              });
+              assertEqual(
+                highBondLead.xp,
+                expectedHighBond.xp,
+                `bond 90 applies 1.20x XP mult via computeBattleXpReward (${expectedHighBond.xp})`,
+              );
+              assertGreater(
+                highBondLead.xp,
+                expectedLowBond.xp,
+                `bond 90 XP (${highBondLead.xp}) exceeds bond 20 XP (${expectedLowBond.xp})`,
+              );
               assertEqual(benchMate.bond, benchBefore + 2, 'conscious bench mate gains +2 bond on victory');
 
               engine.stop({ outcome: 'escaped', faintedAll: false });
@@ -12076,6 +12118,649 @@ function buildTestSuites() {
               app.battle.spawnCelebrationConfetti({ center: { x: 200, y: 150 } });
               assertGreater(app.battle.particles.length, 100, 'battle.spawnCelebrationConfetti spawns multi-wave 2x burst (>100 particles)');
             } finally {
+              restoreAppFromSnapshot(app, snap);
+            }
+          },
+        },
+      ],
+    },
+    {
+      name: '49. Balance Engine, Anti-Tilt Combat/XP/Scaling, Tactical Readiness & Overworld Grace',
+      tests: [
+        {
+          name: 'BALANCE deep-freeze, BIOME_SCALING_OFFSETS parity, equal-level TTK & Composure guardrail (player/wild/boss + post-cap drain)',
+          fn() {
+            // 1. Deep-freeze & single-source-of-truth parity
+            assertEqual(BALANCE, POKEMON_BALANCE, 'pokemon.js re-exports exact BALANCE singleton');
+            assertEqual(Object.isFrozen(BALANCE), true, 'BALANCE root is frozen');
+            for (const key of ['combat', 'progression', 'xp', 'scaling', 'overworld', 'readiness']) {
+              assertEqual(Object.isFrozen(BALANCE[key]), true, `BALANCE.${key} is frozen`);
+            }
+            assertEqual(Object.isFrozen(BALANCE.combat.composure), true, 'BALANCE.combat.composure is frozen');
+            assertEqual(Object.isFrozen(BALANCE.progression.powerTopWeights), true, 'powerTopWeights is frozen');
+            assertEqual(Object.isFrozen(BALANCE.scaling.biomeOffsets), true, 'BALANCE.scaling.biomeOffsets is frozen');
+
+            const biomeKeys = Object.keys(BIOMES);
+            assertEqual(biomeKeys.length, 18, '18 biomes checked for BIOME_SCALING_OFFSETS parity');
+            for (const bId of biomeKeys) {
+              const balOff = BALANCE.scaling.biomeOffsets[bId];
+              assertFinite(balOff, `BALANCE.scaling.biomeOffsets.${bId} finite`);
+              assertEqual(BIOME_SCALING_OFFSETS[bId], balOff, `world-data/config offset matches balance.js for ${bId}`);
+              assertEqual(POKEMON_BIOME_SCALING_OFFSETS[bId], balOff, `pokemon.js offset matches balance.js for ${bId}`);
+            }
+
+            // 2. Pure combat helpers (softenStatRatio, resolveEffectivenessDamageMult, applyOffenseSoftCap)
+            assertEqual(
+              softenStatRatio(100, 10),
+              Math.pow(BALANCE.combat.maxStatRatio, BALANCE.combat.statRatioExponent),
+              'softenStatRatio clamps upper bound and applies exponent',
+            );
+            assertEqual(
+              softenStatRatio(1, 100),
+              Math.pow(BALANCE.combat.minStatRatio, BALANCE.combat.statRatioExponent),
+              'softenStatRatio clamps lower bound and applies exponent',
+            );
+            assertEqual(resolveEffectivenessDamageMult(2), BALANCE.combat.superEffectiveDamageMult, '2x -> 1.65');
+            assertEqual(resolveEffectivenessDamageMult(1.5), BALANCE.combat.mildSuperEffectiveMult, '1.5x -> 1.35');
+            assertEqual(resolveEffectivenessDamageMult(1), 1.0, '1x -> 1.0');
+            assertEqual(resolveEffectivenessDamageMult(0.5), BALANCE.combat.resistedDamageMult, '0.5x -> 0.60');
+            assertEqual(resolveEffectivenessDamageMult(0), 0, '0x -> 0');
+            assertEqual(applyOffenseSoftCap(2.0), 2.0, 'offense soft cap linear below knee');
+            assertGreater(applyOffenseSoftCap(3.5), applyOffenseSoftCap(2.5), 'offense soft cap strictly monotonic');
+            assert(applyOffenseSoftCap(3.5) < 3.5, 'offense soft cap compresses stacked >knee multipliers');
+
+            // 3. Equal-level Lv.5 starter TTK: zero 1-shots + raw effectiveness & strict ordering preserved
+            const bulba5 = createPokemon(1, 5);
+            const char5 = createPokemon(4, 5);
+            const squirt5 = createPokemon(7, 5);
+            const pika5 = createPokemon(25, 5);
+            for (const [atk, def, move] of [
+              [squirt5, char5, MOVES.water_gun],
+              [char5, bulba5, MOVES.ember],
+              [bulba5, squirt5, MOVES.vine_whip],
+              [pika5, squirt5, MOVES.thunder_shock],
+            ]) {
+              const hit = calculateDamage(atk, def, move, {
+                forceHit: true,
+                forceCrit: false,
+                fixedVariance: 1.0,
+                applyAbilities: true,
+              });
+              assertEqual(hit.effectiveness, 2, `${atk.name} -> ${def.name} keeps canonical raw 2x effectiveness`);
+              assert(hit.damage < def.maxHp, `Lv.5 equal-level ${atk.name} ${move.name} does not 1-shot ${def.name} (${hit.damage}/${def.maxHp})`);
+
+              const critHit = calculateDamage(atk, def, move, {
+                forceHit: true,
+                forceCrit: true,
+                fixedVariance: 1.0,
+                applyAbilities: true,
+              });
+              assertGreater(critHit.damage, hit.damage, `${atk.name} crit > non-crit`);
+              assert(critHit.damage < def.maxHp, `Lv.5 equal-level SE+Crit+Ability does not 1-shot ${def.name} (${critHit.damage}/${def.maxHp})`);
+            }
+
+            const sq12 = createPokemon(7, 12);
+            const ch12 = createPokemon(4, 12);
+            const pk12 = createPokemon(25, 12);
+            const bl12 = createPokemon(1, 12);
+            const se12 = calculateDamage(sq12, ch12, MOVES.water_gun, { forceHit: true, forceCrit: false, fixedVariance: 1.0 });
+            const neu12 = calculateDamage(sq12, pk12, MOVES.water_gun, { forceHit: true, forceCrit: false, fixedVariance: 1.0 });
+            const res12 = calculateDamage(sq12, bl12, MOVES.water_gun, { forceHit: true, forceCrit: false, fixedVariance: 1.0 });
+            const crit12 = calculateDamage(sq12, ch12, MOVES.water_gun, { forceHit: true, forceCrit: true, fixedVariance: 1.0 });
+            assertGreater(crit12.damage, se12.damage, 'strict ordering: crit > superEff');
+            assertGreater(se12.damage, neu12.damage, 'strict ordering: superEff > neutral');
+            assertGreater(neu12.damage, res12.damage, 'strict ordering: neutral > resisted');
+
+            // 4. Composure Guardrail (player ramp/bypass, wild catch cap/bypass, boss cap, post-cap drain)
+            const defFull = { level: 10, hp: 100, maxHp: 100 };
+            const offDefault = applyComposureGuardrail(250, { level: 12 }, defFull, {});
+            assertEqual(offDefault.damage, 250, 'composure off unless applyComposure:true');
+            assertEqual(offDefault.composureCapped, false, 'composureCapped false when disabled');
+
+            const plGap4 = applyComposureGuardrail(250, { level: 14 }, defFull, { applyComposure: true, defenderSide: 'player' });
+            assertEqual(plGap4.damage, 72, 'player full-HP composure caps <=+4 gap at 72%');
+            assertEqual(plGap4.composureCapped, true, 'player gap +4 sets composureCapped:true');
+
+            const plGap6 = applyComposureGuardrail(250, { level: 16 }, defFull, { applyComposure: true, defenderSide: 'player' });
+            assertEqual(plGap6.damage, 80, 'player full-HP composure ramps smoothly at +6 gap (80%)');
+
+            const plGap8 = applyComposureGuardrail(250, { level: 18 }, defFull, { applyComposure: true, defenderSide: 'player' });
+            assertEqual(plGap8.damage, 88, 'player full-HP composure caps at 88% on +8 gap hard boundary');
+
+            const plGap9 = applyComposureGuardrail(250, { level: 19 }, defFull, { applyComposure: true, defenderSide: 'player' });
+            assertEqual(plGap9.damage, 250, 'player composure turns off at +9 reckless gap');
+            assertEqual(plGap9.composureCapped, false, 'player +9 gap composureCapped:false');
+
+            const plHurt = applyComposureGuardrail(250, { level: 12 }, { level: 10, hp: 99, maxHp: 100 }, { applyComposure: true, defenderSide: 'player' });
+            assertEqual(plHurt.damage, 250, 'composure inactive when defender hp < maxHp');
+            assertEqual(plHurt.composureCapped, false, 'injured defender composureCapped:false');
+
+            const wildCap = applyComposureGuardrail(250, { level: 15 }, defFull, { applyComposure: true, defenderSide: 'enemy', isBoss: false });
+            assertEqual(wildCap.damage, 84, 'wild full-HP opening capped at 84% within +5 player advantage');
+            assertEqual(wildCap.composureCapped, true, 'wild +5 gap sets composureCapped:true');
+
+            const wildBypass = applyComposureGuardrail(250, { level: 22 }, { level: 1, hp: 25, maxHp: 25 }, { applyComposure: true, defenderSide: 'enemy', isBoss: false });
+            assertEqual(wildBypass.damage, 250, 'Lv.22 vs Lv.1 wild bypasses composure for clean 1-shot');
+            assertEqual(wildBypass.composureCapped, false, 'wild bypass composureCapped:false');
+
+            const bossCap = applyComposureGuardrail(250, { level: 14 }, defFull, { applyComposure: true, defenderSide: 'enemy', isBoss: true });
+            assertEqual(bossCap.damage, 65, 'Shrine boss full-HP opening capped at 65% within +8 gap');
+            assertEqual(bossCap.composureCapped, true, 'boss cap sets composureCapped:true');
+
+            // Post-cap drainHeal consistency via calculateDamage
+            const nectarId = Number(Object.keys(SPECIES).find((id) => SPECIES[id]?.ability === 'nectar_siphon'));
+            const nectarAtk = createPokemon(nectarId, 30, 'grove', { upgradeTier: 3 });
+            const bossTarget = createPokemon(7, 25, 'water'); // Water weak to Grass
+            const cappedDrainHit = calculateDamage(nectarAtk, bossTarget, MOVES.thorn_barrage, {
+              forceHit: true,
+              forceCrit: true,
+              fixedVariance: 1.0,
+              applyAbilities: true,
+              applyComposure: true,
+              defenderSide: 'enemy',
+              isBoss: true,
+            });
+            assertEqual(cappedDrainHit.composureCapped, true, 'heavy boss opener triggers composure in calculateDamage');
+            assert(cappedDrainHit.damage <= Math.floor(bossTarget.maxHp * BALANCE.combat.composure.bossFullHpMaxRatio), 'boss damage respects 65% cap');
+            assertEqual(
+              cappedDrainHit.attackerAbilityTrigger?.drainHeal,
+              Math.max(1, Math.round(cappedDrainHit.damage * 0.2)),
+              'drainHeal is computed AFTER composure cap',
+            );
+          },
+        },
+        {
+          name: 'XP rubber-banding (0.22x..1.65x), per-mate bench share (0.20..0.78), anti-spike scaling caps, Potion scaling & tiered AI',
+          async fn() {
+            // 1. Active XP rubber-banding & dynamic per-mate bench catch-up
+            assertEqual(getXpDeltaMultiplier(10, 10), 1.0, 'equal-level XP deltaMult === 1.0');
+            assertEqual(getXpDeltaMultiplier(30, 10), BALANCE.xp.overlevelMinMult, 'heavy overlevel floors at 0.22x');
+            assertEqual(getXpDeltaMultiplier(10, 20), BALANCE.xp.underlevelMaxMult, 'heavy underlevel caps at 1.65x');
+
+            const xpEqual = computeBattleXpReward({ level: 10 }, { level: 10 });
+            const xpOver = computeBattleXpReward({ level: 25 }, { level: 10 });
+            const xpUnder = computeBattleXpReward({ level: 10 }, { level: 16 });
+            assertEqual(xpEqual.isCatchup, false, 'equal XP not catchup');
+            assertEqual(xpEqual.isTapered, false, 'equal XP not tapered');
+            assertEqual(xpOver.isTapered, true, 'overleveled XP flags isTapered');
+            assert(xpOver.xp >= BALANCE.xp.minActiveXp && xpOver.xp < xpEqual.xp, 'overleveled XP tapers cleanly above floor');
+            assertEqual(xpUnder.isCatchup, true, 'underleveled XP flags isCatchup');
+            assertGreater(xpUnder.xp, xpEqual.xp, 'underleveled XP > equal XP');
+
+            const benchLagging = computeBenchXpShare({ level: 5 }, { level: 15 }, { level: 10 }, 120);
+            const benchEqual = computeBenchXpShare({ level: 10 }, { level: 10 }, { level: 10 }, 120);
+            const benchOver = computeBenchXpShare({ level: 22 }, { level: 22 }, { level: 10 }, 120);
+            assertEqual(benchLagging.shareRatio, BALANCE.xp.benchMaxShare, 'lagging bench mate reaches 0.78 catch-up share');
+            assertEqual(benchLagging.isCatchup, true, 'lagging bench mate flags isCatchup');
+            assertEqual(benchEqual.shareRatio, BALANCE.xp.benchBaseShare, 'equal bench mate uses 0.42 base share');
+            assertEqual(benchOver.shareRatio, BALANCE.xp.benchOverlevelMinShare, 'overleveled bench mate tapers to 0.20 floor');
+            assertGreater(benchLagging.xp, benchEqual.xp, 'lagging bench XP > equal bench XP');
+            assertGreater(benchEqual.xp, benchOver.xp, 'equal bench XP > overleveled bench XP');
+
+            // 2. Anti-spike scaling ceilings
+            const carryProfile = { team: [{ level: 30 }, { level: 6 }, { level: 6 }], badges: [] };
+            assertEqual(getTrainerPowerLevel(carryProfile), 18, 'top-3 blend (0.5/0.3/0.2) prevents solo carry tilt ([30,6,6] === 18)');
+            const maxBadgeProfile = {
+              team: [{ level: 20 }, { level: 20 }, { level: 20 }],
+              badges: BADGES.map((b) => b.id),
+            };
+            assertEqual(getTrainerPowerLevel(maxBadgeProfile), 22, 'badge power bonus capped at +2.0 even at 28 badges');
+
+            // Wild stacked bonus cap (+3 above scaled maxLv)
+            const wildProf = {
+              playerLevel: 18,
+              trainerXp: getCumulativeXpForPlayerLevel(18),
+              team: [createPokemon(25, 18), createPokemon(6, 18), createPokemon(9, 18)],
+              badges: ['meadow', 'flame', 'cascade', 'thunder', 'boulder', 'magma'],
+              shrinesCleared: [],
+              recentEncounters: [],
+            };
+            const caveRange = getBiomeScaledRange('cave', wildProf);
+            const maxWildCeiling = Math.min(BALANCE.progression.maxLevel, caveRange.maxLv + BALANCE.scaling.wildMaxBonusAboveRange);
+            for (let i = 0; i < 40; i++) {
+              const wild = rollWildPokemon('cave', wildProf, {
+                isRarePatch: true,
+                forceElite: true,
+                depthTier: 2,
+                levelBonus: 10,
+              });
+              assert(wild.level <= maxWildCeiling, `stacked wild bonus capped <= ${maxWildCeiling} (got ${wild.level})`);
+            }
+
+            // Shrine Guard (<= +1 offset, <= ★3), Astral Trial (+1..+4, ★2..★4), Rival Rematch (+1..+4, <= ★3)
+            const vet40 = {
+              team: [createPokemon(25, 40), createPokemon(6, 40), createPokemon(9, 40)],
+              badges: BADGES.map((b) => b.id),
+              shrinesCleared: Object.values(SHRINES).map((s) => s.id),
+              rivalsDefeated: Object.values(RIVAL_TRAINERS).map((r) => r.id),
+            };
+            const vetPower40 = getTrainerPowerLevel(vet40);
+            for (const shrine of Object.values(SHRINES)) {
+              const guard = getScaledShrineGuard(shrine, vet40);
+              assert(
+                guard.level <= Math.min(50, Math.max(shrine.level, Math.round(vetPower40 + BALANCE.scaling.shrineGuardMaxOffsetAbovePower))),
+                `${shrine.id} guard level (${guard.level}) respects +1 power offset cap`,
+              );
+              assert(guard.upgradeTier <= BALANCE.scaling.shrineGuardMaxTier, `${shrine.id} guard tier <= ★3 (got ★${guard.upgradeTier})`);
+
+              for (const tc of [0, 2, 6]) {
+                const trial = getScaledShrineTrial(shrine, {
+                  ...vet40,
+                  shrineTrialCounts: { [shrine.id]: tc },
+                });
+                const expectedTrialMax = Math.min(
+                  50,
+                  Math.max(
+                    shrine.level + BALANCE.scaling.shrineTrialBaseOffset,
+                    Math.round(vetPower40) + BALANCE.scaling.shrineTrialBaseOffset + Math.min(BALANCE.scaling.shrineTrialMaxCountBonus, tc),
+                  ),
+                );
+                assertEqual(trial.isElite, true, `${shrine.id} trial tc=${tc} isElite`);
+                assert(trial.level <= expectedTrialMax, `${shrine.id} trial tc=${tc} level (${trial.level}) <= ${expectedTrialMax}`);
+                assertInRange(trial.upgradeTier, 2, BALANCE.scaling.shrineTrialMaxTier, `${shrine.id} trial tc=${tc} tier in [2, 4]`);
+              }
+            }
+
+            for (const rival of Object.values(RIVAL_TRAINERS)) {
+              for (const rc of [0, 3, 8]) {
+                const party = getScaledRivalParty(rival, {
+                  ...vet40,
+                  rivalRematchCounts: { [rival.id]: rc },
+                });
+                assertGreater(party.length, 0, `${rival.id} rc=${rc} party non-empty`);
+                for (const m of party) {
+                  assert(m.upgradeTier <= BALANCE.scaling.rivalMaxTier, `${rival.id} rc=${rc} mon tier <= ★3 (got ★${m.upgradeTier})`);
+                }
+              }
+            }
+
+            // 3. Tiered chooseEnemyMove AI + Potion scaling + .is-high-threat cue
+            const TEST_KEY = 'starlight_pokemon_test_s49_ai_v1';
+            const noopAudio = {
+              playMenuBlip() {}, playCursorMove() {}, playMoveSelect() {}, playWindup() {},
+              playPhysicalImpact() {}, playElemental() {}, playShieldChime() {}, playHealChime() {},
+              playFaint() {}, playLevelUp() {}, playPokeballThrow() {}, playPokeballAbsorb() {},
+              playPokeballBounce() {}, playPokeballWobble() {}, playCaptureSuccess() {},
+              playStarBallShimmer() {}, playXpTick() {}, playShinySparkle() {}, playComposureBrace() {},
+            };
+            let engine = null;
+            const origRand = Math.random;
+            try {
+              window.localStorage.removeItem(TEST_KEY);
+              const store = new StorageManager(TEST_KEY);
+              store.updateSettings({ battlePace: 'fast' });
+              store.selectTrainer('violet');
+              store.chooseStarter(4); // Charmander Lv.5
+              const prof = store.getActiveProfile();
+              prof.bag.potions = 3;
+
+              engine = new BattleEngine({
+                storage: store,
+                audio: noopAudio,
+                onBattleEnd() {},
+                onBadgesUnlocked() {},
+                onHudRefresh() {},
+              });
+
+              const playerMon = createPokemon(4, 10, 'volcano'); // Fire Lv.10
+              const enemyMon = createPokemon(7, 15, 'water'); // Water Lv.15 (+5 -> high threat!)
+              prof.team = [playerMon];
+
+              const startP = engine.start({ enemy: enemyMon, biomeId: 'water' });
+              const flushT = setInterval(() => engine.finishTypewriter(), 10);
+              try {
+                await startP;
+              } finally {
+                clearInterval(flushT);
+              }
+
+              // High-threat level cue toggled on enemy.level - player.level >= 4
+              assertEqual(
+                document.getElementById('enemy-level')?.classList.contains('is-high-threat'),
+                true,
+                '#enemy-level receives .is-high-threat when enemy leads by >=4 levels',
+              );
+
+              // Potion heals max(20, round(maxHp * 0.50))
+              playerMon.hp = 1;
+              const expectedPotionHeal = Math.max(
+                BALANCE.combat.potionMinHeal,
+                Math.round(playerMon.maxHp * BALANCE.combat.potionHealRatio),
+              );
+              const origExec = engine.executeMoveAction.bind(engine);
+              engine.executeMoveAction = async () => false; // skip enemy counterattack to isolate Potion amount
+              const potFlush = setInterval(() => engine.finishTypewriter(), 10);
+              try {
+                await engine.handleUsePotion();
+              } finally {
+                clearInterval(potFlush);
+                engine.executeMoveAction = origExec;
+              }
+              assertEqual(
+                playerMon.hp,
+                Math.min(playerMon.maxHp, 1 + expectedPotionHeal),
+                `Potion healed exact BALANCE amount (+${expectedPotionHeal} HP)`,
+              );
+
+              // Deterministic AI verification with synthetic full-category moveset
+              const customMoves = [MOVES.water_gun, MOVES.vine_whip, MOVES.synthesis, MOVES.shell_shield, MOVES.focus_roar];
+              enemyMon.getMoveObjects = () => customMoves;
+              enemyMon.getMovePp = () => ({ current: 10, max: 10 });
+
+              // Wild AI: skips heal >60%, skips re-shield, skips buff past +1
+              engine.isTrainer = false;
+              engine.isShrine = false;
+              enemyMon.hp = enemyMon.maxHp;
+              enemyMon.shieldTurns = 2;
+              enemyMon.battleStages.atk = 1;
+              for (const r of [0.0, 0.25, 0.5, 0.75, 0.99]) {
+                Math.random = () => r;
+                const picked = engine.chooseEnemyMove();
+                assertEqual(picked.category, 'attack', `Wild AI filters heal/re-shield/over-buff (r=${r}, got ${picked.id})`);
+              }
+
+              // Rival AI: tactical heal/shield in 25%..55% HP & caps buff at +1
+              engine.isTrainer = true;
+              engine.isShrine = false;
+              enemyMon.hp = Math.round(enemyMon.maxHp * 0.35);
+              enemyMon.shieldTurns = 0;
+              Math.random = () => 0.1;
+              const rivalLowPick = engine.chooseEnemyMove();
+              assertEqual(rivalLowPick.category, 'heal', 'Rival AI picks heal when HP <= 40% in stabilization window');
+
+              enemyMon.hp = enemyMon.maxHp;
+              enemyMon.battleStages.atk = 1;
+              enemyMon.shieldTurns = 2;
+              Math.random = () => 0.1;
+              const rivalSmartPick = engine.chooseEnemyMove();
+              assertEqual(rivalSmartPick.id, 'water_gun', 'Rival AI picks Super-Effective Water Gun vs Fire player');
+
+              // Astral Shrine Trial AI: allows buff at +1 (up to cap +2), then stops at +2
+              engine.isTrainer = false;
+              engine.isShrine = true;
+              engine.shrineData = { isAstralTrial: true };
+              enemyMon.hp = enemyMon.maxHp;
+              enemyMon.shieldTurns = 2;
+              enemyMon.battleStages.atk = 1;
+              Math.random = () => 0.05; // enters utility branch (<0.25) where only focus_roar is allowed
+              assertEqual(engine.chooseEnemyMove().id, 'focus_roar', 'Astral Trial AI allows buffing from +1 to +2');
+              enemyMon.battleStages.atk = 2;
+              assertEqual(engine.chooseEnemyMove().category, 'attack', 'Astral Trial AI stops buffing at +2 cap');
+
+              // 0-PP Struggle fallback preserved
+              enemyMon.getMovePp = () => ({ current: 0, max: 10 });
+              const struggle = engine.chooseEnemyMove();
+              assertEqual(struggle?.name, 'Struggle', '0-PP Struggle fallback name preserved');
+              assertEqual(struggle?._isStruggle, true, '0-PP Struggle fallback _isStruggle preserved');
+
+              engine.stop({ outcome: 'escaped', faintedAll: false });
+              assertEqual(
+                document.getElementById('enemy-level')?.classList.contains('is-high-threat'),
+                false,
+                'battle.stop() clears .is-high-threat from #enemy-level',
+              );
+            } finally {
+              Math.random = origRand;
+              engine?.destroy();
+              window.localStorage.removeItem(TEST_KEY);
+            }
+          },
+        },
+        {
+          name: 'assessEncounterReadiness tiers/tips, #encounter-briefing-modal UX, #interact-pill, Guide 17 pills, Overworld grace & docs check',
+          async fn() {
+            const app = window.__starlightApp;
+            assert(Boolean(app), 'GameApp mounted');
+
+            // 1. assessEncounterReadiness tiers, needsHeal, counters & getPartyReadinessLevel
+            const healthyLv15 = { team: [createPokemon(7, 15), createPokemon(25, 15), createPokemon(1, 15)] };
+            assertEqual(getPartyReadinessLevel(healthyLv15), 15, 'getPartyReadinessLevel averages healthy top-3');
+            assertEqual(getPartyReadinessLevel({ team: [] }), 5, 'empty team readiness defaults to 5');
+
+            const rFav = pokemonAssessEncounterReadiness(healthyLv15, { kind: 'biome', targetLevel: 10, enemyTypes: ['fire'] });
+            const rBal = pokemonAssessEncounterReadiness(healthyLv15, { kind: 'shrine', targetLevel: 16, enemyTypes: ['fire'] });
+            const rChg = pokemonAssessEncounterReadiness(healthyLv15, { kind: 'rival', targetLevel: 19, enemyTypes: ['fire'], enemyCount: 3 });
+            const rDng = pokemonAssessEncounterReadiness(healthyLv15, { kind: 'shrine', targetLevel: 24, enemyTypes: ['fire'] });
+            assertEqual(rFav.tier, 'favored', 'delta -5 -> favored');
+            assertEqual(rFav.badgeText, '✅ Favored', 'favored badgeText');
+            assertEqual(rBal.tier, 'balanced', 'delta +1 -> balanced');
+            assertEqual(rBal.badgeText, '⚖️ Even Match', 'balanced badgeText');
+            assertEqual(rChg.tier, 'challenging', 'delta +4 -> challenging');
+            assertEqual(rChg.badgeText, '⚠️ Tough', 'challenging badgeText');
+            assertEqual(rDng.tier, 'danger', 'delta +9 -> danger');
+            assertEqual(rDng.badgeText, '🚨 Risky', 'danger badgeText');
+            assertEqual(rFav.hasTypeAdvantage, true, 'Water party has type advantage vs Fire');
+            assert(rDng.suggestedCounterTypes.length >= 1 && rDng.suggestedCounterTypes.length <= 2, 'suggests 1..2 counter types');
+            assert(typeof rDng.tip === 'string' && rDng.tip.length > 10, 'danger returns helpful tactical tip');
+
+            const hurtMon = createPokemon(1, 15);
+            hurtMon.hp = Math.max(1, Math.floor(hurtMon.maxHp * 0.3));
+            const rHurt = assessEncounterReadiness({ team: [hurtMon] }, { kind: 'shrine', targetLevel: 15, enemyTypes: ['fire'], typeChart: TYPE_CHART });
+            assertEqual(rHurt.needsHeal, true, 'low HP triggers needsHeal');
+            assertEqual(rHurt.tier, 'challenging', 'needsHeal escalates balanced -> challenging');
+            assert(rHurt.tip.toLowerCase().includes('heal'), 'low HP tip advises healing');
+
+            // 2. Live DOM UX: #encounter-briefing-modal, #interact-pill, #biome-banner, Pokédex Guide 17 pills & Overworld Grace
+            const snap = snapshotAppForTest(app);
+            const origRand = Math.random;
+            try {
+              window.localStorage.removeItem(STORAGE_KEY);
+              storage.state = storage.load();
+              app.selectTrainer('violet');
+              storage.chooseStarter(1); // Bulbasaur Lv.5
+              app.enterOverworld(false);
+              app.closeDialogue();
+
+              const profile = storage.getActiveProfile();
+              const modalEl = document.getElementById('encounter-briefing-modal');
+              const pillEl = document.getElementById('briefing-readiness-pill');
+              const pivotBtn = document.getElementById('briefing-pivot-btn');
+              const firstShrineEntry = Object.entries(SHRINES)[0];
+              const highShrineEntry = Object.entries(SHRINES).find(([, s]) => s.level >= 25) || Object.entries(SHRINES).at(-1);
+              const firstRivalEntry = Object.entries(RIVAL_TRAINERS)[0];
+
+              // 2a. handleWorldInteract(shrine) opens briefing modal (no ambush!) + Escape closes
+              app.handleWorldInteract({ type: 'shrine', key: firstShrineEntry[0], data: firstShrineEntry[1] });
+              assertEqual(app.encounterBriefingOpen, true, 'shrine interact opens #encounter-briefing-modal');
+              assertEqual(modalEl.hidden, false, '#encounter-briefing-modal visible');
+              assertEqual(app.battle.active, false, 'shrine briefing prevents immediate battle ambush');
+              assertEqual(app.overworld.paused, true, 'briefing modal pauses overworld');
+              assertEqual(app.isCompassHidden(), true, 'briefing modal hides compass');
+              assert(Boolean(pillEl?.dataset?.tier), '#briefing-readiness-pill sets data-tier');
+              assert(Boolean(document.getElementById('briefing-tip')?.textContent?.trim()), '#briefing-tip populated');
+
+              app.input.lastEmitTime.cancel = 0;
+              window.dispatchEvent(new KeyboardEvent('keydown', { code: 'Escape', key: 'Escape', bubbles: true }));
+              assertEqual(app.encounterBriefingOpen, false, 'Escape closes #encounter-briefing-modal');
+              assertEqual(modalEl.hidden, true, '#encounter-briefing-modal hidden after Escape');
+              assertEqual(app.overworld.paused, false, 'overworld unpauses after Escape');
+
+              // 2b. handleWorldInteract(rival) opens briefing modal with party roster + backdrop click closes
+              app.handleWorldInteract({ type: 'rival', key: firstRivalEntry[0], data: firstRivalEntry[1] });
+              assertEqual(app.encounterBriefingOpen, true, 'rival interact opens #encounter-briefing-modal');
+              assert(
+                (document.getElementById('briefing-opponent-meta')?.textContent || '').includes('Pokémon'),
+                'rival briefing renders Pokémon count & roster',
+              );
+              modalEl.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+              assertEqual(app.encounterBriefingOpen, false, 'backdrop click closes #encounter-briefing-modal');
+
+              // 2c. Enter confirms briefing and launches encounter transition
+              app.handleWorldInteract({ type: 'shrine', key: firstShrineEntry[0], data: firstShrineEntry[1] });
+              assertEqual(app.encounterBriefingOpen, true, 'shrine briefing reopened for Enter test');
+              app.input.lastEmitTime.action = 0;
+              window.dispatchEvent(new KeyboardEvent('keydown', { code: 'Enter', key: 'Enter', bubbles: true }));
+              assertEqual(app.encounterBriefingOpen, false, 'Enter closes briefing modal');
+              assertEqual(app.encounterTransitioning || app.battle.active, true, 'Enter launches shrine encounter');
+              app.cancelEncounterTransition();
+              if (app.battle.active) app.battle.stop({ outcome: 'escaped', faintedAll: false });
+              app.syncControlVisibility();
+              app.syncOverworldPause();
+
+              // 2d. Context-aware pivot button: Farm Zone when healthy & danger; Safe Zone when low HP; hidden when balanced & healthy
+              profile.team[0].healFull();
+              app.openEncounterBriefing({ type: 'shrine', key: highShrineEntry[0], data: highShrineEntry[1] });
+              assertEqual(pillEl.dataset.tier, 'danger', 'Lv.5 vs high-level Shrine flags danger');
+              assertEqual(pivotBtn.hidden, false, 'pivot button visible on danger');
+              assertEqual(pivotBtn.dataset.pivotAction, 'farm', 'healthy danger pivot offers Farm Zone');
+              const farmPivotP = app.triggerBriefingPivot();
+              assertEqual(app.encounterBriefingOpen, false, 'Farm pivot closes briefing');
+              assertEqual(app.warpTransitioning, true, 'Farm pivot starts warp transition');
+              assertEqual(app.warpTransitionEl?.dataset?.mode, 'farm', 'Farm pivot triggers farm warp mode');
+              app.cancelWarpTransition();
+              await farmPivotP;
+
+              profile.team[0].hp = 2; // low HP -> needsHeal
+              app.openEncounterBriefing({ type: 'shrine', key: firstShrineEntry[0], data: firstShrineEntry[1] });
+              assertEqual(pivotBtn.hidden, false, 'pivot button visible when needsHeal');
+              assertEqual(pivotBtn.dataset.pivotAction, 'safe', 'low-HP pivot offers Safe Zone');
+              const safePivotP = app.triggerBriefingPivot();
+              assertEqual(app.encounterBriefingOpen, false, 'Safe pivot closes briefing');
+              assertEqual(app.warpTransitioning, true, 'Safe pivot starts warp transition');
+              assertEqual(app.warpTransitionEl?.dataset?.mode, 'safe', 'Safe pivot triggers safe warp mode');
+              app.cancelWarpTransition();
+              await safePivotP;
+
+              profile.team[0].healFull();
+              app.openEncounterBriefing({ type: 'shrine', key: firstShrineEntry[0], data: firstShrineEntry[1] });
+              assertEqual(pivotBtn.hidden, true, 'pivot button hidden when healthy & balanced');
+              app.closeEncounterBriefing({ silent: true });
+
+              // 2e. Direct startShrineEncounter / startRivalEncounter bypasses briefing modal
+              const directShrineP = app.startShrineEncounter(firstShrineEntry[1]);
+              assertEqual(app.encounterBriefingOpen, false, 'direct startShrineEncounter bypasses briefing modal');
+              assertEqual(app.encounterTransitioning || app.battle.active, true, 'direct startShrineEncounter launches directly');
+              app.cancelEncounterTransition();
+              await directShrineP;
+              if (app.battle.active) app.battle.stop({ outcome: 'escaped', faintedAll: false });
+
+              const directRivalP = app.startRivalEncounter(firstRivalEntry[1]);
+              assertEqual(app.encounterBriefingOpen, false, 'direct startRivalEncounter bypasses briefing modal');
+              assertEqual(app.encounterTransitioning || app.battle.active, true, 'direct startRivalEncounter launches directly');
+              app.cancelEncounterTransition();
+              await directRivalP;
+              if (app.battle.active) app.battle.stop({ outcome: 'escaped', faintedAll: false });
+              app.syncControlVisibility();
+              app.syncOverworldPause();
+
+              // 2f. #interact-pill level + readiness & #biome-banner tough/risky cue
+              app.handleInteractHint({ type: 'shrine', key: highShrineEntry[0], data: highShrineEntry[1] });
+              assertEqual(app.interactPillEl.hidden, false, '#interact-pill shown for shrine');
+              assert(app.interactPillEl.textContent.includes('Lv.'), '#interact-pill includes scaled level');
+              assertEqual(app.interactPillEl.dataset.readiness, 'danger', '#interact-pill sets dataset.readiness');
+              app.handleInteractHint(null);
+
+              app.handleBiomeChange(BIOMES.crater, true);
+              assertEqual(app.biomeBannerEl.dataset.readiness, 'danger', '#biome-banner flags danger on Crater for Lv.5 team');
+              assert(app.biomeBannerEl.textContent.includes('Risky'), '#biome-banner text includes Risky cue');
+
+              // 2g. Pokédex Island Guide renders all 17 wild biome readiness pills
+              app.openPokedex('guide');
+              const guidePills = [...document.querySelectorAll('#pokedex-body .biome-readiness-pill')];
+              assertEqual(guidePills.length, 17, 'Pokédex Guide renders 17 readiness pills (all wild biomes)');
+              assert(
+                guidePills.every((el) => ['favored', 'balanced', 'challenging', 'danger'].includes(el.dataset.tier)),
+                'all 17 Guide readiness pills carry valid data-tier',
+              );
+              app.pokedex.close();
+
+              // 3. Overworld grantEncounterGrace suppression, discovery node passthrough & readiness aura tier helper
+              const ow = app.overworld;
+              ow.encounterGraceSteps = 0;
+              assertEqual(ow.grantEncounterGrace(5), 5, 'grantEncounterGrace(5) sets 5');
+              assertEqual(ow.grantEncounterGrace(2), 5, 'grantEncounterGrace never shortens active grace');
+              assertEqual(ow.grantEncounterGrace(NaN), 5, 'grantEncounterGrace ignores NaN');
+
+              // Find a clean walkable tall-grass tile with no interactive object
+              let grassTile = null;
+              for (let y = 1; y < WORLD_ROWS - 1 && !grassTile; y++) {
+                for (let x = 1; x < WORLD_COLS - 1 && !grassTile; x++) {
+                  if (WORLD_MAP[y][x] === TILE.TALL_GRASS && isTileWalkableAt(x, y) && !ow.getInteractiveAtTile(x, y)) {
+                    grassTile = { x, y };
+                  }
+                }
+              }
+              assert(Boolean(grassTile), 'found clean tall-grass tile for grace test');
+
+              ow.encounterGraceSteps = 0;
+              ow.warpToPosition(grassTile.x, grassTile.y, 'down', { announceBiome: false });
+              assertEqual(
+                ow.encounterGraceSteps,
+                BALANCE.overworld.postWarpGraceSteps,
+                'warpToPosition automatically grants postWarpGraceSteps (3)',
+              );
+
+              const origOnWild = ow.onWildEncounter;
+              const origOnNode = ow.onDiscoveryNode;
+              let wildTriggers = 0;
+              let nodeTriggers = 0;
+              ow.onWildEncounter = () => { wildTriggers += 1; };
+              ow.onDiscoveryNode = () => { nodeTriggers += 1; };
+              try {
+                Math.random = () => 0.0; // would always trigger wild if grace were not active
+                ow.rarePatches = [];
+                ow.stepsSinceBattle = BALANCE.overworld.minStepsBetweenWilds;
+                ow.handleTileArrival(grassTile.x, grassTile.y); // grace 3 -> 2
+                ow.stepsSinceBattle = BALANCE.overworld.minStepsBetweenWilds;
+                ow.handleTileArrival(grassTile.x, grassTile.y); // grace 2 -> 1
+                assertEqual(wildTriggers, 0, 'random wild encounters suppressed during grace steps');
+                assertEqual(ow.encounterGraceSteps, 1, 'encounterGraceSteps decremented cleanly (3 -> 1)');
+
+                // Intentional starfall discovery node still triggers during grace
+                ow.rarePatches = [{ x: grassTile.x, y: grassTile.y, kind: 'starfall' }];
+                ow.handleTileArrival(grassTile.x, grassTile.y); // grace 1 -> 0, triggers starfall
+                assertEqual(nodeTriggers, 1, 'discovery node passes through during encounter grace');
+                assertEqual(ow.encounterGraceSteps, 0, 'encounterGraceSteps reached 0');
+
+                // Post-grace step triggers wild encounter normally
+                ow.stepsSinceBattle = BALANCE.overworld.minStepsBetweenWilds;
+                ow.handleTileArrival(grassTile.x, grassTile.y);
+                assertEqual(wildTriggers, 1, 'wild encounter resumes cleanly once grace expires');
+              } finally {
+                Math.random = origRand;
+                ow.onWildEncounter = origOnWild;
+                ow.onDiscoveryNode = origOnNode;
+              }
+
+              // Post-escape battle end grants postEscapeGraceSteps
+              ow.encounterGraceSteps = 0;
+              app.handleBattleEnd({ outcome: 'escaped', faintedAll: false });
+              assertEqual(
+                ow.encounterGraceSteps,
+                BALANCE.overworld.postEscapeGraceSteps,
+                'handleBattleEnd(escaped) grants postEscapeGraceSteps (3)',
+              );
+
+              // Overworld Shrine & Rival readiness aura tier helper
+              assertEqual(ow.getShrineReadinessTier(highShrineEntry[1], profile), 'danger', 'overworld aura classifies high Shrine as danger');
+              assert(
+                ['favored', 'balanced', 'challenging', 'danger'].includes(ow.getRivalReadinessTier(firstRivalEntry[1], profile)),
+                'overworld aura classifies Rival with valid readiness tier',
+              );
+
+              // 4. Repository architecture & balance docs presence + accuracy check
+              const [agentsRes, archRes, balRes, readmeRes] = await Promise.all([
+                fetch('./AGENTS.md'),
+                fetch('./ARCHITECTURE.md'),
+                fetch('./docs/BALANCE.md'),
+                fetch('./README.md'),
+              ]);
+              assertEqual(agentsRes.ok, true, 'AGENTS.md exists and serves HTTP 200');
+              assertEqual(archRes.ok, true, 'ARCHITECTURE.md exists and serves HTTP 200');
+              assertEqual(balRes.ok, true, 'docs/BALANCE.md exists and serves HTTP 200');
+              assertEqual(readmeRes.ok, true, 'README.md exists and serves HTTP 200');
+              const [agentsText, archText, balText, readmeText] = await Promise.all([
+                agentsRes.text(),
+                archRes.text(),
+                balRes.text(),
+                readmeRes.text(),
+              ]);
+              assert(agentsText.includes('js/balance.js') && agentsText.includes('starlight-shell-v11'), 'AGENTS.md documents js/balance.js & starlight-shell-v11');
+              assert(archText.includes('js/balance.js') && archText.includes('flowchart TD'), 'ARCHITECTURE.md documents js/balance.js & Mermaid DAG');
+              assert(balText.includes('damageDivisor') && balText.includes('applyComposureGuardrail'), 'docs/BALANCE.md documents balance dials & composure');
+              assert(readmeText.includes('starlight-shell-v11') && readmeText.includes('AGENTS.md') && readmeText.includes('ARCHITECTURE.md') && readmeText.includes('docs/BALANCE.md'), 'README.md preserves starlight-shell-v11 & links all 3 docs');
+            } finally {
+              Math.random = origRand;
               restoreAppFromSnapshot(app, snap);
             }
           },
