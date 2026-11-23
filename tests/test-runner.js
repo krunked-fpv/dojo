@@ -12767,6 +12767,131 @@ function buildTestSuites() {
         },
       ],
     },
+    {
+      name: '50. Round 1 100-Playtester Bug Smash & Defeat-Reset Regressions',
+      tests: [
+        {
+          name: 'openSettings() blocked mid-battle (HUD disabled/aria-disabled, #hud-btn-mute enabled, blur & clean restore), out-of-battle Settings closes Pokédex, handleBattleEnd/openDialogue never masked by modals, and performHoldReset() stops active battles synchronously',
+          async fn() {
+            const app = window.__starlightApp;
+            assert(Boolean(app), 'GameApp mounted');
+            const snap = snapshotAppForTest(app);
+
+            try {
+              window.localStorage.removeItem(STORAGE_KEY);
+              storage.state = storage.load();
+              app.selectTrainer('violet');
+              storage.chooseStarter(1);
+              app.enterOverworld(false);
+              app.closeDialogue();
+              storage.updateSettings({ battlePace: 'fast' });
+
+              // (b) Out-of-battle openSettings() still closes open Pokédex
+              app.openPokedex('dex');
+              assertEqual(app.pokedex.isOpen(), true, 'Pokédex opens out of battle');
+              app.openSettings();
+              assertEqual(app.isSettingsOpen(), true, 'openSettings() opens Settings out of battle');
+              assertEqual(app.pokedex.isOpen(), false, 'openSettings() out of battle closes open Pokédex');
+              app.closeSettings();
+              assertEqual(app.isSettingsOpen(), false, 'closeSettings() closes Settings cleanly');
+
+              // (a) Mid-battle openSettings() blocked + HUD settings button disabled + mute remains enabled + focus blurred
+              app.hudSettingsBtn?.focus?.();
+              const wildEnemy = createPokemon(16, 4);
+              app.battle.start({ enemy: wildEnemy, biomeId: 'forest' });
+              app.syncControlVisibility();
+              app.syncOverworldPause();
+
+              assertEqual(app.battle.active, true, 'Battle active during mid-battle Settings guard check');
+              assertEqual(document.body.classList.contains('in-battle'), true, 'body.in-battle set during battle');
+              assertEqual(app.hudSettingsBtn?.disabled, true, '#hud-btn-settings disabled during active battle');
+              assertEqual(
+                app.hudSettingsBtn?.getAttribute('aria-disabled'),
+                'true',
+                '#hud-btn-settings aria-disabled="true" during active battle',
+              );
+              assertEqual(app.hudMuteBtn?.disabled, false, '#hud-btn-mute stays enabled during active battle');
+              assert(
+                document.activeElement !== app.hudSettingsBtn,
+                '#hud-btn-settings blurred when entering battle',
+              );
+
+              app.openSettings();
+              assertEqual(app.isSettingsOpen(), false, 'openSettings() blocked during active battle');
+
+              app.battle.stop({ outcome: 'escaped', faintedAll: false });
+              assertEqual(app.battle.active, false, 'Battle stopped cleanly');
+              assertEqual(document.body.classList.contains('in-battle'), false, 'body.in-battle cleared after battle');
+              assertEqual(app.hudSettingsBtn?.disabled, false, '#hud-btn-settings re-enabled after battle stops');
+              assertEqual(
+                app.hudSettingsBtn?.hasAttribute('aria-disabled'),
+                false,
+                '#hud-btn-settings aria-disabled removed after battle stops',
+              );
+
+              // (c) handleBattleEnd({ faintedAll: true }) and openDialogue() close open overlays so #world-dialogue is never masked
+              if (app.settingsModalEl) app.settingsModalEl.hidden = false;
+              app.pokedex?.open?.('dex');
+              app.encounterBriefingOpen = true;
+              if (app.briefingModalEl) app.briefingModalEl.hidden = false;
+              app.syncControlVisibility();
+              app.handleBattleEnd({ outcome: 'fainted', faintedAll: true });
+
+              assertEqual(app.isSettingsOpen(), false, 'handleBattleEnd({ faintedAll: true }) closes Settings modal');
+              assertEqual(app.pokedex?.isOpen(), false, 'handleBattleEnd({ faintedAll: true }) closes Pokédex modal');
+              assertEqual(app.encounterBriefingOpen, false, 'handleBattleEnd({ faintedAll: true }) closes Encounter Briefing');
+              assertEqual(app.dialogueOpen, true, 'Professor Willow rescue dialogue opens cleanly');
+              assertEqual(app.worldDialogueEl?.hidden, false, '#world-dialogue visible after faintedAll reset');
+              const rescuedPos = storage.getActiveProfile()?.pos;
+              assertEqual(rescuedPos?.x, GAME_META.spawn.x, 'faintedAll resets X to spawn (8)');
+              assertEqual(rescuedPos?.y, GAME_META.spawn.y, 'faintedAll resets Y to spawn (15)');
+              app.closeDialogue();
+
+              if (app.settingsModalEl) app.settingsModalEl.hidden = false;
+              app.pokedex?.open?.('team');
+              app.openDialogue('Direct openDialogue overlay cleanup check');
+              assertEqual(app.isSettingsOpen(), false, 'openDialogue() closes open Settings modal');
+              assertEqual(app.pokedex?.isOpen(), false, 'openDialogue() closes open Pokédex modal');
+              assertEqual(app.dialogueOpen, true, 'openDialogue() opens dialogue unmasked');
+              app.closeDialogue();
+
+              // (d) performHoldReset() synchronously stops active battles and transitions before running reset callback
+              const resetEvents = [];
+              const enemy2 = createPokemon(19, 4);
+              app.battle.start({ enemy: enemy2, biomeId: 'forest' });
+              app.syncControlVisibility();
+              app.encounterTransitioning = true;
+              app.warpTransitioning = true;
+              app.encounterBriefingOpen = true;
+              if (app.briefingModalEl) app.briefingModalEl.hidden = false;
+              if (app.settingsModalEl) app.settingsModalEl.hidden = false;
+
+              app.performHoldReset(() => {
+                resetEvents.push({
+                  battleActive: app.battle.active,
+                  encounterTransitioning: app.encounterTransitioning,
+                  warpTransitioning: app.warpTransitioning,
+                  briefingOpen: app.encounterBriefingOpen,
+                });
+                storage.resetTrainerProgress('violet');
+              }, 'Reset verified!');
+
+              assertEqual(resetEvents.length, 1, 'performHoldReset invoked resetAction synchronously');
+              assertEqual(resetEvents[0].battleActive, false, 'active battle stopped BEFORE resetAction runs');
+              assertEqual(resetEvents[0].encounterTransitioning, false, 'encounterTransitioning cleared BEFORE resetAction');
+              assertEqual(resetEvents[0].warpTransitioning, false, 'warpTransitioning cleared BEFORE resetAction');
+              assertEqual(resetEvents[0].briefingOpen, false, 'encounterBriefingOpen cleared BEFORE resetAction');
+            } finally {
+              if (app.resetRedirectTimer) {
+                clearTimeout(app.resetRedirectTimer);
+                app.resetRedirectTimer = null;
+              }
+              restoreAppFromSnapshot(app, snap);
+            }
+          },
+        },
+      ],
+    },
   ];
 }
 

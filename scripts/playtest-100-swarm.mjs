@@ -414,7 +414,7 @@ function parseCliArgs(argv) {
     seedsSpec: null,
     cohortSpec: null,
     outFile: null,
-    timeoutMs: 240000,
+    timeoutMs: 300000,
     headful: false,
   };
   for (const arg of argv) {
@@ -427,7 +427,7 @@ function parseCliArgs(argv) {
     } else if (arg.startsWith('--out=')) {
       opts.outFile = arg.slice('--out='.length);
     } else if (arg.startsWith('--timeout-ms=')) {
-      opts.timeoutMs = Math.max(30000, Number(arg.split('=')[1]) || 240000);
+      opts.timeoutMs = Math.max(30000, Number(arg.split('=')[1]) || 300000);
     } else if (arg === '--headful') {
       opts.headful = true;
     }
@@ -1149,6 +1149,9 @@ async function clickWorldTile(page, tx, ty) {
     if (clientX < rect.left + 8 || clientX > rect.right - 8 || clientY < Math.max(rect.top + 8, hudBottom + 8) || clientY > rect.bottom - 52) {
       return null;
     }
+    if (document.elementFromPoint(clientX, clientY) !== canvas) {
+      return null;
+    }
     return { clientX, clientY };
   }, { x: tx, y: ty });
 
@@ -1685,7 +1688,7 @@ async function triggerWildEncounterAtGrass(page, gx, gy, { maxSteps = 36 } = {})
     await page.evaluate(({ x, y }) => {
       window.__starlightApp?.overworld?.walkToTile?.(x, y);
     }, { x: targetX, y: gy });
-    await page.waitForTimeout(280);
+    await page.waitForTimeout(160);
   }
   return Boolean((await getGameState(page)).battle.active);
 }
@@ -1712,13 +1715,16 @@ async function runCohort1(page, spec, rng, telemetry, recordAnomaly) {
       rng,
       stage: 'c1-chaos-wild',
       chaosMidBattle: async () => {
-        // Test pressing Escape + clicking #hud-btn-settings mid-battle
+        // Test pressing Escape + attempting #hud-btn-settings & openSettings() mid-battle
         await page.keyboard.press('Escape').catch(() => {});
         const settingsBtn = page.locator('#hud-btn-settings');
-        if (await settingsBtn.isVisible().catch(() => false)) {
-          await settingsBtn.click({ timeout: 2000 }).catch(() => {});
+        const btnEnabled = await settingsBtn.isEnabled().catch(() => false);
+        if (btnEnabled && await settingsBtn.isVisible().catch(() => false)) {
+          await settingsBtn.click({ timeout: 1000 }).catch(() => {});
+        } else {
+          await page.evaluate(() => window.__starlightApp?.openSettings?.());
         }
-        await page.waitForTimeout(180);
+        await page.waitForTimeout(120);
         const stMid = await getGameState(page);
         if (stMid.modals.settings) {
           recordAnomaly('P1', 'Code', 'SETTINGS_ALLOWED_MID_BATTLE', 'Settings modal opened while battle is active without battle guard', { stage: 'c1-chaos-wild' });
@@ -1756,24 +1762,26 @@ async function runCohort1(page, spec, rng, telemetry, recordAnomaly) {
       await page.locator('#battle-moves .move-card:not([disabled])').last().click().catch(() => {});
       await page.waitForTimeout(150);
       const settingsBtn = page.locator('#hud-btn-settings');
-      if (await settingsBtn.isVisible().catch(() => false)) {
-        await settingsBtn.click({ timeout: 1500 }).catch(() => {});
-        await page.waitForTimeout(120);
-        if (spec.seed % 2 === 0 && (await getGameState(page)).modals.settings) {
-          for (let w = 0; w < 24; w++) {
-            await page.waitForTimeout(250);
-            const cur = await getGameState(page);
-            if (!cur.battle.active) {
-              if (cur.modals.settings && cur.modals.dialogue) {
-                recordAnomaly('P1', 'Visual/HUD', 'SETTINGS_MASKS_RESCUE_DIALOGUE', 'Settings modal stayed open over Professor Willow rescue dialogue after battle faintedAll', { stage: 'c1-pre-faint-settings' });
-              }
-              break;
+      if ((await settingsBtn.isEnabled().catch(() => false)) && (await settingsBtn.isVisible().catch(() => false))) {
+        await settingsBtn.click({ timeout: 1000 }).catch(() => {});
+      } else {
+        await page.evaluate(() => window.__starlightApp?.openSettings?.());
+      }
+      await page.waitForTimeout(120);
+      if (spec.seed % 2 === 0 && (await getGameState(page)).modals.settings) {
+        for (let w = 0; w < 24; w++) {
+          await page.waitForTimeout(250);
+          const cur = await getGameState(page);
+          if (!cur.battle.active) {
+            if (cur.modals.settings && cur.modals.dialogue) {
+              recordAnomaly('P1', 'Visual/HUD', 'SETTINGS_MASKS_RESCUE_DIALOGUE', 'Settings modal stayed open over Professor Willow rescue dialogue after battle faintedAll', { stage: 'c1-pre-faint-settings' });
             }
+            break;
           }
         }
-        if ((await getGameState(page)).modals.settings) {
-          await page.click('#settings-close-btn', { force: true }).catch(() => {});
-        }
+      }
+      if ((await getGameState(page)).modals.settings) {
+        await page.click('#settings-close-btn', { force: true }).catch(() => {});
       }
     },
   });
