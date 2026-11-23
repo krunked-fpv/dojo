@@ -2675,7 +2675,11 @@ class GameApp {
         justUnlocked: false,
       };
       if (!knockRes.attuned) {
-        this.openDialogue('🔍 A faint star-shaped seam is etched into the cottage wall... Tiny runes whisper: "Earn 1 Island Badge or register 5 Pokédex species to attune your Starlight, then return and knock three times!"');
+        const badgeCount = Array.isArray(profile.badges) ? profile.badges.length : 0;
+        const dexCount = countCaughtSpecies(profile);
+        this.openDialogue(
+          `🔍 A faint star-shaped seam is etched into the cottage wall... Tiny runes whisper: "Earn 1 Island Badge (${Math.min(1, badgeCount)}/1) or register 5 Pokédex species (${Math.min(5, dexCount)}/5) to attune your Starlight, then return and knock three times!"`,
+        );
       } else if (knockRes.unlocked || knockRes.justUnlocked) {
         this.overworld?.triggerCelebrationBurst?.(tx, ty, 'arcade');
         this.overworld?.refreshInteractHint?.();
