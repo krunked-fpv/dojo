@@ -382,6 +382,18 @@ class GameApp {
       document.body.classList.toggle('in-minigame', Boolean(this.minigame?.isOpen()));
     }
 
+    if (this.hudSettingsBtn) {
+      this.hudSettingsBtn.disabled = inBattle;
+      if (inBattle) {
+        this.hudSettingsBtn.setAttribute('aria-disabled', 'true');
+        if (typeof document !== 'undefined' && document.activeElement === this.hudSettingsBtn) {
+          this.hudSettingsBtn.blur();
+        }
+      } else {
+        this.hudSettingsBtn.removeAttribute('aria-disabled');
+      }
+    }
+
     if (becameInBattle || becameModalOpen) {
       this.input.clearAll();
       this.overworld?.clearTouchNavigation?.();
@@ -681,42 +693,44 @@ class GameApp {
 
     this.bindHoldReset(this.resetTrainerBtn, this.resetTrainerFill, () => {
       const id = storage.getActiveTrainerId();
-      this.cancelWarpTransition();
-      this.closeEncounterBriefing({ silent: true });
-      this.minigame?.close?.();
-      storage.resetTrainerProgress(id);
-      if (this.hudArcadeBtn) {
-        this.hudArcadeBtn.hidden = true;
-        this.hudArcadeBtn.removeAttribute('data-charges');
-        this.hudArcadeBtn.classList.remove('is-depleted');
-      }
-      this.resetStatusEl.textContent = `${TRAINERS[id]?.name || 'Trainer'}'s progress was reset cleanly!`;
-      if (this.resetRedirectTimer) clearTimeout(this.resetRedirectTimer);
-      this.resetRedirectTimer = setTimeout(() => {
-        this.resetRedirectTimer = null;
-        this.closeSettings();
-        this.showBootScreen();
-      }, 450);
+      this.performHoldReset(
+        () => storage.resetTrainerProgress(id),
+        `${TRAINERS[id]?.name || 'Trainer'}'s progress was reset cleanly!`,
+      );
     });
 
     this.bindHoldReset(this.resetAllBtn, this.resetAllFill, () => {
-      this.cancelWarpTransition();
-      this.closeEncounterBriefing({ silent: true });
-      this.minigame?.close?.();
-      storage.resetAllProgress();
-      if (this.hudArcadeBtn) {
-        this.hudArcadeBtn.hidden = true;
-        this.hudArcadeBtn.removeAttribute('data-charges');
-        this.hudArcadeBtn.classList.remove('is-depleted');
-      }
-      this.resetStatusEl.textContent = 'Both Violet and Ozias profiles were reset cleanly!';
-      if (this.resetRedirectTimer) clearTimeout(this.resetRedirectTimer);
-      this.resetRedirectTimer = setTimeout(() => {
-        this.resetRedirectTimer = null;
-        this.closeSettings();
-        this.showBootScreen();
-      }, 450);
+      this.performHoldReset(
+        () => storage.resetAllProgress(),
+        'Both Violet and Ozias profiles were reset cleanly!',
+      );
     });
+  }
+
+  performHoldReset(resetAction, statusMessage) {
+    this.cancelEncounterTransition?.();
+    this.cancelWarpTransition();
+    this.closeEncounterBriefing({ silent: true });
+    if (this.battle?.active) {
+      this.battle.stop({ outcome: 'escaped', faintedAll: false });
+    }
+    this.pokedex?.close?.();
+    this.minigame?.close?.();
+    resetAction();
+    if (this.hudArcadeBtn) {
+      this.hudArcadeBtn.hidden = true;
+      this.hudArcadeBtn.removeAttribute('data-charges');
+      this.hudArcadeBtn.classList.remove('is-depleted');
+    }
+    if (this.resetStatusEl) {
+      this.resetStatusEl.textContent = statusMessage;
+    }
+    if (this.resetRedirectTimer) clearTimeout(this.resetRedirectTimer);
+    this.resetRedirectTimer = setTimeout(() => {
+      this.resetRedirectTimer = null;
+      this.closeSettings();
+      this.showBootScreen();
+    }, 450);
   }
 
   bindHoldReset(btnEl, fillEl, onConfirmed) {
@@ -1860,6 +1874,15 @@ class GameApp {
   }
 
   openDialogue(message) {
+    if (this.isSettingsOpen()) {
+      this.closeSettings();
+    }
+    if (this.pokedex?.isOpen()) {
+      this.pokedex.close();
+    }
+    if (this.encounterBriefingOpen) {
+      this.closeEncounterBriefing({ silent: true });
+    }
     const profile = storage.getActiveProfile();
     const trainerName = TRAINERS[profile?.trainerId]?.name || 'Trainer';
     const text = message.replaceAll('{trainer}', trainerName);
@@ -2991,6 +3014,16 @@ class GameApp {
     this._preBattleShrineTrialCount = null;
     let pendingDialogue = null;
 
+    if (this.isSettingsOpen()) {
+      this.closeSettings();
+    }
+    if (this.pokedex?.isOpen()) {
+      this.pokedex.close();
+    }
+    if (this.encounterBriefingOpen) {
+      this.closeEncounterBriefing({ silent: true });
+    }
+
     if (result?.faintedAll) {
       storage.updatePosition(GAME_META.spawn.x, GAME_META.spawn.y, 'down', false);
       storage.healTeam(true);
@@ -3168,6 +3201,7 @@ class GameApp {
       !this.bootScreenEl?.hidden ||
       !this.starterScreenEl?.hidden ||
       this.gameShellEl?.hidden ||
+      this.battle?.active ||
       this.encounterTransitioning ||
       this.warpTransitioning ||
       this.minigame?.isOpen()

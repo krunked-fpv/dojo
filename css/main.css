@@ -865,8 +865,8 @@ button {
   border-color: rgba(148, 163, 184, 0.6);
 }
 
-.hud-pill:hover,
-.hud-icon-btn:hover {
+.hud-pill:hover:not(:disabled),
+.hud-icon-btn:hover:not(:disabled) {
   border-color: var(--trainer-accent);
 }
 
@@ -876,9 +876,22 @@ button {
   box-shadow: 0 0 12px var(--trainer-accent-soft), 0 2px 0 #090d1a;
 }
 
-.hud-pill:active,
-.hud-icon-btn:active {
+.hud-pill:active:not(:disabled),
+.hud-icon-btn:active:not(:disabled) {
   transform: translateY(1px);
+}
+
+.hud-icon-btn:disabled,
+body.in-battle #hud-btn-settings {
+  opacity: 0.45;
+  cursor: not-allowed;
+  filter: grayscale(0.35);
+}
+
+body.in-battle #hud-btn-settings:hover,
+body.in-battle #hud-btn-settings:active {
+  border-color: rgba(255, 255, 255, 0.2);
+  transform: none;
 }
 
 .hud-pill.has-evo-ready {
