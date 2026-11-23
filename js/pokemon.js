@@ -1460,15 +1460,45 @@ export function rollWildPokemon(biomeId, avgTeamLevelOrProfile = 5, options = {}
   const badgesCount = Array.isArray(profile?.badges) ? profile.badges.length : 0;
   const isRarePatch = Boolean(options?.isRarePatch);
   const disableAntiRepeat = options?.disableAntiRepeat === true;
+  const rawDepth = options?.depthTier;
+  const depthTier = (
+    rawDepth !== null
+    && rawDepth !== undefined
+    && rawDepth !== ''
+    && typeof rawDepth !== 'boolean'
+    && Number.isFinite(Number(rawDepth))
+  )
+    ? Math.max(0, Math.min(2, Math.floor(Number(rawDepth))))
+    : 0;
+  const isNoviceOutskirts = depthTier === 0 && badgesCount === 0;
+  const toughCutoff = BALANCE.scaling.noviceOutskirtsCatchFactorCutoff;
+  const toughWeightMult = BALANCE.scaling.noviceOutskirtsToughWeightMult;
 
   const recentHistory = isProfile && Array.isArray(profile.recentEncounters)
     ? sanitizeEncounterHistory(profile.recentEncounters)
     : sanitizeEncounterHistory(recentWildEncounters);
 
-  const weightedPool = biome.encounters.map((entry) => ({
-    id: entry.id,
-    weight: isRarePatch ? Math.max(1, Math.round(1000 / Math.max(4, entry.weight))) : entry.weight,
-  }));
+  const weightedPool = biome.encounters.map((entry) => {
+    const speciesCatchFactor = Number(SPECIES[entry.id]?.catchFactor);
+    const isNoviceBruiser = isNoviceOutskirts
+      && Number.isFinite(speciesCatchFactor)
+      && speciesCatchFactor < toughCutoff;
+
+    // Skip rare-patch inverse weighting for tough bruisers in 0-badge outskirts so
+    // rare nodes stay welcoming instead of spiking low-weight heavy hitters.
+    let weight = isRarePatch && !isNoviceBruiser
+      ? Math.max(1, Math.round(1000 / Math.max(4, entry.weight)))
+      : entry.weight;
+
+    if (isNoviceBruiser) {
+      weight = Math.max(1, weight * toughWeightMult);
+    }
+
+    return {
+      id: entry.id,
+      weight,
+    };
+  });
 
   if (isProfile && profile?.shrinesCleared) {
     const clearedList = Array.isArray(profile.shrinesCleared)
@@ -1645,10 +1675,12 @@ export function rollWildPokemon(biomeId, avgTeamLevelOrProfile = 5, options = {}
 
   const maxLvCap = BALANCE.progression.maxLevel;
   let isElite = false;
+  const allowRareElite = isRarePatch && badgesCount >= BALANCE.scaling.noviceRarePatchMinBadgesForElite;
+  const allowGrassElite = badgesCount >= 2;
   if (typeof options?.forceElite === 'boolean') {
     isElite = options.forceElite;
-  } else if (isRarePatch || badgesCount >= 2) {
-    const eliteChance = isRarePatch
+  } else if (allowRareElite || allowGrassElite) {
+    const eliteChance = allowRareElite
       ? (badgesCount >= 4 ? BALANCE.scaling.wildRareEliteChanceHigh : BALANCE.scaling.wildRareEliteChanceLow)
       : Math.min(
           BALANCE.scaling.wildEliteChanceCap,
@@ -1665,16 +1697,6 @@ export function rollWildPokemon(biomeId, avgTeamLevelOrProfile = 5, options = {}
     upgradeTier = 1 + Math.floor(Math.random() * maxEliteTier);
   }
 
-  const rawDepth = options?.depthTier;
-  const depthTier = (
-    rawDepth !== null
-    && rawDepth !== undefined
-    && rawDepth !== ''
-    && typeof rawDepth !== 'boolean'
-    && Number.isFinite(Number(rawDepth))
-  )
-    ? Math.max(0, Math.min(2, Math.floor(Number(rawDepth))))
-    : 0;
   const depthBoost = depthTier === 1
     ? 1 + Math.floor(Math.random() * 2)
     : (depthTier >= 2 ? 2 + Math.floor(Math.random() * 3) : 0);

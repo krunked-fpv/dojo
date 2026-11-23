@@ -195,6 +195,12 @@ export const BALANCE = deepFreeze({
     },
     /** Maximum total stacked wild level bonus (rare + elite + depth + levelBonus) above biome `maxLv`. */
     wildMaxBonusAboveRange: 3,
+    /** CatchFactor threshold below which species count as tough outskirts bruisers for 0-badge `depthTier === 0` spawns. */
+    noviceOutskirtsCatchFactorCutoff: 0.73,
+    /** Weight multiplier applied to tough outskirts bruisers during 0-badge `depthTier === 0` spawns (clamped `>= 1`). */
+    noviceOutskirtsToughWeightMult: 0.25,
+    /** Minimum badges required before rare grass patches roll random Elite wilds (`options.forceElite` still overrides). */
+    noviceRarePatchMinBadgesForElite: 1,
     /** Base elite spawn probability in standard wild grass once badges >= 2. */
     wildEliteBaseChance: 0.06,
     /** Additional elite spawn probability per unlocked badge. */
@@ -566,6 +572,7 @@ const TIER_ORDER = ['favored', 'balanced', 'challenging', 'danger'];
 export function assessEncounterReadiness(profile, spec = {}) {
   const {
     kind = 'biome',
+    source = null,
     targetLevel: rawTargetLevel,
     minLv: rawMinLv,
     maxLv: rawMaxLv,
@@ -573,6 +580,10 @@ export function assessEncounterReadiness(profile, spec = {}) {
     enemyCount: rawEnemyCount = 1,
     typeChart = null,
   } = spec || {};
+
+  const normalizedKind = typeof kind === 'string' && kind.trim() ? kind.trim().toLowerCase() : 'biome';
+  const normalizedSource = typeof source === 'string' && source.trim() ? source.trim().toLowerCase() : null;
+  const encounterSource = normalizedSource ?? normalizedKind;
 
   const maxLvCap = BALANCE.progression.maxLevel;
   const rawTeam = Array.isArray(profile)
@@ -631,6 +642,8 @@ export function assessEncounterReadiness(profile, spec = {}) {
 
   let hasTypeAdvantage = false;
   let hasTypeRisk = false;
+  let healthyDefensiveCount = 0;
+  let weakCount = 0;
   const suggestedCounterTypes = [];
 
   if (typeChart && typeof typeChart === 'object' && enemyTypes.length > 0) {
@@ -668,9 +681,9 @@ export function assessEncounterReadiness(profile, spec = {}) {
     }
 
     if (defensiveTypes.length > 0) {
+      healthyDefensiveCount = defensiveTypes.length;
       const leadType = defensiveTypes[0];
       const leadWeak = enemyTypes.some((eType) => Number(typeChart[eType]?.[leadType]) > 1);
-      let weakCount = 0;
       for (const dType of defensiveTypes) {
         if (enemyTypes.some((eType) => Number(typeChart[eType]?.[dType]) > 1)) {
           weakCount += 1;
@@ -718,6 +731,20 @@ export function assessEncounterReadiness(profile, spec = {}) {
     tierIdx = 3;
   }
 
+  // Non-biome encounters (Shrine/Rival/Trial) escalate Even Match -> Tough when
+  // the opponent leads by >= 1 Lv, the healthy team has no type counter, and 100% of
+  // healthy defensive types are weak to the enemy so players see the Farm Zone pivot.
+  if (
+    encounterSource !== 'biome'
+    && tierIdx === 1
+    && levelDelta >= 1
+    && !hasTypeAdvantage
+    && healthyDefensiveCount > 0
+    && weakCount === healthyDefensiveCount
+  ) {
+    tierIdx = 2;
+  }
+
   if (team.length > 0 && healthyCount === 0) {
     tierIdx = 3;
   } else if (needsHeal) {
@@ -737,8 +764,8 @@ export function assessEncounterReadiness(profile, spec = {}) {
   } else if (tierKey === 'danger') {
     const gapText = levelDelta > 0 ? `+${Math.round(levelDelta)} Lv` : 'high-power';
     tip = countersLabel
-      ? `Strong ${kind === 'biome' ? 'area' : 'foe'} (${gapText})! Train nearby or bring ${countersLabel} moves.`
-      : `Strong ${kind === 'biome' ? 'area' : 'foe'} (${gapText})! Train up or stock Potions before jumping in.`;
+      ? `Strong ${encounterSource === 'biome' ? 'area' : 'foe'} (${gapText})! Train nearby or bring ${countersLabel} moves.`
+      : `Strong ${encounterSource === 'biome' ? 'area' : 'foe'} (${gapText})! Train up or stock Potions before jumping in.`;
   } else if (hasTypeRisk && countersLabel) {
     tip = `Watch your lead matchup — try leading with ${countersLabel} moves!`;
   } else if (tierKey === 'challenging') {

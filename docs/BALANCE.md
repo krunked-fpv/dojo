@@ -101,6 +101,9 @@ Opt-in full-HP opening guardrail (`options.applyComposure === true`). Only trigg
 | --- | --- | --- | --- |
 | `biomeOffsets` | `village: -2, forest: -1, cave/water/volcano/desert: 0, peak..rift: +1` | Makes scaled biomes tougher relative to Player Level | Makes scaled biomes gentler relative to Player Level |
 | `wildMaxBonusAboveRange` | `3` | Allows rare + elite + deep wilds to spike further above `maxLv` | Tightens max wild level ceiling above biome range |
+| `noviceOutskirtsCatchFactorCutoff` | `0.73` | Treats more mid-catch species as tough bruisers at `0` badges & `depthTier === 0` | Restricts novice outskirts weight scaling to fewer hard-to-catch bruisers |
+| `noviceOutskirtsToughWeightMult` | `0.25` | Increases tough bruiser frequency in `0`-badge outskirts (`depthTier === 0`, clamped `>= 1`) | Reduces tough bruisers in `0`-badge outskirts (`>= 1` clamp preserves `1025/1025` reachability) |
+| `noviceRarePatchMinBadgesForElite` | `1` | Delays random Elite rolls on rare grass patches to higher badge counts (`forceElite` still overrides) | Unlocks random rare-patch Elites earlier (`0` restores 0-badge rare Elites) |
 | `wildEliteBaseChance` | `0.06` | More frequent wild Elites once `badges >= 2` | Fewer surprise wild Elites |
 | `wildEliteBadgeStep` | `0.012` | Elite rate climbs faster with badges | Flatter elite spawn curve |
 | `wildEliteChanceCap` | `0.18` | Higher max grass Elite rate in late game | Lower late-game Elite ceiling |
@@ -134,6 +137,8 @@ Opt-in full-HP opening guardrail (`options.applyComposure === true`). Only trigg
 | `balancedMaxDelta` | `2` | Wider `⚖️ Even Match` band | Flags slight underleveling as `⚠️ Tough` sooner |
 | `challengingMaxDelta` | `5` | Wider `⚠️ Tough` band before `🚨 Risky` | Warns `🚨 Risky` earlier on level gaps |
 | `lowHpWarnRatio` | `0.65` | Flags `needsHeal` earlier when party takes light chip damage | Only warns to heal when party is heavily worn down |
+
+> **Non-Biome 100%-Healthy-Weakness Escalation (`assessEncounterReadiness`):** When evaluating a non-biome encounter (`source !== 'biome'`, falling back to `kind !== 'biome'` when `source` is omitted) whose base level tier is `balanced` (`tierIdx === 1` / `⚖️ Even Match`) with `levelDelta >= 1`, no party super-effective type advantage (`!hasTypeAdvantage`), and `100%` of healthy party defensive types weak to at least one enemy type (`defensiveTypes.length > 0 && weakCount === defensiveTypes.length`), `assessEncounterReadiness` escalates `tierIdx` from `1` to `2` (`'challenging'` / `⚠️ Tough`) before applying `healthyCount === 0 -> 3` and the `needsHeal` (`+1`) step. This preserves neutral/resistant matchups (e.g., Lv.5 Bulbasaur vs Lv.6/7 Pikachu remains `⚖️ Even Match`) while flagging mono-weak pairings (e.g., Lv.5 Squirtle vs Lv.6 Pikachu) as `⚠️ Tough` so players see the `✨ Farm Zone` pivot.
 
 ---
 
