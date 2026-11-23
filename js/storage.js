@@ -19,7 +19,7 @@ import {
   findNearestSafePosition,
   isTileWalkableAt,
 } from './config.js';
-import { Pokemon, createStarterPokemon, getBondTier } from './pokemon.js';
+import { Pokemon, createStarterPokemon, getBondTier, getPlayerProgression } from './pokemon.js';
 
 export const STORAGE_KEY = 'starlight_pokemon_save_v1';
 export const MAX_CHEER_CHARGES = 3;
@@ -260,6 +260,19 @@ export function syncProfilePokedex(profile) {
     seenCount: seen.length,
     caughtCount: nextCaughtKeys.length,
   };
+}
+
+/**
+ * Synchronize a trainer profile's persisted `trainerXp` and `playerLevel`
+ * from authoritative progression data without mutating party or box levels.
+ */
+export function syncProfilePlayerProgression(profile) {
+  const prog = getPlayerProgression(profile);
+  if (profile && typeof profile === 'object' && !Array.isArray(profile)) {
+    profile.trainerXp = prog.xp;
+    profile.playerLevel = prog.level;
+  }
+  return prog;
 }
 
 export function isSpeciesCaught(profile, speciesId) {
@@ -555,6 +568,8 @@ function createFreshProfile(trainerId) {
   return {
     trainerId,
     starterId: null,
+    trainerXp: 0,
+    playerLevel: 1,
     pos: { ...GAME_META.spawn },
     appearance: hydrateAppearance(null),
     team: [],
@@ -765,6 +780,7 @@ export function validateAndRepairProfile(raw, trainerIdFallback = null, report =
   repairProfileParty(raw);
   deduplicateTeamAndBoxUids(raw, report);
   syncProfilePokedex(raw);
+  syncProfilePlayerProgression(raw);
 
   raw.arcade = hydrateArcade(raw.arcade, { allowLegacyPlayUnlock: true });
 
@@ -1062,7 +1078,7 @@ export class StorageManager {
           cheerCharges: 0,
           gems: hydrateGems(null),
         };
-    return {
+    const out = {
       ...src,
       pos: sanitizePosition(src.pos),
       appearance: hydrateAppearance(src.appearance),
@@ -1083,6 +1099,12 @@ export class StorageManager {
       team: (Array.isArray(src.team) ? src.team : []).map((p) => (typeof p?.toJSON === 'function' ? p.toJSON() : p)),
       box: (Array.isArray(src.box) ? src.box : []).map((p) => (typeof p?.toJSON === 'function' ? p.toJSON() : p)),
     };
+    const prog = syncProfilePlayerProgression(out);
+    if (isPlainObject(profile)) {
+      profile.trainerXp = prog.xp;
+      profile.playerLevel = prog.level;
+    }
+    return out;
   }
 
   selectTrainer(trainerId) {
@@ -1090,6 +1112,7 @@ export class StorageManager {
     this.state.activeTrainerId = trainerId;
     const profile = this.getActiveProfile();
     this.syncPokedex(profile, true);
+    syncProfilePlayerProgression(profile);
     this.save();
     return profile;
   }
@@ -1107,22 +1130,33 @@ export class StorageManager {
     return this.state.profiles[this.state.activeTrainerId] || null;
   }
 
+  getPlayerProgression(profile = this.getActiveProfile()) {
+    return getPlayerProgression(profile);
+  }
+
+  getPlayerLevel(profile = this.getActiveProfile()) {
+    return this.getPlayerProgression(profile).level;
+  }
+
   getProfileSummary(trainerId) {
     const profile = this.getProfile(trainerId);
     if (!profile || !profile.starterId) {
-      return { started: false, label: 'New Adventure!', leadId: null, dexCount: 0, badgeCount: 0 };
+      return { started: false, label: 'New Adventure!', leadId: null, dexCount: 0, badgeCount: 0, playerLevel: 1 };
     }
     syncProfilePokedex(profile);
+    const prog = syncProfilePlayerProgression(profile);
+    const playerLevel = prog.level;
     const lead = profile.team[0];
     const dexCount = Object.keys(profile.pokedex.caught).length;
     const badgeCount = profile.badges.length;
     const leadLabel = lead ? `Lv.${lead.level} ${lead.displayName || lead.name}` : 'Ready';
     return {
       started: true,
-      label: `${leadLabel} • Dex ${dexCount}/${Object.keys(SPECIES).length} • ${badgeCount} Badges`,
+      label: `Trainer Lv.${playerLevel} • ${leadLabel} • Dex ${dexCount}/${Object.keys(SPECIES).length} • ${badgeCount} Badges`,
       leadId: lead ? lead.speciesId : profile.starterId,
       dexCount,
       badgeCount,
+      playerLevel,
     };
   }
 
@@ -1144,6 +1178,7 @@ export class StorageManager {
     if (!isPlainObject(profile.stats)) profile.stats = hydrateProfileStats(null);
     profile.stats.totalCaught = toNonNegInt(profile.stats.totalCaught, 0) + 1;
     syncProfilePokedex(profile);
+    syncProfilePlayerProgression(profile);
     this.evaluateBadges(false);
     this.save();
     return starter;
@@ -1343,6 +1378,7 @@ export class StorageManager {
     }
 
     syncProfilePokedex(profile);
+    syncProfilePlayerProgression(profile);
     const newBadges = this.evaluateBadges(false);
     this.save();
     return { destination, newBadges };
@@ -1843,6 +1879,24 @@ export class StorageManager {
     };
   }
 
+  /**
+   * Recall the trainer safely to Starlight Village without mutating step, cheer,
+   * arcade, party, bag, or Pokédex progress.
+   */
+  warpToSafeZone() {
+    const safePt = Config.getSafeZoneWarpPoint?.() || {
+      x: GAME_META.spawn?.x ?? 8,
+      y: GAME_META.spawn?.y ?? 15,
+      dir: GAME_META.spawn?.dir || 'down',
+    };
+    const res = this.warpToZone(safePt.x, safePt.y, safePt.dir || 'down', 'village');
+    return {
+      ...res,
+      mode: 'safe',
+      biomeId: 'village',
+    };
+  }
+
   markNpcTalked(npcId) {
     const profile = this.getActiveProfile();
     if (!profile || !npcId) return false;
@@ -1865,6 +1919,7 @@ export class StorageManager {
 
     profile.questsCompleted.push(questId);
     this.addRewards(rewards || {}, false);
+    syncProfilePlayerProgression(profile);
     const newBadges = this.evaluateBadges(false);
     this.save();
     return { completed: true, rewards, newBadges };
@@ -1889,6 +1944,7 @@ export class StorageManager {
       profile.shrinesCleared.push(shrineId);
     }
     syncProfilePokedex(profile);
+    syncProfilePlayerProgression(profile);
     if (firstClear && this.isArcadeUnlocked(profile)) {
       this.addArcadeCharges(1, false);
     }
@@ -1922,6 +1978,7 @@ export class StorageManager {
     if (this.isArcadeUnlocked(profile)) {
       this.addArcadeCharges(1, false);
     }
+    syncProfilePlayerProgression(profile);
     const newBadges = this.evaluateBadges(false);
     this.save();
     return {
@@ -1948,6 +2005,7 @@ export class StorageManager {
     if (this.isArcadeUnlocked(profile)) {
       this.addArcadeCharges(1, false);
     }
+    syncProfilePlayerProgression(profile);
     const newBadges = this.evaluateBadges(false);
     this.save();
     return { trialCount: nextCount, newBadges };
@@ -2257,6 +2315,7 @@ export class StorageManager {
         }
       }
     }
+    syncProfilePlayerProgression(profile);
     const newBadges = this.evaluateBadges(false);
     this.save();
     return newBadges;
@@ -2273,7 +2332,11 @@ export class StorageManager {
         unlockedNow.push(badge);
       }
     }
-    if (persist && unlockedNow.length > 0) this.save();
+    const prevXp = profile.trainerXp;
+    const prevLv = profile.playerLevel;
+    const prog = syncProfilePlayerProgression(profile);
+    const progChanged = prevXp !== prog.xp || prevLv !== prog.level;
+    if (persist && (unlockedNow.length > 0 || progChanged)) this.save();
     return unlockedNow;
   }
 
