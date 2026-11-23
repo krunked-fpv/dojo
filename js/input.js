@@ -55,6 +55,7 @@ export class InputController {
       cancel: [],
       pokedex: [],
       warp: [],
+      safeWarp: [],
       navigate: [],
       moveSlot: [],
     };
@@ -63,6 +64,7 @@ export class InputController {
       cancel: 0,
       pokedex: 0,
       warp: 0,
+      safeWarp: 0,
       navigate: 0,
       moveSlot: 0,
     };
@@ -164,6 +166,8 @@ export class InputController {
         this.emit('pokedex');
       } else if (e.code === 'KeyT') {
         this.emit('warp');
+      } else if (e.code === 'KeyH') {
+        this.emit('safeWarp');
       }
     });
 
