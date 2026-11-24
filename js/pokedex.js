@@ -173,6 +173,144 @@ function escapeHtml(raw) {
     .replaceAll("'", '&#39;');
 }
 
+export function normalizeTrainerNicknameSafe(raw) {
+  if (typeof Config.normalizeTrainerNickname === 'function') {
+    return Config.normalizeTrainerNickname(raw);
+  }
+  if (typeof raw !== 'string') return null;
+  const cleaned = raw
+    .replace(/\{[^}]*\}/g, '')
+    .replace(/[{}]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 18)
+    .trim();
+  return cleaned.length > 0 ? cleaned : null;
+}
+
+export function resolveTrainerDisplayNameSafe(profileOrContext = null, fallbackTrainerId = null) {
+  if (typeof Config.resolveTrainerDisplayName === 'function') {
+    return Config.resolveTrainerDisplayName(profileOrContext, fallbackTrainerId);
+  }
+  if (typeof profileOrContext === 'string') {
+    const idKey = profileOrContext.trim().toLowerCase();
+    if (TRAINERS?.[idKey]?.name) return TRAINERS[idKey].name;
+    return normalizeTrainerNicknameSafe(profileOrContext) || 'Trainer';
+  }
+  const profileObj = (
+    profileOrContext &&
+    typeof profileOrContext === 'object' &&
+    profileOrContext.profile &&
+    typeof profileOrContext.profile === 'object'
+  )
+    ? profileOrContext.profile
+    : profileOrContext;
+  const candidates = [
+    profileObj?.appearance?.nickname,
+    profileObj?.appearance?.customName,
+    profileObj?.appearance?.trainerName,
+    profileObj?.nickname,
+    profileObj?.customName,
+    profileObj?.trainerNickname,
+    profileObj?.customTrainerName,
+    profileOrContext?.customNickname,
+    profileOrContext?.trainerName,
+    profileObj?.trainerName,
+  ];
+  for (const cand of candidates) {
+    const cleaned = normalizeTrainerNicknameSafe(cand);
+    if (cleaned) {
+      const canonical = TRAINERS?.[cleaned.toLowerCase()]?.name;
+      return canonical || cleaned;
+    }
+  }
+  const rawId = profileObj?.trainerId ?? profileOrContext?.trainerId ?? fallbackTrainerId;
+  if (typeof rawId === 'string') {
+    const canonical = TRAINERS?.[rawId.trim().toLowerCase()]?.name;
+    if (canonical) return canonical;
+  }
+  return 'Trainer';
+}
+
+export function formatGameTextSafe(template, context = null) {
+  if (typeof Config.formatGameText === 'function') {
+    return Config.formatGameText(template, context);
+  }
+  if (template === null || template === undefined) return '';
+  const str = String(template);
+  if (!str.includes('{') && !str.includes('}')) return str;
+  const cleanToken = (v) => (
+    typeof v === 'string'
+      ? v.replace(/\{[^}]*\}/g, '').replace(/[{}]/g, '').replace(/\s+/g, ' ').trim()
+      : ''
+  );
+  const ctx = context && typeof context === 'object' ? context : {};
+  const profile = ctx.profile ?? ((ctx.trainerId || ctx.appearance || Array.isArray(ctx.team)) ? ctx : null);
+  const trainerName = resolveTrainerDisplayNameSafe(ctx, ctx.trainerId ?? profile?.trainerId ?? null);
+  const rivalName = cleanToken(ctx.rivalName ?? ctx.rival?.name ?? ctx.trainerData?.name) || 'Rival';
+  const pokemonName = cleanToken(
+    ctx.pokemonName ??
+    ctx.partnerName ??
+    ctx.pokemon?.displayName ??
+    ctx.pokemon?.name ??
+    profile?.team?.[0]?.displayName ??
+    profile?.team?.[0]?.name,
+  ) || 'Partner';
+  const moveName = cleanToken(ctx.moveName ?? ctx.move?.name) || 'Move';
+
+  let out = str;
+  for (let pass = 0; pass < 2 && out.includes('{'); pass++) {
+    out = out.replace(/\{([^{}]+)\}/g, (_match, inner) => {
+      const trimmed = String(inner).trim();
+      const norm = trimmed.toLowerCase().replace(/[\s_-]+/g, '');
+      if (
+        norm === 'trainer' ||
+        norm === 'trainername' ||
+        norm === 'playername' ||
+        norm === 'player' ||
+        norm === 'customname' ||
+        norm === 'nickname' ||
+        norm === 'trainernickname' ||
+        norm.startsWith('trainer') ||
+        norm.startsWith('player')
+      ) {
+        return trainerName;
+      }
+      if (norm === 'name') {
+        return cleanToken(ctx.name) || trainerName;
+      }
+      if (norm === 'rival' || norm === 'rivalname') {
+        return rivalName;
+      }
+      if (norm === 'pokemon' || norm === 'pokemonname' || norm === 'partner' || norm === 'partnername') {
+        return pokemonName;
+      }
+      if (norm === 'move' || norm === 'movename') {
+        return moveName;
+      }
+      const rawVal = ctx[trimmed];
+      if (typeof rawVal === 'number' && Number.isFinite(rawVal)) {
+        return String(rawVal);
+      }
+      if (typeof rawVal === 'string') {
+        const cleanedVal = cleanToken(rawVal);
+        if (cleanedVal) return cleanedVal;
+      }
+      return cleanToken(trimmed) || trainerName;
+    });
+  }
+  return out.replace(/[{}]/g, '');
+}
+
+function formatPokedexText(template, profile = null, extraContext = {}) {
+  const extra = extraContext && typeof extraContext === 'object' ? extraContext : {};
+  const ctx = {
+    ...(profile ? { profile } : {}),
+    ...extra,
+  };
+  return formatGameTextSafe(template, ctx);
+}
+
 function toNonNegIntSafe(v) {
   if (v === null || v === undefined || v === '' || typeof v === 'boolean') return 0;
   const num = Number(v);
@@ -1156,9 +1294,10 @@ export class PokedexUI {
       abilityRow.className = `dex-detail-ability${selSeen ? '' : ' is-unknown'}`;
       if (selSeen) {
         abilityRow.appendChild(buildAbilityPillEl(ability));
+        const activeProfile = this.storage?.getActiveProfile?.() || null;
         const abilityDesc = document.createElement('span');
         abilityDesc.className = 'dex-ability-desc';
-        abilityDesc.textContent = ability.description || '';
+        abilityDesc.textContent = formatPokedexText(ability.description || '', activeProfile, { pokemon: selected });
         abilityRow.appendChild(abilityDesc);
       } else {
         abilityRow.appendChild(buildAbilityPillEl(null, { unknown: true }));
@@ -1170,10 +1309,11 @@ export class PokedexUI {
       info.appendChild(abilityRow);
     }
 
+    const activeProfileForFlavor = this.storage?.getActiveProfile?.() || null;
     const flavor = document.createElement('p');
     flavor.className = 'dex-detail-flavor';
     flavor.textContent = selCaught
-      ? selected.flavor
+      ? formatPokedexText(selected.flavor, activeProfileForFlavor, { pokemon: selected })
       : `Habitat Clue: Explore ${habitat} to meet this Pokémon!`;
     info.appendChild(flavor);
 
@@ -2502,6 +2642,10 @@ export class PokedexUI {
     const recZone = getRecommendedFarmingZoneSafe(profile);
     const recPlayerLevel = recZone.playerLevel ?? recZone.partyLevel ?? prog.level;
 
+    const compassTitle = formatPokedexText(
+      guidance?.title || `Explore Starlight Island & Discover All ${Object.keys(BIOMES || {}).length || 18} Biomes!`,
+      profile,
+    );
     const compassCard = document.createElement('div');
     compassCard.className = 'guide-compass-card';
     compassCard.innerHTML = `
@@ -2509,7 +2653,7 @@ export class PokedexUI {
         <span class="guide-compass-badge">${guidance?.icon || '🧭'} STARLIGHT COMPASS OBJECTIVE</span>
         <span class="guide-compass-dir">${dirText}${Number.isFinite(guidance?.distance) && guidance.distance > 0 ? ` • ${guidance.distance} tiles` : ''}</span>
       </div>
-      <h3 class="guide-compass-title">${guidance?.title || `Explore Starlight Island & Discover All ${Object.keys(BIOMES || {}).length || 18} Biomes!`}</h3>
+      <h3 class="guide-compass-title">${escapeHtml(compassTitle)}</h3>
       <div class="guide-compass-stats">
         ${targetBiome ? `<span>📍 Destination: <strong>${targetBiome.icon} ${targetBiome.name}</strong></span>` : ''}
         <span>🧭 Player Level: <strong>Lv.${prog.level}</strong></span>
@@ -2695,10 +2839,10 @@ export class PokedexUI {
           ? PokemonMod.getScaledShrineGuard(sh, profile)
           : null;
         const guardLv = guard?.level ?? sh.level;
-        return `<span>⛩️ ${sh.name}: ${cleared ? 'Cleared ✓' : `Guardian Lv.${guardLv}`}</span>`;
+        return `<span>⛩️ ${escapeHtml(formatPokedexText(sh.name, profile))}: ${cleared ? 'Cleared ✓' : `Guardian Lv.${guardLv}`}</span>`;
       }).join('');
       const rivalRow = biomeRival
-        ? `<span>⚔️ ${biomeRival.name}: ${profile.rivalsDefeated?.includes(biomeRival.id) ? 'Defeated ✓ (Rematchable)' : 'Ready to Duel!'}</span>`
+        ? `<span>⚔️ ${escapeHtml(formatPokedexText(biomeRival.name, profile, { rival: biomeRival }))}: ${profile.rivalsDefeated?.includes(biomeRival.id) ? 'Defeated ✓ (Rematchable)' : 'Ready to Duel!'}</span>`
         : '';
       const recommendedTag = isRecommended
         ? '<span class="biome-recommended-tag">🌟 Best Lv. Match</span>'
@@ -2718,7 +2862,9 @@ export class PokedexUI {
           label: biome.name,
         });
         if (readiness) {
-          readinessPill = `<span class="biome-readiness-pill is-${escapeHtml(readiness.tier)}" data-tier="${escapeHtml(readiness.tier)}" title="${escapeHtml(readiness.tip)}">${escapeHtml(readiness.badgeText)}</span>`;
+          const tipText = formatPokedexText(readiness.tip, profile);
+          const badgeText = formatPokedexText(readiness.badgeText, profile);
+          readinessPill = `<span class="biome-readiness-pill is-${escapeHtml(readiness.tier)}" data-tier="${escapeHtml(readiness.tier)}" title="${escapeHtml(tipText)}">${escapeHtml(badgeText)}</span>`;
         }
       }
       const threatPill = !scaled.isSafe
@@ -2761,11 +2907,12 @@ export class PokedexUI {
         const biomeInfo = BIOMES[rival.biome];
         const partyCount = Array.isArray(rival.party) ? rival.party.length : 1;
         const rewardChips = formatRewardsList(defeated ? (rival.rematchRewards || rival.rewards) : rival.rewards);
+        const rivalName = formatPokedexText(rival.name, profile, { rival });
         const rCard = document.createElement('div');
         rCard.className = `quest-card ${defeated ? 'is-done' : ''}`;
         rCard.innerHTML = `
           <div class="quest-card-head">
-            <strong>${defeated ? '🏆' : '⚔️'} ${rival.name}</strong>
+            <strong>${defeated ? '🏆' : '⚔️'} ${escapeHtml(rivalName)}</strong>
             <span class="quest-status-pill">${defeated ? 'Defeated ✓ (+2 Lv Rematch)' : `${partyCount} Pokémon`}</span>
           </div>
           <p class="quest-desc">${biomeInfo ? `${biomeInfo.icon} ${biomeInfo.name}` : 'Starlight Island'} • ${defeated ? 'Challenge again anytime for bonus items!' : 'Talk to challenge this rival!'}</p>
@@ -2793,8 +2940,11 @@ export class PokedexUI {
       for (const quest of quests) {
         const done = Boolean(profile.questsCompleted?.includes(quest.id));
         const ready = !done && Boolean(quest.check?.(profile));
-        const progress = typeof quest.progressText === 'function' ? quest.progressText(profile) : '';
+        const rawProgress = typeof quest.progressText === 'function' ? quest.progressText(profile) : '';
+        const progress = rawProgress ? formatPokedexText(rawProgress, profile) : '';
         const rewardChips = formatRewardsList(quest.rewards);
+        const questTitle = formatPokedexText(quest.title, profile);
+        const questDesc = formatPokedexText(quest.description, profile);
 
         const qCard = document.createElement('div');
         qCard.className = `quest-card ${done ? 'is-done' : ready ? 'is-ready' : ''}`;
@@ -2802,12 +2952,12 @@ export class PokedexUI {
 
         qCard.innerHTML = `
           <div class="quest-card-head">
-            <strong>${done ? '✅' : ready ? '🌟' : '📜'} ${quest.title}</strong>
+            <strong>${done ? '✅' : ready ? '🌟' : '📜'} ${escapeHtml(questTitle)}</strong>
             <span class="quest-status-pill">${statusText}</span>
           </div>
-          <p class="quest-desc">${quest.description}</p>
+          <p class="quest-desc">${escapeHtml(questDesc)}</p>
           <div class="quest-footer">
-            ${progress ? `<span class="quest-progress-text">${progress}</span>` : ''}
+            ${progress ? `<span class="quest-progress-text">${escapeHtml(progress)}</span>` : ''}
             <div class="quest-reward-row">
               ${rewardChips.map((c) => `<span class="quest-reward-chip">${c}</span>`).join('')}
             </div>
@@ -2841,6 +2991,8 @@ export class PokedexUI {
     for (const badge of BADGES) {
       const earned = profile.badges.includes(badge.id);
       const typeInfo = TYPES[badge.type] || TYPES.normal;
+      const badgeName = formatPokedexText(badge.name, profile);
+      const badgeDesc = formatPokedexText(badge.description, profile);
 
       const card = document.createElement('div');
       card.className = `badge-card ${earned ? 'is-earned' : 'is-locked'}`;
@@ -2853,8 +3005,8 @@ export class PokedexUI {
           <span>${earned ? badge.icon : '🔒'}</span>
         </div>
         <div class="badge-info">
-          <strong>${badge.name}</strong>
-          <p>${badge.description}</p>
+          <strong>${escapeHtml(badgeName)}</strong>
+          <p>${escapeHtml(badgeDesc)}</p>
           <span class="badge-status">${earned ? '✓ Unlocked!' : 'Keep Exploring'}</span>
         </div>
       `;
@@ -2872,6 +3024,10 @@ export class PokedexUI {
 
     const appearance = profile.appearance || { styleId: 'default', accessory: 'cap', cape: false, aura: 'none' };
     const trainerInfo = TRAINERS?.[profile.trainerId] || TRAINERS?.violet || { name: 'Trainer', emblem: '★', tagline: 'Starlight Explorer' };
+    const displayName = resolveTrainerDisplayNameSafe(profile, profile.trainerId);
+    const currentNickname = normalizeTrainerNicknameSafe(
+      appearance?.nickname ?? appearance?.customName ?? profile?.nickname,
+    ) || '';
     const { stylesMap, accMap, aurasMap } = getTrainerAppearanceOptions();
     const styles = Object.values(stylesMap);
     const accessories = Object.values(accMap);
@@ -2893,6 +3049,18 @@ export class PokedexUI {
       aura: currentAura,
     };
 
+    const patchAppearance = (patch) => {
+      const updated = this.storage.updateAppearance?.(patch);
+      if (typeof this.storage?.setTrainerNickname !== 'function') {
+        const active = this.storage.getActiveProfile?.();
+        if (active?.appearance && currentNickname && !active.appearance.nickname) {
+          active.appearance.nickname = currentNickname;
+          this.storage.save?.();
+        }
+      }
+      return updated || { ...previewAppearance, ...patch };
+    };
+
     const hero = document.createElement('div');
     hero.className = 'trainer-studio-hero';
 
@@ -2912,10 +3080,94 @@ export class PokedexUI {
     const heroInfo = document.createElement('div');
     heroInfo.className = 'trainer-studio-hero-info';
     heroInfo.innerHTML = `
-      <span class="trainer-badge-tag">${trainerInfo.emblem || '★'} ${trainerInfo.name.toUpperCase()}</span>
-      <h3 class="trainer-studio-title">${trainerInfo.name}'s Style Studio</h3>
-      <p class="trainer-studio-sub">${currentStyle?.icon || '⭐'} ${currentStyle?.name || 'Signature Outfit'} • ${currentAcc?.icon || '🧢'} ${currentAcc?.name || 'Adventure Cap'}${auraTag}</p>
+      <span class="trainer-badge-tag">${trainerInfo.emblem || '★'} ${escapeHtml(displayName.toUpperCase())}</span>
+      <h3 class="trainer-studio-title">${escapeHtml(displayName)}'s Style Studio</h3>
+      <p class="trainer-studio-sub">${currentStyle?.icon || '⭐'} ${escapeHtml(currentStyle?.name || 'Signature Outfit')} • ${currentAcc?.icon || '🧢'} ${escapeHtml(currentAcc?.name || 'Adventure Cap')}${escapeHtml(auraTag)}</p>
     `;
+
+    const applyTrainerNickname = (rawValue, blipFreq = 760) => {
+      const cleaned = normalizeTrainerNicknameSafe(rawValue) || '';
+      if (typeof this.storage?.setTrainerNickname === 'function') {
+        this.storage.setTrainerNickname(cleaned, profile.trainerId);
+      } else if (typeof this.storage?.updateAppearance === 'function') {
+        this.storage.updateAppearance({ nickname: cleaned || null });
+        const active = this.storage.getActiveProfile?.();
+        if (active?.appearance) {
+          if (cleaned) {
+            active.appearance.nickname = cleaned;
+          } else {
+            delete active.appearance.nickname;
+          }
+          this.storage.save?.();
+        }
+      }
+      const latestAppearance = this.storage?.getActiveProfile?.()?.appearance || {
+        ...previewAppearance,
+        ...(cleaned ? { nickname: cleaned } : {}),
+      };
+      this.audio?.playMenuBlip?.(blipFreq);
+      drawTrainerPortrait(previewCanvas, profile.trainerId, latestAppearance);
+      this.onAppearanceChanged?.(latestAppearance);
+      this.render();
+    };
+
+    const nameForm = document.createElement('form');
+    nameForm.className = 'trainer-name-form';
+    const nameLabel = document.createElement('label');
+    nameLabel.className = 'trainer-name-label';
+    nameLabel.htmlFor = 'trainer-nickname-input';
+    nameLabel.textContent = 'Trainer Name';
+
+    const nameControls = document.createElement('div');
+    nameControls.className = 'trainer-name-controls';
+    const nameInput = document.createElement('input');
+    nameInput.id = 'trainer-nickname-input';
+    nameInput.type = 'text';
+    nameInput.className = 'nickname-input trainer-name-input';
+    nameInput.maxLength = 18;
+    nameInput.autocomplete = 'off';
+    nameInput.value = currentNickname;
+    nameInput.placeholder = trainerInfo.name || 'Trainer';
+    nameInput.setAttribute('aria-label', 'Trainer Name');
+
+    const nameActions = document.createElement('div');
+    nameActions.className = 'trainer-name-actions';
+    const saveNameBtn = document.createElement('button');
+    saveNameBtn.id = 'trainer-nickname-save';
+    saveNameBtn.type = 'submit';
+    saveNameBtn.className = 'mini-btn is-accent';
+    saveNameBtn.textContent = 'Save';
+
+    const resetNameBtn = document.createElement('button');
+    resetNameBtn.id = 'trainer-nickname-reset';
+    resetNameBtn.type = 'button';
+    resetNameBtn.className = 'mini-btn';
+    resetNameBtn.textContent = 'Reset';
+    resetNameBtn.title = `Reset to ${trainerInfo.name || 'default'}`;
+    resetNameBtn.disabled = !currentNickname;
+
+    resetNameBtn.addEventListener('click', () => applyTrainerNickname('', 640));
+    nameForm.addEventListener('submit', (e) => {
+      e.preventDefault();
+      applyTrainerNickname(nameInput.value, 760);
+    });
+    nameInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' || e.code === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
+        nameInput.value = currentNickname;
+        nameInput.blur();
+        this.audio?.playMenuBlip?.(520);
+      }
+    });
+
+    nameActions.appendChild(saveNameBtn);
+    nameActions.appendChild(resetNameBtn);
+    nameControls.appendChild(nameInput);
+    nameControls.appendChild(nameActions);
+    nameForm.appendChild(nameLabel);
+    nameForm.appendChild(nameControls);
+    heroInfo.appendChild(nameForm);
 
     const capeBtn = document.createElement('button');
     capeBtn.id = 'trainer-cape-toggle';
@@ -2923,7 +3175,7 @@ export class PokedexUI {
     capeBtn.className = `cape-toggle-btn ${appearance.cape ? 'is-active' : ''}`;
     capeBtn.textContent = `🦸 Starlight Cape: ${appearance.cape ? 'ON' : 'OFF'}`;
     capeBtn.addEventListener('click', () => {
-      const updated = this.storage.updateAppearance?.({ cape: !appearance.cape }) || { ...previewAppearance, cape: !appearance.cape };
+      const updated = patchAppearance({ cape: !appearance.cape });
       const resolvedForDraw = { ...previewAppearance, ...updated, styleId: currentStyleId, accessory: currentAccId, aura: currentAura, cape: Boolean(updated?.cape) };
       this.audio?.playMenuBlip?.(760);
       drawTrainerPortrait(previewCanvas, profile.trainerId, resolvedForDraw);
@@ -2962,7 +3214,7 @@ export class PokedexUI {
         <span class="style-chip-label">${style.icon || '🎨'} ${style.name}</span>
       `;
       chip.addEventListener('click', () => {
-        const updated = this.storage.updateAppearance?.({ styleId: style.id }) || { ...previewAppearance, styleId: style.id };
+        const updated = patchAppearance({ styleId: style.id });
         this._fallbackStyle = updated?.styleId !== style.id ? style.id : null;
         const resolvedForDraw = { ...previewAppearance, ...updated, styleId: style.id };
         this.audio?.playMenuBlip?.(720);
@@ -2988,7 +3240,7 @@ export class PokedexUI {
       chip.className = `accessory-chip ${currentAccId === acc.id ? 'is-active' : ''}`;
       chip.innerHTML = `<span class="accessory-chip-icon">${acc.icon || '🧢'}</span><span>${acc.name}</span>`;
       chip.addEventListener('click', () => {
-        const updated = this.storage.updateAppearance?.({ accessory: acc.id }) || { ...previewAppearance, accessory: acc.id };
+        const updated = patchAppearance({ accessory: acc.id });
         this._fallbackAcc = updated?.accessory !== acc.id ? acc.id : null;
         const resolvedForDraw = { ...previewAppearance, ...updated, accessory: acc.id };
         this.audio?.playMenuBlip?.(740);
@@ -3014,7 +3266,7 @@ export class PokedexUI {
       chip.className = `aura-chip ${currentAura === aura.id ? 'is-active' : ''}`;
       chip.innerHTML = `<span class="aura-chip-icon">${aura.icon || '✨'}</span><span>${aura.name}</span>`;
       chip.addEventListener('click', () => {
-        const updated = this.storage.updateAppearance?.({ aura: aura.id }) || { ...previewAppearance, aura: aura.id };
+        const updated = patchAppearance({ aura: aura.id });
         this._fallbackAura = updated?.aura !== aura.id ? aura.id : null;
         const resolvedForDraw = { ...previewAppearance, ...updated, aura: aura.id };
         this.audio?.playMenuBlip?.(760);
