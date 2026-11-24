@@ -2359,8 +2359,9 @@ async function runCohort3(page, spec, rng, telemetry, recordAnomaly) {
   // Collector & 1,025-Dex Explorer: catch wilds, search/filter Dex (including regex/punctuation), cries, Team/Box, Shard upgrade, Cheer
   await navigateToCoord(page, 9, 6, { telemetry, recordAnomaly, rng, maxDistance: 0, maxMs: 20000, fightWilds: 'run', stage: 'c3-catch-walk' });
   const targetPartyOrCatches = spec.isWave2 ? 4 : 2;
-  for (let attempt = 0; attempt < (spec.isWave2 ? 7 : 6) && (await getGameState(page)).caughtCount < targetPartyOrCatches; attempt++) {
-    const triggered = await triggerWildEncounterAtGrass(page, 9, 6, { maxSteps: 22 });
+  for (let attempt = 0; attempt < 6 && (await getGameState(page)).caughtCount < targetPartyOrCatches; attempt++) {
+    if (spec.isWave2 && Date.now() - c3Start > 85000) break;
+    const triggered = await triggerWildEncounterAtGrass(page, 9, 6, { maxSteps: 20 });
     if (!triggered) break;
     await playActiveBattleToEnd(page, { strategy: spec.isWave2 ? 'catch_new' : 'catch', telemetry, recordAnomaly, rng, stage: 'c3-catch-wild' });
     await dismissDialogue(page, telemetry, recordAnomaly, 'c3-after-catch');
@@ -2376,11 +2377,13 @@ async function runCohort3(page, spec, rng, telemetry, recordAnomaly) {
 
   if (spec.isWave2) {
     // Verify 0-badge Forest Outskirts Rare Patch rolls 0 random Elites
-    await triggerOutskirtsRarePatchEncounter(page, telemetry, recordAnomaly, 'c3-r2-rare-patch', { maxWaitMs: 6500 });
+    await triggerOutskirtsRarePatchEncounter(page, telemetry, recordAnomaly, 'c3-r2-rare-patch', { maxWaitMs: 5500 });
     // Open Chest (17,1) Emerald Canopy Chest (Verdant Gem) & fight Ranger Leo (11,5) when budget allows
-    await navigateToCoord(page, 17, 1, { telemetry, recordAnomaly, rng, maxDistance: 1, maxMs: 15000, fightWilds: 'run', stage: 'c3-r2-leaf-chest' });
-    await triggerInteractAtTarget(page, 17, 1, telemetry, recordAnomaly, 'c3-r2-leaf-chest-open');
-    if (Date.now() - c3Start < 140000) {
+    if (Date.now() - c3Start < 115000) {
+      await navigateToCoord(page, 17, 1, { telemetry, recordAnomaly, rng, maxDistance: 1, maxMs: 15000, fightWilds: 'run', stage: 'c3-r2-leaf-chest' });
+      await triggerInteractAtTarget(page, 17, 1, telemetry, recordAnomaly, 'c3-r2-leaf-chest-open');
+    }
+    if (Date.now() - c3Start < 105000) {
       await navigateToCoord(page, 11, 5, { telemetry, recordAnomaly, rng, maxDistance: 1, maxMs: 12000, fightWilds: 'run', stage: 'c3-r2-leo' });
       await triggerInteractAtTarget(page, 11, 5, telemetry, recordAnomaly, 'c3-r2-leo-brief');
       if ((await getGameState(page)).modals.briefing) {
@@ -2395,8 +2398,8 @@ async function runCohort3(page, spec, rng, telemetry, recordAnomaly) {
     await page.waitForTimeout(450);
   }
 
-  // Open Chest 26,1 or 4,24 for real Star Shards before upgrading (skip slow Lagoon detour if C3 elapsed > 165s)
-  const shardChest = (!spec.isWave2 || Date.now() - c3Start < 165000)
+  // Open Chest 26,1 or 4,24 for real Star Shards before upgrading (skip slow Lagoon detour if C3 elapsed > 125s)
+  const shardChest = (!spec.isWave2 || Date.now() - c3Start < 125000)
     ? WORLD_INDEX.chests.find((c) => c.key === '4,24')
     : null;
   if (shardChest) {
