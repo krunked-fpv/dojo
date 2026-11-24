@@ -48,8 +48,11 @@ import {
   getSafeZoneWarpPoint,
   getSpriteUrls,
   getTileDepthInfo,
+  formatGameText,
   isTileWalkableAt,
+  normalizeTrainerNickname,
   resolveFarmingBiomeForLevel,
+  resolveTrainerDisplayName,
   resolveTrainerLook,
 } from '../js/config.js';
 import {
@@ -113,14 +116,18 @@ import {
   STEPS_PER_CHEER_CHARGE,
   STORAGE_KEY,
   StorageManager,
+  formatGameText as storageFormatGameText,
   isSpeciesCaught,
   isSpeciesSeen,
+  normalizeTrainerNickname as storageNormalizeTrainerNickname,
+  resolveTrainerDisplayName as storageResolveTrainerDisplayName,
   sanitizePosition,
   storage,
   syncProfilePlayerProgression,
   syncProfilePokedex,
   validateAndRepairProfile,
 } from '../js/storage.js';
+import { OverworldEngine } from '../js/overworld.js';
 import {
   getPlayerProgressionSafe,
   getRecommendedFarmingZoneSafe,
@@ -13042,6 +13049,492 @@ function buildTestSuites() {
             } finally {
               Math.random = origRand;
               restoreAppFromSnapshot(app, snap);
+            }
+          },
+        },
+      ],
+    },
+    {
+      name: '52. Battle Dock Geometry Lock, Typewriter Ghost-Span & Zero Raw Braces',
+      tests: [
+        {
+          name: 'Zero-jump battle dock across 1-line, mid-typewriter, 2-line, 220+ char Rival strings & 1-move vs 4-move grids (0px shift, 0 overlap, 0 overflow)',
+          async fn() {
+            const app = window.__starlightApp;
+            assert(Boolean(app), 'GameApp mounted');
+            const snap = snapshotAppForTest(app);
+
+            const rectOf = (sel) => {
+              const el = document.querySelector(sel);
+              if (!el) return null;
+              const r = el.getBoundingClientRect();
+              return { top: r.top, bottom: r.bottom, left: r.left, right: r.right, width: r.width, height: r.height };
+            };
+            const overlaps = (a, b) => Boolean(
+              a && b && !(a.right <= b.left || a.left >= b.right || a.bottom <= b.top || a.top >= b.bottom),
+            );
+            const waitFrames = async () => {
+              await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+            };
+            const captureMetrics = () => {
+              const deckEl = document.querySelector('.battle-deck');
+              const logEl = document.getElementById('battle-log');
+              const actionsEl = document.getElementById('battle-actions');
+              const movesEl = document.getElementById('battle-moves');
+              const stageEl = document.getElementById('battle-stage');
+              return {
+                rects: {
+                  deck: rectOf('.battle-deck'),
+                  log: rectOf('#battle-log'),
+                  actions: rectOf('#battle-actions'),
+                  moves: rectOf('#battle-moves'),
+                  stage: rectOf('#battle-stage'),
+                },
+                eCard: rectOf('.status-card-enemy'),
+                pCard: rectOf('.status-card-player'),
+                eSprite: rectOf('#enemy-sprite'),
+                pSprite: rectOf('#player-sprite'),
+                overflows: {
+                  doc: document.documentElement.scrollWidth > window.innerWidth + 2,
+                  deck: Boolean(deckEl && deckEl.scrollWidth > deckEl.clientWidth + 2),
+                  log: Boolean(logEl && logEl.scrollWidth > logEl.clientWidth + 2),
+                  moves: Boolean(movesEl && movesEl.scrollWidth > movesEl.clientWidth + 2),
+                  actions: Boolean(actionsEl && actionsEl.scrollWidth > actionsEl.clientWidth + 2),
+                },
+                deckVisibleInViewport: Boolean(
+                  deckEl
+                  && rectOf('.battle-deck').top >= -1
+                  && rectOf('.battle-deck').bottom <= window.innerHeight + 2,
+                ),
+                logText: logEl?.textContent || '',
+                moveCardCount: document.querySelectorAll('#battle-moves .move-card').length,
+              };
+            };
+            const assertStableAndClean = (label, metrics, baseline) => {
+              for (const [k, rect] of Object.entries(metrics.rects)) {
+                assert(Boolean(rect && rect.height > 0 && rect.width > 0), `${label}: ${k} rendered`);
+                const base = baseline.rects[k];
+                for (const prop of ['top', 'bottom', 'height']) {
+                  const delta = Math.abs(rect[prop] - base[prop]);
+                  assert(delta < 0.5, `${label}: ${k}.${prop} shifted by ${delta.toFixed(2)}px (expected <0.5px)`);
+                }
+              }
+              assertEqual(overlaps(metrics.eCard, metrics.pSprite), false, `${label}: enemy card vs player sprite non-overlap`);
+              assertEqual(overlaps(metrics.pCard, metrics.eSprite), false, `${label}: player card vs enemy sprite non-overlap`);
+              assertEqual(overlaps(metrics.eCard, metrics.eSprite), false, `${label}: enemy card vs enemy sprite non-overlap`);
+              assertEqual(overlaps(metrics.pCard, metrics.pSprite), false, `${label}: player card vs player sprite non-overlap`);
+              for (const [k, ov] of Object.entries(metrics.overflows)) {
+                assertEqual(ov, false, `${label}: ${k} horizontal overflow free`);
+              }
+              assertEqual(metrics.deckVisibleInViewport, true, `${label}: .battle-deck within viewport`);
+              assert(!/\{[^}]+\}|[{}]/.test(metrics.logText), `${label}: #battle-log free of raw braces ("${metrics.logText}")`);
+            };
+
+            try {
+              window.localStorage.removeItem(STORAGE_KEY);
+              storage.state = storage.load();
+              app.selectTrainer('violet');
+              storage.chooseStarter(1);
+              app.enterOverworld(false);
+              app.closeDialogue();
+              storage.updateSettings({ battlePace: 'fast' });
+              app.applySettings();
+
+              const profile = storage.getActiveProfile();
+              const venusaur = createPokemon(3, 36, 'forest', {
+                moveIds: ['vine_whip', 'razor_leaf', 'solar_pulse', 'synthesis'],
+              });
+              profile.team = [venusaur];
+
+              const rival = RIVAL_TRAINERS['81,71'] || Object.values(RIVAL_TRAINERS).find((r) => String(r.intro || '').includes('{trainer}'));
+              const enemy = createPokemon(248, 36, 'crater');
+              const startP = app.battle.start({
+                enemy,
+                enemyParty: [enemy],
+                isTrainer: true,
+                trainerData: rival,
+                biomeId: 'crater',
+              });
+              app.syncControlVisibility();
+              const flushStart = setInterval(() => app.battle.finishTypewriter(), 15);
+              try {
+                await startP;
+              } finally {
+                clearInterval(flushStart);
+              }
+              while (app.battle.active && !app.battle.canAcceptPlayerAction()) {
+                await new Promise((r) => setTimeout(r, 15));
+              }
+
+              const logEl = document.getElementById('battle-log');
+              assert(Boolean(logEl), '#battle-log mounted');
+
+              // 1. Baseline 1-line prompt + 4-move grid
+              app.battle.setIdlePrompt('What will Venusaur do?');
+              await waitFrames();
+              const baseline = captureMetrics();
+              assertEqual(baseline.moveCardCount, 4, 'baseline battle renders 4-move deck');
+              assertEqual(logEl.classList.contains('is-long-text'), false, '1-line prompt clears .is-long-text');
+              assertEqual(logEl.classList.contains('is-xlong-text'), false, '1-line prompt clears .is-xlong-text');
+              assertStableAndClean('baseline-1line-4moves', baseline, baseline);
+
+              // 2. Mid-typewriter streaming (240+ char Rival string) -> ghost-span split + 0px shift
+              const xlongTemplate = '{rival}: "{trainer}, we hiked from Starlight Village all the way across Terastal Crystal Crater and Astral Sky Citadel to test {pokemon} with {move} under full Starlight Resonance! Let us see whether your Starlight Bond can endure our fiercest storm!"';
+              const sayP = app.battle.say(xlongTemplate, 30, 350);
+              await new Promise((r) => setTimeout(r, 110));
+              await waitFrames();
+              const typedSpan = logEl.querySelector('.battle-log-typed');
+              const ghostSpan = logEl.querySelector('.battle-log-ghost');
+              assert(logEl.classList.contains('is-typing'), 'mid-typewriter sets .is-typing');
+              assert(logEl.classList.contains('is-xlong-text'), '220+ char Rival string activates .is-xlong-text');
+              assert(Boolean(typedSpan && ghostSpan), 'ghost-span wrapper rendered in #battle-log');
+              assertGreater(typedSpan.textContent.length, 0, '.battle-log-typed has visible partial characters mid-stream');
+              assertGreater(ghostSpan.textContent.length, 0, '.battle-log-ghost reserves remaining layout mid-stream');
+              assertGreater(logEl.textContent.length, 220, 'full interpolated text length > 220 mid-stream');
+              assert(logEl.textContent.includes('Violet') && logEl.textContent.includes('Venusaur'), 'mid-stream interpolated {trainer} & {pokemon}');
+              assertEqual(logEl.scrollTop, 0, 'scrollTop resets to 0 on say()');
+              const midStreamMetrics = captureMetrics();
+              assertStableAndClean('mid-typewriter-xlong', midStreamMetrics, baseline);
+              app.battle.finishTypewriter();
+              await sayP;
+              await waitFrames();
+              assertEqual(ghostSpan.textContent, '', 'finishTypewriter clears .battle-log-ghost');
+              assertStableAndClean('settled-xlong-220+', captureMetrics(), baseline);
+
+              // 3. ~85-char 2-line message & 92-char .is-long-text threshold
+              app.battle.setIdlePrompt('Venusaur unleashed Razor Leaf! It struck Tyranitar with a sharp critical hit today!');
+              await waitFrames();
+              assertEqual(logEl.classList.contains('is-long-text'), false, '83-char message stays below 89-char .is-long-text threshold');
+              assertStableAndClean('two-line-83chars', captureMetrics(), baseline);
+
+              app.battle.setIdlePrompt('✨ Venusaur unleashed Starlight Solar Pulse! Critical hit landed cleanly against Tyranitar now!');
+              await waitFrames();
+              assertEqual(logEl.classList.contains('is-long-text'), true, '94-char message toggles .is-long-text');
+              assertEqual(logEl.classList.contains('is-xlong-text'), false, '94-char message does not toggle .is-xlong-text');
+              assertStableAndClean('two-line-94chars-long', captureMetrics(), baseline);
+
+              // 4. 1-move grid vs 4-move grid stability
+              venusaur.moves = ['razor_leaf'];
+              app.battle.renderMoveButtons();
+              app.battle.setIdlePrompt('What will Venusaur do?');
+              await waitFrames();
+              const oneMoveMetrics = captureMetrics();
+              assertEqual(oneMoveMetrics.moveCardCount, 1, '1-move deck renders exactly 1 move card');
+              assertStableAndClean('one-move-deck', oneMoveMetrics, baseline);
+
+              app.battle.stop({ outcome: 'escaped', faintedAll: false });
+              app.syncControlVisibility();
+              app.syncOverworldPause();
+            } finally {
+              restoreAppFromSnapshot(app, snap);
+              app.syncControlVisibility();
+              app.syncOverworldPause();
+            }
+          },
+        },
+        {
+          name: 'Zero raw braces across all static world strings, Config/Storage formatters, Style Studio nickname round-trip, OverworldEngine, openDialogue & BattleEngine',
+          async fn() {
+            const app = window.__starlightApp;
+            assert(Boolean(app), 'GameApp mounted');
+            const snap = snapshotAppForTest(app);
+
+            const hasRawBrace = (val) => typeof val === 'string' && /\{[^}]+\}|[{}]/.test(val);
+            const collectStrings = (obj, pathPrefix, out = []) => {
+              if (typeof obj === 'string') {
+                out.push({ path: pathPrefix, value: obj });
+                return out;
+              }
+              if (!obj || typeof obj !== 'object') return out;
+              if (Array.isArray(obj)) {
+                obj.forEach((item, idx) => collectStrings(item, `${pathPrefix}[${idx}]`, out));
+                return out;
+              }
+              for (const [k, v] of Object.entries(obj)) {
+                collectStrings(v, `${pathPrefix}.${k}`, out);
+              }
+              return out;
+            };
+
+            const TOKEN_VARIANTS = [
+              '{trainerName}',
+              '{trainername}',
+              '{trainer_name}',
+              '{trainer name}',
+              '{playerName}',
+              '{player}',
+              '{trainer}',
+              '{name}',
+              '{rival}',
+              '{pokemon}',
+              '{move}',
+            ];
+
+            const TEST_KEY = 'starlight_pokemon_test_s52_braces_v1';
+
+            try {
+              // 1. Static world scan across all dialogue/badge/landmark tables + quest progressText
+              const staticDatasets = [
+                ['SIGNPOSTS', SIGNPOSTS],
+                ['SHRINES', SHRINES],
+                ['CHESTS', CHESTS],
+                ['NPCS', NPCS],
+                ['FIELD_QUESTS', FIELD_QUESTS],
+                ['RIVAL_TRAINERS', RIVAL_TRAINERS],
+                ['LANDMARKS', LANDMARKS],
+                ['BADGES', BADGES],
+                ['BIOMES', BIOMES],
+                ['SECRET_ARCADE_SPOT', SECRET_ARCADE_SPOT],
+              ];
+              const staticEntries = [];
+              for (const [label, data] of staticDatasets) {
+                collectStrings(data, label, staticEntries);
+              }
+              assertGreater(staticEntries.length, 400, `scanned ${staticEntries.length} static strings`);
+
+              const violetCtx = { profile: { trainerId: 'violet', team: [{ name: 'Bulbasaur' }] }, rivalName: 'Ranger Leo' };
+              const oziasCtx = { profile: { trainerId: 'ozias', team: [{ name: 'Squirtle' }] }, rivalName: 'Ranger Leo' };
+              const customCtx = { profile: { trainerId: 'violet', appearance: { nickname: 'NovaAce' }, team: [{ name: 'Pikachu' }] }, rivalName: 'Ranger Leo' };
+
+              for (const entry of staticEntries) {
+                const raw = entry.value;
+                assert(!raw.includes('${'), `no uninterpolated template literal in ${entry.path}: "${raw}"`);
+                const opens = (raw.match(/\{/g) || []).length;
+                const closes = (raw.match(/\}/g) || []).length;
+                assertEqual(opens, closes, `balanced braces in ${entry.path}`);
+                for (const [ctxLabel, ctx] of [['violet', violetCtx], ['ozias', oziasCtx], ['custom', customCtx], ['null', null]]) {
+                  const formatted = formatGameText(raw, ctx);
+                  assert(!hasRawBrace(formatted), `static ${entry.path} (${ctxLabel}) leaked braces: "${formatted}"`);
+                }
+              }
+
+              for (const q of FIELD_QUESTS) {
+                if (typeof q.progressText === 'function') {
+                  for (const prof of [
+                    { trainerId: 'violet', badges: [], shrinesCleared: [], questsCompleted: [], team: [], box: [], pokedex: { seen: {}, caught: {} }, stats: {} },
+                    { trainerId: 'ozias', appearance: { nickname: 'NovaAce' }, badges: [], shrinesCleared: [], questsCompleted: [], team: [], box: [], pokedex: { seen: {}, caught: {} }, stats: {} },
+                  ]) {
+                    const formatted = formatGameText(q.progressText(prof), { profile: prof });
+                    assert(!hasRawBrace(formatted), `quest ${q.id} progressText leaked braces: "${formatted}"`);
+                  }
+                }
+              }
+
+              // 2. Contract 1 API: normalizeTrainerNickname, resolveTrainerDisplayName, formatGameText, StorageManager re-exports
+              assertEqual(formatGameText, storageFormatGameText, 'storage.js re-exports exact formatGameText');
+              assertEqual(normalizeTrainerNickname, storageNormalizeTrainerNickname, 'storage.js re-exports exact normalizeTrainerNickname');
+              assertEqual(resolveTrainerDisplayName, storageResolveTrainerDisplayName, 'storage.js re-exports exact resolveTrainerDisplayName');
+
+              assertEqual(normalizeTrainerNickname('  {bad} StarlightExplorer99  '), 'StarlightExplorer9', 'normalizeTrainerNickname strips braces, collapses spaces & slices 18');
+              assertEqual(normalizeTrainerNickname('{only}   '), null, 'normalizeTrainerNickname returns null when brace-only');
+              assertEqual(normalizeTrainerNickname(null), null, 'normalizeTrainerNickname returns null for null');
+
+              assertEqual(resolveTrainerDisplayName({ trainerId: 'violet' }), 'Violet', 'default Violet display name');
+              assertEqual(resolveTrainerDisplayName({ trainerId: 'ozias' }), 'Ozias', 'default Ozias display name');
+              assertEqual(resolveTrainerDisplayName({ trainerId: 'violet', appearance: { nickname: 'SkyAce' } }), 'SkyAce', 'Style Studio nickname overrides Violet');
+              assertEqual(resolveTrainerDisplayName({ trainerId: 'ozias', appearance: { nickname: '{corrupt}' } }), 'Ozias', 'corrupt brace-only nickname falls back to Ozias');
+              assertEqual(resolveTrainerDisplayName(null), 'Trainer', 'null profile safely resolves to Trainer');
+              assertEqual(resolveTrainerDisplayName({ trainerId: 'invalid' }), 'Trainer', 'invalid trainerId resolves to Trainer');
+
+              const allTokenTemplate = `${TOKEN_VARIANTS.join(' | ')} | {unknownToken} | {{nested}} | broken { brace`;
+              for (const [label, ctx, expectedName] of [
+                ['Violet', { profile: { trainerId: 'violet', team: [{ name: 'Venusaur' }] }, rivalName: 'Astra', moveName: 'Solar Pulse' }, 'Violet'],
+                ['Ozias', { profile: { trainerId: 'ozias', team: [{ name: 'Blastoise' }] }, rivalName: 'Astra', moveName: 'Hydro Pulse' }, 'Ozias'],
+                ['Custom', { profile: { trainerId: 'violet', appearance: { nickname: 'SkyAce' }, team: [{ name: 'Pikachu' }] }, rivalName: 'Astra', moveName: 'Thunderbolt' }, 'SkyAce'],
+                ['NullFallback', null, 'Trainer'],
+              ]) {
+                const out = formatGameText(allTokenTemplate, ctx);
+                assert(!hasRawBrace(out), `formatGameText(${label}) zero braces (got "${out}")`);
+                assert(out.includes(expectedName), `formatGameText(${label}) includes "${expectedName}"`);
+              }
+              assertEqual(
+                formatGameText('{trainerName}/{trainername}/{trainer_name}/{trainer name}/{playerName}/{player}/{trainer}/{name}', { trainerId: 'ozias' }),
+                'Ozias/Ozias/Ozias/Ozias/Ozias/Ozias/Ozias/Ozias',
+                'all trainer/player/name token variants resolve identically',
+              );
+              assertEqual(
+                formatGameText('{rival} vs {pokemon} used {move}!', { trainerId: 'violet', rivalName: 'Nova', pokemonName: 'Charizard', moveName: 'Flame Burst' }),
+                'Nova vs Charizard used Flame Burst!',
+                'rival/pokemon/move tokens resolve cleanly',
+              );
+
+              // 3. StorageManager setTrainerNickname / formatText / save-load round-trip / legacy repair
+              window.localStorage.removeItem(TEST_KEY);
+              const store = new StorageManager(TEST_KEY);
+              store.selectTrainer('violet');
+              store.chooseStarter(1);
+              assertEqual(store.getTrainerDisplayName(), 'Violet', 'fresh StorageManager defaults to Violet');
+              assertEqual(store.setTrainerNickname('StarKid', 'violet'), 'StarKid', 'setTrainerNickname returns StarKid');
+              assertEqual(store.formatText('Go, {trainerName}!'), 'Go, StarKid!', 'StorageManager.formatText resolves StarKid');
+              store.updateAppearance({ cape: true });
+              assertEqual(store.getActiveProfile().appearance.nickname, 'StarKid', 'updateAppearance({ cape: true }) preserves nickname');
+              const reloadedStore = new StorageManager(TEST_KEY);
+              assertEqual(reloadedStore.getTrainerDisplayName(), 'StarKid', 'nickname persists across save/load round-trip');
+              assertEqual(reloadedStore.setTrainerNickname('', 'violet'), 'Violet', 'empty setTrainerNickname resets back to Violet');
+
+              const legacyProfile = validateAndRepairProfile({
+                trainerId: 'ozias',
+                starterId: 7,
+                nickname: 'LegacyAce',
+                team: [createPokemon(7, 5).toJSON()],
+              }, 'ozias');
+              assertEqual(legacyProfile.appearance.nickname, 'LegacyAce', 'validateAndRepairProfile migrates legacy top-level nickname');
+              assertEqual(legacyProfile.nickname, undefined, 'validateAndRepairProfile removes legacy top-level nickname');
+
+              // 4. Live GameApp, Style Studio UI, OverworldEngine, openDialogue & BattleEngine
+              window.localStorage.removeItem(STORAGE_KEY);
+              storage.state = storage.load();
+              app.selectTrainer('ozias');
+              assert(
+                (document.getElementById('starter-greeting')?.textContent || '').includes('Ozias')
+                && !hasRawBrace(document.getElementById('starter-greeting')?.textContent || ''),
+                'Starter greeting renders Ozias with zero braces',
+              );
+              app.selectTrainer('violet');
+              storage.chooseStarter(1);
+              app.enterOverworld(false);
+              app.closeDialogue();
+              storage.updateSettings({ battlePace: 'fast' });
+              app.applySettings();
+
+              assertEqual(document.getElementById('hud-trainer-name')?.textContent, 'Violet', 'HUD shows Violet initially');
+
+              // Style Studio nickname save & zero horizontal overflow
+              app.openPokedex('trainer');
+              const dexBody = document.getElementById('pokedex-body');
+              const nickInput = document.getElementById('trainer-nickname-input');
+              const nickSave = document.getElementById('trainer-nickname-save');
+              assert(Boolean(nickInput && nickSave), 'Style Studio renders #trainer-nickname-input and #trainer-nickname-save');
+              assert(dexBody.scrollWidth <= dexBody.clientWidth + 2, 'Style Studio has zero horizontal overflow');
+              nickInput.value = 'StarNova';
+              nickSave.click();
+              assertEqual(storage.getTrainerDisplayName(), 'StarNova', 'Style Studio Save persists StarNova');
+              assertEqual(document.getElementById('hud-trainer-name')?.textContent, 'StarNova', 'HUD live-updates to StarNova');
+              app.pokedex.close();
+
+              // openDialogue across all 11 token variants
+              app.openDialogue(`${TOKEN_VARIANTS.join(' ')}!`);
+              const dlgText = document.getElementById('world-dialogue-text')?.textContent || '';
+              assert(!hasRawBrace(dlgText), `openDialogue zero braces: "${dlgText}"`);
+              assert(dlgText.includes('StarNova'), 'openDialogue renders custom nickname StarNova');
+              app.closeDialogue();
+
+              // OverworldEngine scan across all interactive tile coordinates + hint/interact callbacks
+              const allTargets = [
+                ...Object.keys(SIGNPOSTS),
+                ...Object.keys(SHRINES),
+                ...Object.keys(CHESTS),
+                ...Object.keys(NPCS),
+                ...Object.keys(RIVAL_TRAINERS),
+                ...Object.keys(LANDMARKS),
+                `${SECRET_ARCADE_SPOT.x},${SECRET_ARCADE_SPOT.y}`,
+              ];
+              for (const key of allTargets) {
+                const [kx, ky] = key.split(',').map(Number);
+                const t = app.overworld.getInteractiveAtTile(kx, ky);
+                if (t) {
+                  assert(!hasRawBrace(t.label), `Overworld target ${key} label zero braces`);
+                  for (const entry of collectStrings(t.data, `ow:${key}`)) {
+                    assert(!hasRawBrace(entry.value), `Overworld target ${entry.path} zero braces: "${entry.value}"`);
+                  }
+                }
+              }
+              let hinted = null;
+              let interacted = null;
+              const oziasOw = new OverworldEngine(document.createElement('canvas'), {
+                getProfile: () => ({ trainerId: 'ozias', pos: { x: 11, y: 6, dir: 'up' }, team: [createPokemon(7, 5)] }),
+                onInteractHint: (t) => { hinted = t; },
+                onInteract: (t) => { interacted = t; },
+              });
+              oziasOw.active = true;
+              oziasOw.paused = false;
+              oziasOw.moving = false;
+              oziasOw.refreshInteractHint();
+              oziasOw.triggerInteract();
+              assert(Boolean(hinted && interacted), 'OverworldEngine emits onInteractHint and onInteract for faced rival');
+              for (const entry of collectStrings({ h: hinted, i: interacted }, 'oziasOw')) {
+                assert(!hasRawBrace(entry.value), `OverworldEngine callback ${entry.path} zero braces: "${entry.value}"`);
+              }
+              assertEqual(oziasOw.formatOverworldText('Hello {trainerName} & {player}!'), 'Hello Ozias & Ozias!', 'OverworldEngine resolves Ozias');
+              const nullOw = new OverworldEngine(document.createElement('canvas'), { getProfile: () => null });
+              assertEqual(nullOw.formatOverworldText('Hello {trainerName}!'), 'Hello Trainer!', 'OverworldEngine null profile resolves Trainer');
+
+              // BattleEngine.start / say / setIdlePrompt across custom nickname, Ozias & null fallback
+              const rivalData = RIVAL_TRAINERS['11,5'] || Object.values(RIVAL_TRAINERS)[0];
+              const runBattleTokenCheck = async (label, expectedTrainer) => {
+                const foe = createPokemon(16, 5, 'forest');
+                const p = app.battle.start({
+                  enemy: foe,
+                  enemyParty: [foe],
+                  isTrainer: true,
+                  trainerData: rivalData,
+                  biomeId: 'forest',
+                });
+                const flush = setInterval(() => app.battle.finishTypewriter(), 10);
+                try {
+                  await p;
+                  const introLog = document.getElementById('battle-log')?.textContent || '';
+                  assert(!hasRawBrace(introLog), `${label} BattleEngine.start intro zero braces: "${introLog}"`);
+
+                  const sayP = app.battle.say(TOKEN_VARIANTS.join(' '), 0, 0);
+                  app.battle.finishTypewriter();
+                  await sayP;
+                  const sayLog = document.getElementById('battle-log')?.textContent || '';
+                  assert(!hasRawBrace(sayLog), `${label} BattleEngine.say zero braces: "${sayLog}"`);
+                  assert(sayLog.includes(expectedTrainer), `${label} BattleEngine.say includes ${expectedTrainer}`);
+
+                  app.battle.setIdlePrompt('Ready, {trainerName} & {pokemon}? Use {move}!');
+                  const idleLog = document.getElementById('battle-log')?.textContent || '';
+                  assert(!hasRawBrace(idleLog), `${label} BattleEngine.setIdlePrompt zero braces: "${idleLog}"`);
+                  assert(idleLog.includes(expectedTrainer), `${label} BattleEngine.setIdlePrompt includes ${expectedTrainer}`);
+                } finally {
+                  clearInterval(flush);
+                  app.battle.stop({ outcome: 'escaped', faintedAll: false });
+                  app.syncControlVisibility();
+                  app.syncOverworldPause();
+                }
+              };
+
+              await runBattleTokenCheck('CustomNickname', 'StarNova');
+
+              // Reset Style Studio nickname via UI button -> reverts to Violet
+              app.openPokedex('trainer');
+              document.getElementById('trainer-nickname-reset')?.click();
+              assertEqual(document.getElementById('hud-trainer-name')?.textContent, 'Violet', 'Style Studio Reset restores Violet on HUD');
+              app.pokedex.close();
+
+              // Ozias battle check
+              app.selectTrainer('ozias');
+              storage.chooseStarter(7);
+              app.enterOverworld(false);
+              app.closeDialogue();
+              await runBattleTokenCheck('Ozias', 'Ozias');
+
+              // Null fallback BattleEngine check
+              const origBattleStorage = app.battle.storage;
+              try {
+                app.battle.storage = {
+                  getActiveProfile: () => null,
+                  getSettings: () => ({ battlePace: 'fast' }),
+                  state: {},
+                  save() {},
+                  syncActiveProfile() {},
+                  markSpeciesSeen() {},
+                };
+                const nullSayP = app.battle.say('Go, {trainerName}! {trainer} {player}!', 0, 0);
+                app.battle.finishTypewriter();
+                await nullSayP;
+                const nullLog = document.getElementById('battle-log')?.textContent || '';
+                assert(!hasRawBrace(nullLog), `NullBattleStorage say zero braces: "${nullLog}"`);
+                assert(nullLog.includes('Trainer'), 'NullBattleStorage falls back to Trainer');
+              } finally {
+                app.battle.storage = origBattleStorage;
+              }
+            } finally {
+              window.localStorage.removeItem(TEST_KEY);
+              restoreAppFromSnapshot(app, snap);
+              app.syncControlVisibility();
+              app.syncOverworldPause();
             }
           },
         },

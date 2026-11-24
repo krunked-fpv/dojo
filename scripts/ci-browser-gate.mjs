@@ -521,16 +521,31 @@ async function runStageB(browser, baseUrl) {
         );
       }
 
-      // 2. Battle layout & bounding-box collision check
+      // 2. Battle layout, zero-jump dock stability & bounding-box collision check
       const battleRes = await page.evaluate(async () => {
         const app = window.__starlightApp;
         const { createPokemon } = await import('./js/pokemon.js');
+        const { RIVAL_TRAINERS } = await import('./js/config.js');
+        const profile = app.pokedex?.storage?.getActiveProfile?.();
+        const venusaur = createPokemon(3, 36, 'forest', {
+          moveIds: ['vine_whip', 'razor_leaf', 'solar_pulse', 'synthesis'],
+        });
+        if (profile) {
+          profile.team = [venusaur];
+        }
+        const rival = RIVAL_TRAINERS['81,71'] || Object.values(RIVAL_TRAINERS)[0];
         const enemy = createPokemon(1024, 36, 'crater', {
           isElite: true,
           upgradeTier: 4,
           encounterTrait: 'apex',
         });
-        const startPromise = app.battle.start({ enemy, biomeId: 'crater' });
+        const startPromise = app.battle.start({
+          enemy,
+          enemyParty: [enemy],
+          isTrainer: true,
+          trainerData: rival,
+          biomeId: 'crater',
+        });
         app.syncControlVisibility();
         const typeFlush = setInterval(() => app.battle.finishTypewriter(), 20);
         try {
@@ -538,8 +553,11 @@ async function runStageB(browser, baseUrl) {
         } finally {
           clearInterval(typeFlush);
         }
-        await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+        while (app.battle.active && !app.battle.canAcceptPlayerAction()) {
+          await new Promise((r) => setTimeout(r, 15));
+        }
 
+        const waitFrames = () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
         const rectOf = (sel) => {
           const el = document.querySelector(sel);
           if (!el) return null;
@@ -550,53 +568,166 @@ async function runStageB(browser, baseUrl) {
           a && b && !(a.right <= b.left || a.left >= b.right || a.bottom <= b.top || a.top >= b.bottom),
         );
 
-        const eCard = rectOf('.status-card-enemy');
-        const pCard = rectOf('.status-card-player');
-        const eSprite = rectOf('#enemy-sprite');
-        const pSprite = rectOf('#player-sprite');
-        const deckEl = document.querySelector('.battle-deck');
-        const deckRect = deckEl ? deckEl.getBoundingClientRect() : null;
+        const captureState = (label) => {
+          const deckEl = document.querySelector('.battle-deck');
+          const logEl = document.getElementById('battle-log');
+          const movesEl = document.getElementById('battle-moves');
+          const actionsEl = document.getElementById('battle-actions');
+          const stageEl = document.getElementById('battle-stage');
+          const eCard = rectOf('.status-card-enemy');
+          const pCard = rectOf('.status-card-player');
+          const eSprite = rectOf('#enemy-sprite');
+          const pSprite = rectOf('#player-sprite');
+          const deckRect = rectOf('.battle-deck');
 
-        const result = {
-          battleVisible: !document.getElementById('battle-screen')?.hidden,
-          eCard_vs_pSprite: overlaps(eCard, pSprite),
-          pCard_vs_eSprite: overlaps(pCard, eSprite),
-          eCard_vs_eSprite: overlaps(eCard, eSprite),
-          pCard_vs_pSprite: overlaps(pCard, pSprite),
-          deckTop: deckRect ? Math.round(deckRect.top) : -1,
-          deckBottom: deckRect ? Math.round(deckRect.bottom) : 99999,
-          deckScrollWidth: deckEl ? deckEl.scrollWidth : 99999,
-          deckClientWidth: deckEl ? deckEl.clientWidth : 0,
+          return {
+            label,
+            battleVisible: !document.getElementById('battle-screen')?.hidden,
+            rects: {
+              deck: deckRect,
+              log: rectOf('#battle-log'),
+              actions: rectOf('#battle-actions'),
+              moves: rectOf('#battle-moves'),
+              stage: rectOf('#battle-stage'),
+            },
+            eCard_vs_pSprite: overlaps(eCard, pSprite),
+            pCard_vs_eSprite: overlaps(pCard, eSprite),
+            eCard_vs_eSprite: overlaps(eCard, eSprite),
+            pCard_vs_pSprite: overlaps(pCard, pSprite),
+            deckTop: deckRect ? Math.round(deckRect.top) : -1,
+            deckBottom: deckRect ? Math.round(deckRect.bottom) : 99999,
+            docOverflow: document.documentElement.scrollWidth > window.innerWidth + 2,
+            deckOverflow: Boolean(deckEl && deckEl.scrollWidth > deckEl.clientWidth + 2),
+            logOverflow: Boolean(logEl && logEl.scrollWidth > logEl.clientWidth + 2),
+            movesOverflow: Boolean(movesEl && movesEl.scrollWidth > movesEl.clientWidth + 2),
+            actionsOverflow: Boolean(actionsEl && actionsEl.scrollWidth > actionsEl.clientWidth + 2),
+            deckScrollWidth: deckEl ? deckEl.scrollWidth : 99999,
+            deckClientWidth: deckEl ? deckEl.clientWidth : 0,
+            stageHeight: stageEl ? Math.round(stageEl.getBoundingClientRect().height) : 0,
+            logText: logEl?.textContent || '',
+            hasRawBraces: /\{[^}]+\}|[{}]/.test(logEl?.textContent || ''),
+            isTyping: Boolean(logEl?.classList.contains('is-typing')),
+            isLongText: Boolean(logEl?.classList.contains('is-long-text')),
+            isXlongText: Boolean(logEl?.classList.contains('is-xlong-text')),
+            typedLen: logEl?.querySelector('.battle-log-typed')?.textContent?.length ?? 0,
+            ghostLen: logEl?.querySelector('.battle-log-ghost')?.textContent?.length ?? 0,
+            scrollTop: logEl?.scrollTop ?? -1,
+            moveCardCount: document.querySelectorAll('#battle-moves .move-card').length,
+            innerWidth: window.innerWidth,
+            innerHeight: window.innerHeight,
+          };
+        };
+
+        const states = [];
+        try {
+          // State 1: Baseline 1-line prompt + 4-move grid
+          app.battle.setIdlePrompt('What will Venusaur do?');
+          await waitFrames();
+          states.push(captureState('idle-1line-4moves'));
+
+          // State 2: Mid-typewriter streaming (240+ char Rival string)
+          const xlongRivalMsg = '{rival}: "{trainer}, we hiked from Starlight Village all the way across Terastal Crystal Crater and Astral Sky Citadel to test {pokemon} with {move} under full Starlight Resonance! Let us see whether your Starlight Bond can endure our fiercest storm!"';
+          const sayP = app.battle.say(xlongRivalMsg, 30, 350);
+          await new Promise((r) => setTimeout(r, 100));
+          await waitFrames();
+          states.push(captureState('mid-typewriter-220+'));
+          app.battle.finishTypewriter();
+          await sayP;
+          await waitFrames();
+          states.push(captureState('settled-220+'));
+
+          // State 3: ~85-char 2-line combat message & ~94-char .is-long-text message
+          app.battle.setIdlePrompt('Venusaur unleashed Razor Leaf! It struck Tyranitar with a sharp critical hit today!');
+          await waitFrames();
+          states.push(captureState('two-line-83chars'));
+
+          app.battle.setIdlePrompt('✨ Venusaur unleashed Starlight Solar Pulse! Critical hit landed cleanly against Tyranitar now!');
+          await waitFrames();
+          states.push(captureState('two-line-94chars-long'));
+
+          // State 4: 1-move grid vs 4-move grid
+          venusaur.moves = ['razor_leaf'];
+          app.battle.renderMoveButtons();
+          app.battle.setIdlePrompt('What will Venusaur do?');
+          await waitFrames();
+          states.push(captureState('one-move-deck'));
+        } finally {
+          app.battle.stop({ outcome: 'escaped', faintedAll: false });
+          app.syncControlVisibility();
+          app.syncOverworldPause();
+        }
+
+        return {
+          baseline: states[0],
+          states,
           innerWidth: window.innerWidth,
           innerHeight: window.innerHeight,
         };
-
-        app.battle.stop({ outcome: 'escaped', faintedAll: false });
-        app.syncControlVisibility();
-        app.syncOverworldPause();
-        return result;
       });
 
-      if (
-        !battleRes.battleVisible
-        || battleRes.eCard_vs_pSprite
-        || battleRes.pCard_vs_eSprite
-        || battleRes.eCard_vs_eSprite
-        || battleRes.pCard_vs_pSprite
-      ) {
-        throw new Error(`${vp.name}: battle card/sprite overlap or hidden (${JSON.stringify(battleRes)})`);
+      const base = battleRes.baseline;
+      if (!base || base.moveCardCount !== 4) {
+        throw new Error(`${vp.name}: expected 4-move baseline, got ${base?.moveCardCount}`);
       }
-      if (
-        battleRes.deckTop < 0
-        || battleRes.deckBottom > battleRes.innerHeight + 2
-        || battleRes.deckScrollWidth > battleRes.deckClientWidth + 2
-      ) {
-        throw new Error(
-          `${vp.name}: .battle-deck viewport clip/overflow (top=${battleRes.deckTop}, bottom=${battleRes.deckBottom}/${battleRes.innerHeight}, sw=${battleRes.deckScrollWidth}/${battleRes.deckClientWidth})`,
-        );
+      const midState = battleRes.states.find((s) => s.label === 'mid-typewriter-220+');
+      if (!midState?.isTyping || midState.typedLen <= 0 || midState.ghostLen <= 0 || midState.scrollTop !== 0) {
+        throw new Error(`${vp.name}: mid-typewriter ghost-span invariant failed (${JSON.stringify(midState)})`);
+      }
+      const xlongState = battleRes.states.find((s) => s.label === 'settled-220+');
+      if (!xlongState?.isXlongText || xlongState.logText.length < 220) {
+        throw new Error(`${vp.name}: 220+ char Rival string missing .is-xlong-text (${JSON.stringify(xlongState)})`);
+      }
+      const oneMoveState = battleRes.states.find((s) => s.label === 'one-move-deck');
+      if (!oneMoveState || oneMoveState.moveCardCount !== 1) {
+        throw new Error(`${vp.name}: expected 1-move deck, got ${oneMoveState?.moveCardCount}`);
       }
 
-      // 3. #pokedex-body horizontal overflow check
+      let maxDockShiftPx = 0;
+      for (const st of battleRes.states) {
+        if (
+          !st.battleVisible
+          || st.eCard_vs_pSprite
+          || st.pCard_vs_eSprite
+          || st.eCard_vs_eSprite
+          || st.pCard_vs_pSprite
+        ) {
+          throw new Error(`${vp.name} [${st.label}]: battle card/sprite overlap or hidden (${JSON.stringify(st)})`);
+        }
+        if (
+          st.deckTop < -1
+          || st.deckBottom > st.innerHeight + 2
+          || st.docOverflow
+          || st.deckOverflow
+          || st.logOverflow
+          || st.movesOverflow
+          || st.actionsOverflow
+        ) {
+          throw new Error(
+            `${vp.name} [${st.label}]: battle dock clip/overflow (top=${st.deckTop}, bottom=${st.deckBottom}/${st.innerHeight}, overflows=${JSON.stringify({ doc: st.docOverflow, deck: st.deckOverflow, log: st.logOverflow, moves: st.movesOverflow, actions: st.actionsOverflow })})`,
+          );
+        }
+        if (st.hasRawBraces) {
+          throw new Error(`${vp.name} [${st.label}]: raw braces leaked in #battle-log ("${st.logText}")`);
+        }
+        for (const elKey of ['deck', 'log', 'actions', 'moves', 'stage']) {
+          const cur = st.rects[elKey];
+          const ref = base.rects[elKey];
+          if (!cur || !ref || cur.width <= 0 || cur.height <= 0) {
+            throw new Error(`${vp.name} [${st.label}]: missing rect for ${elKey}`);
+          }
+          for (const prop of ['top', 'bottom', 'height']) {
+            const delta = Math.abs(cur[prop] - ref[prop]);
+            if (delta > maxDockShiftPx) maxDockShiftPx = delta;
+            if (delta >= 0.5) {
+              throw new Error(
+                `${vp.name} [${st.label}]: zero-jump violation on ${elKey}.${prop}: delta=${delta.toFixed(2)}px (cur=${cur[prop]}, base=${ref[prop]})`,
+              );
+            }
+          }
+        }
+      }
+
+      // 3. #pokedex-body horizontal overflow check (Pokédex + Style Studio)
       await page.click('#hud-btn-dex');
       await page.waitForSelector('#pokedex-modal:not([hidden])', { state: 'visible' });
       const dexRes = await page.evaluate(async () => {
@@ -612,6 +743,17 @@ async function runStageB(browser, baseUrl) {
           innerWidth: window.innerWidth,
         };
       });
+      await page.click('#pokedex-tab-trainer');
+      const styleRes = await page.evaluate(async () => {
+        await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+        const body = document.getElementById('pokedex-body');
+        const nickInput = document.getElementById('trainer-nickname-input');
+        return {
+          scrollWidth: body ? body.scrollWidth : 99999,
+          clientWidth: body ? body.clientWidth : 0,
+          hasNickInput: Boolean(nickInput),
+        };
+      });
       await page.click('#pokedex-close-btn');
       await page.waitForSelector('#pokedex-modal[hidden]', { state: 'attached' });
 
@@ -619,9 +761,11 @@ async function runStageB(browser, baseUrl) {
         dexRes.scrollWidth > dexRes.clientWidth + 2
         || dexRes.cardLeft < -1
         || dexRes.cardRight > dexRes.innerWidth + 2
+        || styleRes.scrollWidth > styleRes.clientWidth + 2
+        || !styleRes.hasNickInput
       ) {
         throw new Error(
-          `${vp.name}: #pokedex-body horizontal overflow (${dexRes.scrollWidth} > ${dexRes.clientWidth}, card=[${dexRes.cardLeft},${dexRes.cardRight}]/${dexRes.innerWidth})`,
+          `${vp.name}: #pokedex-body horizontal overflow or missing Style Studio nickname row (dex=${dexRes.scrollWidth}/${dexRes.clientWidth}, style=${styleRes.scrollWidth}/${styleRes.clientWidth}, hasNick=${styleRes.hasNickInput}, card=[${dexRes.cardLeft},${dexRes.cardRight}]/${dexRes.innerWidth})`,
         );
       }
 
@@ -674,7 +818,7 @@ async function runStageB(browser, baseUrl) {
 
       assertCleanTelemetry(`Stage B (${vp.name})`, telemetry);
       console.log(
-        `[PASS] Stage B (${vp.name}, hasTouch=${vp.hasTouch}): HUD ${hudRes.scrollWidth}/${hudRes.clientWidth}, Battle 0-overlap (deck=${battleRes.deckBottom}/${battleRes.innerHeight}), Dex ${dexRes.scrollWidth}/${dexRes.clientWidth}, Sky-Hop dash=[${miniRes.dashBox.left},${miniRes.dashBox.top}..${miniRes.dashBox.right},${miniRes.dashBox.bottom}]`,
+        `[PASS] Stage B (${vp.name}, hasTouch=${vp.hasTouch}): HUD ${hudRes.scrollWidth}/${hudRes.clientWidth}, Battle 0-overlap (deck=${base.deckBottom}/${battleRes.innerHeight}, maxShift=${maxDockShiftPx.toFixed(2)}px across ${battleRes.states.length} states), Dex ${dexRes.scrollWidth}/${dexRes.clientWidth} + Style ${styleRes.scrollWidth}/${styleRes.clientWidth}, Sky-Hop dash=[${miniRes.dashBox.left},${miniRes.dashBox.top}..${miniRes.dashBox.right},${miniRes.dashBox.bottom}]`,
       );
     } finally {
       await context.close();
