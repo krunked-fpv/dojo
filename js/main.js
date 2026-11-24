@@ -186,6 +186,7 @@ class GameApp {
     this._pendingBriefing = null;
     this._wasInBattle = false;
     this._wasModalOpen = false;
+    this._wasInteractPillSuppressed = true;
     this._lastCompassHidden = null;
     this._starterFallbackStyle = null;
     this._starterFallbackAcc = null;
@@ -362,6 +363,23 @@ class GameApp {
     this.syncControlVisibility();
   }
 
+  isInteractPillSuppressed() {
+    return Boolean(
+      this.dialogueOpen ||
+      (this.worldDialogueEl && !this.worldDialogueEl.hidden) ||
+      this.battle?.active ||
+      this.encounterTransitioning ||
+      this.warpTransitioning ||
+      this.encounterBriefingOpen ||
+      this.pokedex?.isOpen() ||
+      this.minigame?.isOpen() ||
+      this.isSettingsOpen() ||
+      !this.bootScreenEl?.hidden ||
+      !this.starterScreenEl?.hidden ||
+      this.gameShellEl?.hidden
+    );
+  }
+
   syncControlVisibility(options = {}) {
     const inBattle = Boolean(this.battle?.active || this.encounterTransitioning);
     const modalOpen = Boolean(
@@ -397,6 +415,18 @@ class GameApp {
     if (becameInBattle || becameModalOpen) {
       this.input.clearAll();
       this.overworld?.clearTouchNavigation?.();
+    }
+
+    const interactSuppressed = this.isInteractPillSuppressed();
+    const wasInteractSuppressed = Boolean(this._wasInteractPillSuppressed);
+    this._wasInteractPillSuppressed = interactSuppressed;
+    if (this.interactPillEl) {
+      if (interactSuppressed) {
+        this.interactPillEl.hidden = true;
+        delete this.interactPillEl.dataset.readiness;
+      } else if (wasInteractSuppressed && !options?.skipInteractHint) {
+        this.handleInteractHint(this.overworld?.getInteractiveTarget?.() ?? null);
+      }
     }
 
     if (!options?.skipWarpDock) {
@@ -1874,6 +1904,10 @@ class GameApp {
   }
 
   openDialogue(message) {
+    if (this.interactPillEl) {
+      this.interactPillEl.hidden = true;
+      delete this.interactPillEl.dataset.readiness;
+    }
     if (this.isSettingsOpen()) {
       this.closeSettings();
     }
@@ -1899,7 +1933,10 @@ class GameApp {
     this.worldDialogueEl.hidden = true;
     this.dialogueOpen = false;
     this.blurFocusedControl();
-    this.syncOverworldPause();
+    this.syncOverworldPause({ skipInteractHint: true });
+    if (!this.isInteractPillSuppressed()) {
+      this.handleInteractHint(this.overworld?.getInteractiveTarget?.() ?? null);
+    }
   }
 
   handleBiomeChange(biome, announce) {
@@ -2373,7 +2410,7 @@ class GameApp {
 
   handleInteractHint(target) {
     if (!this.interactPillEl) return;
-    if (!target) {
+    if (!target || this.isInteractPillSuppressed()) {
       this.interactPillEl.hidden = true;
       delete this.interactPillEl.dataset.readiness;
       return;
@@ -2899,6 +2936,7 @@ class GameApp {
     let guardianLevel = shrine.level || 10;
     let upgradeTier = 0;
     let isElite = false;
+    let guardMoveIds = null;
     let shrineData = shrine;
 
     if (isAstralTrial) {
@@ -2909,6 +2947,9 @@ class GameApp {
       guardianLevel = Math.max(1, Math.min(50, Number(trialSpec.level ?? (shrine.level + 3)) || 12));
       upgradeTier = Math.max(1, Number(trialSpec.upgradeTier) || 2);
       isElite = trialSpec.isElite ?? true;
+      if (Array.isArray(trialSpec.moveIds) && trialSpec.moveIds.length > 0) {
+        guardMoveIds = trialSpec.moveIds;
+      }
       const trialNumber = Math.max(1, Number(trialSpec.trialNumber) || ((profile?.shrineTrialCounts?.[shrine.id] || 0) + 1));
       const guardianName = SPECIES[guardianId]?.name || 'Guardian';
       shrineData = {
@@ -2925,10 +2966,17 @@ class GameApp {
       guardianId = guardSpec.guardianId ?? shrine.guardianId;
       guardianLevel = Math.max(1, Math.min(50, Number(guardSpec.level ?? shrine.level) || shrine.level || 10));
       upgradeTier = Math.max(0, Number(guardSpec.upgradeTier) || 0);
+      if (Array.isArray(guardSpec.moveIds) && guardSpec.moveIds.length > 0) {
+        guardMoveIds = guardSpec.moveIds;
+      }
       this._preBattleShrineTrialCount = null;
     }
 
-    const guardian = createPokemon(guardianId, guardianLevel, shrine.biome, { upgradeTier, isElite });
+    const guardian = createPokemon(guardianId, guardianLevel, shrine.biome, {
+      upgradeTier,
+      isElite,
+      ...(Array.isArray(guardMoveIds) ? { moveIds: guardMoveIds } : {}),
+    });
     this._pendingShrineData = shrineData;
     const ready = await this.triggerEncounterTransition('shrine', {
       mode: 'shrine',
