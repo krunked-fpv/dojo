@@ -12892,6 +12892,161 @@ function buildTestSuites() {
         },
       ],
     },
+    {
+      name: '51. Round 2 Onboarding, Balance & UX Fix Regressions',
+      tests: [
+        {
+          name: 'Forest Outskirts depth/pool scaling, Shrine Lv.6 novice moveIds & Ranger Leo pacing, Squirtle Shrine Tough readiness, Novice Compass chain, Sky-Hop live counters & #interact-pill dialogue suppression',
+          fn() {
+            const app = window.__starlightApp;
+            assert(Boolean(app), 'GameApp mounted');
+            const snap = snapshotAppForTest(app);
+            const origRand = Math.random;
+
+            try {
+              // (1) Outskirts depth gating & Whispering Forest pool / 0-badge rare Elite rules
+              const depth9_6 = getTileDepthInfo(9, 6);
+              const depth9_9 = getTileDepthInfo(9, 9);
+              const depth15_3 = getTileDepthInfo(15, 3);
+              assertEqual(depth9_6.depthTier, 0, '(9,6) Whispering Forest entrance resolves to Outskirts depthTier 0');
+              assertEqual(depth9_9.depthTier, 0, '(9,9) Whispering Forest south corridor resolves to Outskirts depthTier 0');
+              assertEqual(depth15_3.depthTier, 2, '(15,3) Forest Shrine sanctuary keeps depthTier 2');
+              assertEqual(BIOMES.forest.encounters.length, 55, 'BIOMES.forest keeps all 55 species intact');
+
+              const noviceProfile = { badges: [], shrinesCleared: [], team: [createPokemon(7, 5)], recentEncounters: [] };
+              let seedRng = 1337;
+              Math.random = () => {
+                seedRng = (seedRng * 1664525 + 1013904223) >>> 0;
+                return seedRng / 4294967296;
+              };
+              let outskirtsBruisers = 0;
+              for (let i = 0; i < 400; i++) {
+                const wild = rollWildPokemon('forest', noviceProfile, { depthTier: 0, isRarePatch: i % 4 === 0, disableAntiRepeat: true });
+                const cf = Number(SPECIES[wild.speciesId]?.catchFactor);
+                if (Number.isFinite(cf) && cf < BALANCE.scaling.noviceOutskirtsCatchFactorCutoff) {
+                  outskirtsBruisers += 1;
+                }
+              }
+              assert(outskirtsBruisers / 400 < 0.06, `0-badge Outskirts bruiser rate reduced (<6%, got ${outskirtsBruisers}/400)`);
+
+              Math.random = () => 0.005;
+              const rareNovice = rollWildPokemon('forest', noviceProfile, { depthTier: 0, isRarePatch: true, disableAntiRepeat: true });
+              assertEqual(rareNovice.isElite, false, '0-badge rare patch suppresses random Elites');
+              const rareForced = rollWildPokemon('forest', noviceProfile, { depthTier: 0, isRarePatch: true, forceElite: true, disableAntiRepeat: true });
+              assertEqual(rareForced.isElite, true, 'forceElite: true still forces Elite on 0-badge rare patch');
+              const oneBadgeProfile = { badges: ['meadow'], shrinesCleared: ['forest_shrine'], team: [createPokemon(1, 7)], recentEncounters: [] };
+              const rareOneBadge = rollWildPokemon('forest', oneBadgeProfile, { depthTier: 0, isRarePatch: true, disableAntiRepeat: true });
+              assertEqual(rareOneBadge.isElite, true, 'badges >= 1 rare patch still rolls Elites');
+              Math.random = origRand;
+
+              // (2) Forest Shrine Lv.6 novice moveIds, createPokemon({ moveIds }) & Ranger Leo Lv.5/6 pacing
+              assertEqual(SHRINES['15,3'].level, 6, 'SHRINES[15,3] Forest Shrine level lowered to 6');
+              const noviceGuard = getScaledShrineGuard(SHRINES['15,3'], noviceProfile);
+              assertEqual(noviceGuard.level, 6, 'Novice Forest Shrine guard starts at Lv.6');
+              assertEqual(noviceGuard.upgradeTier, 0, 'Novice Forest Shrine guard has upgradeTier 0');
+              assertEqual(
+                JSON.stringify(noviceGuard.moveIds),
+                JSON.stringify(['thunder_shock', 'quick_attack', 'spark_dash']),
+                'Novice Forest Shrine guard omits thunderbolt',
+              );
+
+              const customPika = createPokemon(25, 6, 'forest', { moveIds: noviceGuard.moveIds });
+              assertEqual(
+                JSON.stringify(customPika.getMoveObjects().map((m) => m.id)),
+                JSON.stringify(['thunder_shock', 'quick_attack', 'spark_dash']),
+                'createPokemon({ moveIds }) overrides active moves without mutating SPECIES[25].movePool',
+              );
+              assertEqual(SPECIES[25].movePool.length, 4, 'SPECIES[25].movePool preserves all 4 canonical moves');
+              const roundTripPika = Pokemon.fromJSON(customPika.toJSON());
+              assertEqual(roundTripPika.speciesId, 25, 'Pokemon toJSON/fromJSON round-trips cleanly alongside custom moveIds');
+
+              const veteranProfile = {
+                badges: ['meadow', 'boulder', 'cascade', 'magma'],
+                shrinesCleared: ['forest_shrine', 'cave_shrine', 'water_shrine', 'volcano_shrine'],
+                team: [createPokemon(1, 14)],
+              };
+              const veteranGuard = getScaledShrineGuard(SHRINES['15,3'], veteranProfile);
+              assert(veteranGuard.upgradeTier >= 1, 'Veteran Forest Shrine guard scales upgradeTier >= 1');
+              assertEqual(veteranGuard.moveIds, undefined, 'Veteran Forest Shrine guard keeps full move kit');
+
+              const leoPartyIds = RIVAL_TRAINERS['11,5'].party.map((p) => `${p.speciesId}@${p.level}`);
+              assertEqual(JSON.stringify(leoPartyIds), JSON.stringify(['16@5', '43@6']), 'Ranger Leo (11,5) base party uses Pidgey Lv.5 + Oddish Lv.6');
+              const leoNovice = getScaledRivalParty(RIVAL_TRAINERS['11,5'], noviceProfile);
+              assertEqual(leoNovice[0].speciesId, 16, 'Novice scaled Leo leads with Pidgey');
+              assertEqual(leoNovice[1].level, 6, 'Novice scaled Leo partner stays Lv.6');
+              const leoVet = getScaledRivalParty(RIVAL_TRAINERS['11,5'], veteranProfile);
+              assert(leoVet[0].level >= 12 && leoVet[0].upgradeTier >= 1, 'Veteran scaled Leo continues scaling upward');
+
+              // (3) Readiness escalation on Squirtle vs Lv.6 Electric Shrine vs Bulbasaur & biome
+              const shrineSpec = { kind: 'shrine', source: 'shrine', targetLevel: 6, enemyTypes: ['electric'], typeChart: TYPE_CHART };
+              const biomeSpec = { kind: 'biome', targetLevel: 6, enemyTypes: ['electric'], typeChart: TYPE_CHART };
+              assertEqual(
+                assessEncounterReadiness([createPokemon(7, 5)], shrineSpec).tier,
+                'challenging',
+                'Solo Lv.5 Squirtle escalates Lv.6 Electric Shrine to challenging (Tough)',
+              );
+              assertEqual(
+                assessEncounterReadiness([createPokemon(1, 5)], shrineSpec).tier,
+                'balanced',
+                'Solo Lv.5 Bulbasaur stays balanced against Lv.6 Electric Shrine',
+              );
+              assertEqual(
+                assessEncounterReadiness([createPokemon(7, 5)], biomeSpec).tier,
+                'balanced',
+                'Non-shrine biome readiness stays non-escalated (balanced)',
+              );
+
+              // (4) Novice Starlight Compass onboarding sequence & post-Forest-Shrine compatibility
+              const cStep1 = getCompassGuidance({ badges: [], shrinesCleared: [], npcsTalked: [], questsCompleted: [], chestsOpened: [], pokedex: { caught: { 1: 1 } }, team: [createPokemon(1, 5)] }, SPECIES);
+              const cStep2 = getCompassGuidance({ badges: [], shrinesCleared: [], npcsTalked: ['npc_willow'], questsCompleted: [], chestsOpened: [], pokedex: { caught: { 1: 1 } }, team: [createPokemon(1, 5)] }, SPECIES);
+              const cStep3 = getCompassGuidance({ badges: [], shrinesCleared: [], npcsTalked: ['npc_willow', 'npc_fern'], questsCompleted: [], chestsOpened: [], pokedex: { caught: { 1: 1 } }, team: [createPokemon(1, 5)] }, SPECIES);
+              const cStep4 = getCompassGuidance({ badges: [], shrinesCleared: [], npcsTalked: ['npc_willow', 'npc_fern'], questsCompleted: [], chestsOpened: [], pokedex: { caught: { 1: 1, 10: 1, 29: 1 } }, team: [createPokemon(1, 5), createPokemon(10, 4)] }, SPECIES);
+              const cStep5 = getCompassGuidance({ badges: [], shrinesCleared: [], npcsTalked: ['npc_willow', 'npc_fern'], questsCompleted: [], chestsOpened: ['forest_chest'], pokedex: { caught: { 1: 1, 10: 1, 29: 1 } }, team: [createPokemon(1, 5), createPokemon(10, 4)] }, SPECIES);
+              const cCleared = getCompassGuidance({ badges: ['meadow'], shrinesCleared: ['forest_shrine'], npcsTalked: [], questsCompleted: [], chestsOpened: [], pokedex: { caught: { 1: 1 } }, team: [createPokemon(1, 7)] }, SPECIES);
+              assertEqual(cStep1?.title, 'Talk to Professor Willow', 'Compass step 1 targets Willow');
+              assertEqual(cStep2?.title, 'Meet Ranger Fern (North)', 'Compass step 2 targets Ranger Fern');
+              assertEqual(cStep3?.title, 'Catch Forest Friends', 'Compass step 3 targets Catch Forest Friends');
+              assertEqual(cStep4?.title, 'Claim Ranger Supplies', 'Compass step 4 targets Ranger Supplies');
+              assertEqual(cStep5?.title, 'Forest Shrine (North)', 'Compass step 5 targets Forest Shrine');
+              assertEqual(cCleared?.title, 'Crystal Shrine (East)', 'Cleared Forest Shrine preserves exact Crystal Shrine routing');
+
+              // (5) Sky-Hop live progress counters + #interact-pill suppression during #world-dialogue
+              window.localStorage.removeItem(STORAGE_KEY);
+              storage.state = storage.load();
+              app.selectTrainer('violet');
+              storage.chooseStarter(1);
+              app.enterOverworld(false);
+              app.closeDialogue();
+
+              storage.updatePosition(SECRET_ARCADE_SPOT.x, SECRET_ARCADE_SPOT.y + 1, 'up', false);
+              app.overworld?.syncFromProfile?.();
+              app.overworld?.refreshInteractHint?.();
+              assertEqual(app.interactPillEl?.hidden, false, '#interact-pill visible when facing Sky-Hop wall');
+
+              app.handleWorldInteract({
+                type: 'arcade',
+                key: SECRET_ARCADE_SPOT.key,
+                x: SECRET_ARCADE_SPOT.x,
+                y: SECRET_ARCADE_SPOT.y,
+                data: SECRET_ARCADE_SPOT,
+              });
+              const wallText = app.worldDialogueTextEl?.textContent || '';
+              assert(wallText.includes('1 Island Badge (0/1)'), `Sky-Hop un-attuned wall includes live badge progress (got "${wallText}")`);
+              assert(wallText.includes('5 Pokédex species (1/5)'), `Sky-Hop un-attuned wall includes live Pokédex progress (got "${wallText}")`);
+              assertEqual(app.dialogueOpen, true, '#world-dialogue is open after Sky-Hop knock');
+              assertEqual(app.worldDialogueEl?.hidden, false, '#world-dialogue element visible');
+              assertEqual(app.interactPillEl?.hidden, true, '#interact-pill suppressed while #world-dialogue is open (zero overlap)');
+
+              app.closeDialogue();
+              assertEqual(app.interactPillEl?.hidden, false, '#interact-pill restored cleanly after closeDialogue()');
+            } finally {
+              Math.random = origRand;
+              restoreAppFromSnapshot(app, snap);
+            }
+          },
+        },
+      ],
+    },
   ];
 }
 
