@@ -454,6 +454,149 @@ export function resolveMoveParticleShape(move) {
   return shapeByType[move.type] || 'circle';
 }
 
+const FALLBACK_TRAINERS = {
+  violet: { id: 'violet', name: 'Violet' },
+  ozias: { id: 'ozias', name: 'Ozias' },
+};
+
+function cleanBattleToken(raw) {
+  if (typeof raw !== 'string') return '';
+  return raw
+    .replace(/\{[^}]*\}/g, '')
+    .replace(/[{}]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function normalizeBattleTrainerNickname(raw) {
+  if (typeof raw !== 'string') return null;
+  const cleaned = cleanBattleToken(raw).slice(0, 18).trim();
+  return cleaned.length > 0 ? cleaned : null;
+}
+
+function resolveBattleTrainerDisplayName(profileOrContext = null, fallbackTrainerId = null) {
+  const trainersMap = Config.TRAINERS || FALLBACK_TRAINERS;
+  if (typeof profileOrContext === 'string') {
+    const key = profileOrContext.trim().toLowerCase();
+    if (trainersMap[key]?.name) return trainersMap[key].name;
+    return normalizeBattleTrainerNickname(profileOrContext) || 'Trainer';
+  }
+  const profileObj = (
+    profileOrContext
+    && typeof profileOrContext === 'object'
+    && profileOrContext.profile
+    && typeof profileOrContext.profile === 'object'
+  )
+    ? profileOrContext.profile
+    : profileOrContext;
+
+  const candidates = [
+    profileObj?.appearance?.nickname,
+    profileObj?.appearance?.customName,
+    profileObj?.appearance?.trainerName,
+    profileObj?.nickname,
+    profileObj?.customName,
+    profileObj?.trainerNickname,
+    profileObj?.customTrainerName,
+    profileOrContext?.customNickname,
+    profileOrContext?.trainerName,
+    profileObj?.trainerName,
+  ];
+  for (const cand of candidates) {
+    const norm = normalizeBattleTrainerNickname(cand);
+    if (!norm) continue;
+    const canonical = trainersMap[norm.toLowerCase()]?.name;
+    return canonical || norm;
+  }
+
+  const rawId = profileObj?.trainerId ?? profileOrContext?.trainerId ?? fallbackTrainerId;
+  if (typeof rawId === 'string') {
+    const canonical = trainersMap[rawId.trim().toLowerCase()]?.name;
+    if (canonical) return canonical;
+  }
+  return 'Trainer';
+}
+
+function formatBattleTextFallback(template, context = null) {
+  if (template === null || template === undefined) return '';
+  const str = String(template);
+  if (!str.includes('{') && !str.includes('}')) return str;
+
+  const ctx = (context && typeof context === 'object') ? context : {};
+  const profile = ctx.profile ?? ((ctx.trainerId || ctx.appearance || Array.isArray(ctx.team)) ? ctx : null);
+  const trainerName = resolveBattleTrainerDisplayName(ctx, ctx.trainerId ?? profile?.trainerId ?? null);
+  const rivalName = cleanBattleToken(ctx.rivalName ?? ctx.rival?.name ?? ctx.trainerData?.name) || 'Rival';
+  const pokemonName = cleanBattleToken(
+    ctx.pokemonName
+    ?? ctx.partnerName
+    ?? ctx.pokemon?.displayName
+    ?? ctx.pokemon?.name
+    ?? profile?.team?.[0]?.displayName
+    ?? profile?.team?.[0]?.name,
+  ) || 'Partner';
+  const moveName = cleanBattleToken(ctx.moveName ?? ctx.move?.name) || 'Move';
+
+  let out = str;
+  for (let pass = 0; pass < 2; pass++) {
+    const next = out.replace(/\{([^{}]+)\}/g, (_, inner) => {
+      const trimmed = inner.trim();
+      const norm = trimmed.toLowerCase().replace(/[\s_-]+/g, '');
+      if (
+        norm === 'trainer'
+        || norm === 'trainername'
+        || norm === 'playername'
+        || norm === 'player'
+        || norm === 'customname'
+        || norm === 'nickname'
+        || norm === 'trainernickname'
+        || norm.startsWith('trainer')
+        || norm.startsWith('player')
+      ) {
+        return trainerName;
+      }
+      if (norm === 'name') {
+        return cleanBattleToken(ctx.name) || trainerName;
+      }
+      if (norm === 'rival' || norm === 'rivalname') {
+        return rivalName;
+      }
+      if (norm === 'pokemon' || norm === 'pokemonname' || norm === 'partner' || norm === 'partnername') {
+        return pokemonName;
+      }
+      if (norm === 'move' || norm === 'movename') {
+        return moveName;
+      }
+      const rawVal = ctx[trimmed];
+      if (typeof rawVal === 'number' && Number.isFinite(rawVal)) {
+        return String(rawVal);
+      }
+      if (typeof rawVal === 'string') {
+        const cleanedVal = cleanBattleToken(rawVal);
+        if (cleanedVal) return cleanedVal;
+      }
+      return cleanBattleToken(inner) || trainerName;
+    });
+    if (next === out) break;
+    out = next;
+  }
+  return out.replace(/[{}]/g, '');
+}
+
+function clampSafeSliceIndex(str, idx) {
+  let end = Math.max(0, Math.min(str.length, idx));
+  if (end > 0 && end < str.length) {
+    const prevCode = str.charCodeAt(end - 1);
+    const nextCode = str.charCodeAt(end);
+    if (prevCode >= 0xD800 && prevCode <= 0xDBFF && nextCode >= 0xDC00 && nextCode <= 0xDFFF) {
+      end += 1;
+    }
+    if (end < str.length && str.charCodeAt(end) === 0xFE0F) {
+      end += 1;
+    }
+  }
+  return end;
+}
+
 export class BattleEngine {
   constructor({ storage, audio, onBattleEnd, onBadgesUnlocked, onHudRefresh }) {
     this.storage = storage;
@@ -547,6 +690,9 @@ export class BattleEngine {
     this.typingHoldTimer = null;
     this.typingResolve = null;
     this.typingFullText = '';
+    this._logContentEl = null;
+    this._logTypedEl = null;
+    this._logGhostEl = null;
     this._lastSkipPointerUpAt = -1000;
 
     this.displayedEnemyHp = 0;
@@ -776,12 +922,79 @@ export class BattleEngine {
     this.syncMoveSelectionVisuals();
   }
 
+  formatBattleText(text, extraContext = {}) {
+    if (text === null || text === undefined) return '';
+    const profile = this.storage?.getActiveProfile?.() || null;
+    const ctx = {
+      profile,
+      trainerId: profile?.trainerId ?? this.storage?.state?.activeTrainerId ?? null,
+      pokemon: this.player || null,
+      pokemonName: this.player?.displayName || this.player?.name || null,
+      partnerName: this.player?.displayName || this.player?.name || null,
+      enemy: this.enemy || null,
+      enemyName: this.enemy?.name || null,
+      trainerData: this.trainerData || null,
+      rivalName: this.trainerData?.name || null,
+      ...(extraContext && typeof extraContext === 'object' ? extraContext : {}),
+    };
+    const raw = typeof Config.formatGameText === 'function'
+      ? Config.formatGameText(text, ctx)
+      : formatBattleTextFallback(text, ctx);
+    return typeof raw === 'string' && (raw.includes('{') || raw.includes('}'))
+      ? formatBattleTextFallback(raw, ctx)
+      : String(raw ?? '');
+  }
+
+  applyLogTextMetrics(text) {
+    if (!this.logEl) return;
+    const len = String(text ?? '').length;
+    this.logEl.classList.toggle('is-long-text', len >= 89 && len <= 140);
+    this.logEl.classList.toggle('is-xlong-text', len > 140);
+  }
+
+  _ensureLogSpans() {
+    if (!this.logEl) return false;
+    const valid = (
+      this._logContentEl?.parentNode === this.logEl
+      && this._logTypedEl?.parentNode === this._logContentEl
+      && this._logGhostEl?.parentNode === this._logContentEl
+      && this.logEl.childNodes.length === 1
+      && this._logContentEl.childNodes.length === 2
+    );
+    if (valid) return true;
+
+    const contentEl = document.createElement('span');
+    contentEl.className = 'battle-log-content';
+    const typedEl = document.createElement('span');
+    typedEl.className = 'battle-log-typed';
+    const ghostEl = document.createElement('span');
+    ghostEl.className = 'battle-log-ghost';
+    ghostEl.setAttribute('aria-hidden', 'true');
+    contentEl.append(typedEl, ghostEl);
+
+    this.logEl.textContent = '';
+    this.logEl.appendChild(contentEl);
+    this._logContentEl = contentEl;
+    this._logTypedEl = typedEl;
+    this._logGhostEl = ghostEl;
+    return true;
+  }
+
+  _renderLogText(typedText, ghostText = '') {
+    if (!this._ensureLogSpans()) return;
+    this._logTypedEl.textContent = String(typedText ?? '');
+    this._logGhostEl.textContent = String(ghostText ?? '');
+  }
+
   setIdlePrompt(text) {
     this.finishTypewriter();
-    this.typingFullText = text;
+    const safeText = this.formatBattleText(text);
+    this.typingFullText = safeText;
+    this.applyLogTextMetrics(safeText);
     if (this.logEl) {
       this.logEl.classList.remove('is-typing', 'is-waiting');
-      this.logEl.textContent = text;
+      this._renderLogText(safeText, '');
+      this.logEl.scrollTop = 0;
     }
   }
 
@@ -1011,30 +1224,34 @@ export class BattleEngine {
       }
     }
 
-    const playerName = this.player.displayName || this.player.name;
+    const playerName = this.formatBattleText(this.player.displayName || this.player.name);
+    const enemyName = this.formatBattleText(leadEnemy.name);
     const traitTag = wildTrait ? ` (${wildTrait.callout})` : '';
     let introMsg = '';
     if (isShrine && shrineData) {
       if (shrineData.isAstralTrial) {
-        introMsg = `🌟 Astral Shrine Trial #${shrineData.trialNumber || 1}! Guardian ${leadEnemy.name} appeared! Go, ${playerName}!`;
+        introMsg = `🌟 Astral Shrine Trial #${shrineData.trialNumber || 1}! Guardian ${enemyName} appeared! Go, ${playerName}!`;
       } else {
         introMsg = shrineData.intro;
       }
     } else if (this.isTrainer && this.trainerData) {
       const isRematch = Boolean(this.trainerData.id && profile.rivalsDefeated?.includes(this.trainerData.id));
-      const line = (isRematch && this.trainerData.rematchIntro) || this.trainerData.intro;
+      const rawLine = (isRematch && this.trainerData.rematchIntro) || this.trainerData.intro;
+      const rivalName = this.formatBattleText(this.trainerData.name || 'Rival');
+      const line = rawLine ? this.formatBattleText(rawLine, { rivalName }) : '';
       introMsg = line
-        ? `${this.trainerData.name}: "${line}" Sent out ${leadEnemy.name}! Go, ${playerName}!`
-        : `${this.trainerData.name} sent out ${leadEnemy.name}! Go, ${playerName}!`;
+        ? `${rivalName}: "${line}" Sent out ${enemyName}! Go, ${playerName}!`
+        : `${rivalName} sent out ${enemyName}! Go, ${playerName}!`;
     } else if (leadEnemy.isElite && leadEnemy.isShiny) {
-      introMsg = `✨ A rare ELITE wild ${leadEnemy.name}${traitTag} appeared! (Starlight Shimmer!) Go, ${playerName}!`;
+      introMsg = `✨ A rare ELITE wild ${enemyName}${traitTag} appeared! (Starlight Shimmer!) Go, ${playerName}!`;
     } else if (leadEnemy.isElite) {
-      introMsg = `⚡ A rare ELITE wild ${leadEnemy.name}${traitTag} appeared! Go, ${playerName}!`;
+      introMsg = `⚡ A rare ELITE wild ${enemyName}${traitTag} appeared! Go, ${playerName}!`;
     } else if (leadEnemy.isShiny) {
-      introMsg = `✨ A rare Starlight Shimmer ${leadEnemy.name}${traitTag} appeared! Go, ${playerName}!`;
+      introMsg = `✨ A rare Starlight Shimmer ${enemyName}${traitTag} appeared! Go, ${playerName}!`;
     } else {
-      introMsg = `A wild ${leadEnemy.name}${traitTag} appeared! Go, ${playerName}!`;
+      introMsg = `A wild ${enemyName}${traitTag} appeared! Go, ${playerName}!`;
     }
+    introMsg = this.formatBattleText(introMsg);
     await this.say(introMsg);
 
     if (!this.isSessionValid(sid)) return;
@@ -1250,7 +1467,7 @@ export class BattleEngine {
     enemyCard?.classList.toggle('is-elite-card', Boolean(this.enemy.isElite));
     this.enemySpriteEl?.classList.toggle('is-elite-sprite', Boolean(this.enemy.isElite));
 
-    if (this.enemyNameEl) this.enemyNameEl.textContent = this.enemy.name;
+    if (this.enemyNameEl) this.enemyNameEl.textContent = this.formatBattleText(this.enemy.name);
     if (this.enemyLevelEl) {
       this.enemyLevelEl.textContent = `Lv.${this.enemy.level}`;
       const levelGap = (Number(this.enemy.level) || 1) - (Number(this.player.level) || 1);
@@ -1276,7 +1493,8 @@ export class BattleEngine {
       if (Array.isArray(this.enemyParty) && this.enemyParty.length > 1) {
         pipsEl.innerHTML = this.enemyParty.map((mon, idx) => {
           const stateCls = mon?.isFainted ? ' is-fainted' : idx === this.enemyPartyIndex ? ' is-active' : '';
-          const title = mon ? `${mon.name} Lv.${mon.level}${mon.isFainted ? ' (Fainted)' : ''}` : '';
+          const monLabel = mon ? this.formatBattleText(mon.name) : '';
+          const title = mon ? `${monLabel} Lv.${mon.level}${mon.isFainted ? ' (Fainted)' : ''}` : '';
           return `<span class="enemy-party-pip${stateCls}" title="${title}"></span>`;
         }).join('');
         pipsEl.hidden = false;
@@ -1290,7 +1508,7 @@ export class BattleEngine {
       this.renderStagePills(this.enemyStagesEl, this.enemy, { isEnemy: true });
     }
 
-    if (this.playerNameEl) this.playerNameEl.textContent = this.player.displayName || this.player.name;
+    if (this.playerNameEl) this.playerNameEl.textContent = this.formatBattleText(this.player.displayName || this.player.name);
     if (this.playerLevelEl) this.playerLevelEl.textContent = `Lv.${this.player.level}`;
     this.syncRankPill('player', this.player);
     const pType = resolveTypeMeta(this.player.type);
@@ -1683,11 +1901,13 @@ export class BattleEngine {
     const resolvedHold = holdMs !== null && holdMs !== undefined && Number.isFinite(Number(holdMs))
       ? Number(holdMs)
       : pace.sayHoldMs;
-    const safeText = String(text ?? '');
+    const safeText = this.formatBattleText(text);
     this.typingFullText = safeText;
+    this.applyLogTextMetrics(safeText);
 
     if (this.logEl) {
-      this.logEl.textContent = '';
+      this._renderLogText('', safeText);
+      this.logEl.scrollTop = 0;
       this.logEl.classList.remove('is-waiting');
       this.logEl.classList.add('is-typing');
     }
@@ -1702,7 +1922,7 @@ export class BattleEngine {
           this.typingTimer = null;
         }
         if (this.logEl) {
-          this.logEl.textContent = safeText;
+          this._renderLogText(safeText, '');
           this.logEl.classList.remove('is-typing');
           this.logEl.classList.add('is-waiting');
         }
@@ -1731,9 +1951,9 @@ export class BattleEngine {
       this.typingTimer = setInterval(() => {
         const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
         const elapsedChars = Math.floor((now - startedAt) / Math.max(1, resolvedSpeed));
-        idx = Math.min(safeText.length, Math.max(idx + 1, elapsedChars));
+        idx = clampSafeSliceIndex(safeText, Math.max(idx + 1, elapsedChars));
         if (this.logEl) {
-          this.logEl.textContent = safeText.slice(0, idx);
+          this._renderLogText(safeText.slice(0, idx), safeText.slice(idx));
         }
         if (idx >= safeText.length) {
           enterWaitingPhase();
@@ -1754,7 +1974,8 @@ export class BattleEngine {
     if (this.logEl) {
       this.logEl.classList.remove('is-typing', 'is-waiting');
       if (this.typingFullText) {
-        this.logEl.textContent = this.typingFullText;
+        this.applyLogTextMetrics(this.typingFullText);
+        this._renderLogText(this.typingFullText, '');
       }
     }
     if (this.typingResolve) {
@@ -1822,7 +2043,7 @@ export class BattleEngine {
       vy: -44,
       life: -delay,
       maxLife,
-      text,
+      text: this.formatBattleText(text),
       color,
       size,
     });
@@ -2035,7 +2256,7 @@ export class BattleEngine {
     const bannerEl = this.abilityBannerEl || this.ensureAbilityBannerEl();
     const spriteEl = side === 'enemy' ? this.enemySpriteEl : this.playerSpriteEl;
     const abilityType = ability.type || 'normal';
-    const summaryText = String(effectSummary || '').trim();
+    const summaryText = this.formatBattleText(String(effectSummary || '').trim());
 
     if (this.stageEl) {
       this.stageEl.dataset.abilityAura = abilityType;
@@ -2049,7 +2270,7 @@ export class BattleEngine {
       iconSpan.textContent = ability.icon || '✨';
       const textSpan = document.createElement('span');
       textSpan.className = 'ability-banner-text';
-      textSpan.textContent = summaryText ? `${ability.name} — ${summaryText}` : ability.name;
+      textSpan.textContent = this.formatBattleText(summaryText ? `${ability.name} — ${summaryText}` : ability.name);
       bannerEl.append(iconSpan, ' ', textSpan);
       bannerEl.dataset.type = abilityType;
       bannerEl.dataset.side = side === 'enemy' ? 'enemy' : 'player';
@@ -8282,8 +8503,8 @@ export class BattleEngine {
       this.spawnFloatingText(atkCenter.x, atkCenter.y - 34, '0 PP → STRUGGLE!', '#fde047', 16, 0, 1.25);
     }
 
-    const attackerLabel = isPlayer ? (attacker.displayName || attacker.name) : attacker.name;
-    await this.say(`${attackerLabel} used ${move.name}!`);
+    const attackerLabel = this.formatBattleText(isPlayer ? (attacker.displayName || attacker.name) : attacker.name);
+    await this.say(this.formatBattleText(`${attackerLabel} used ${move.name}!`, { move, moveName: move.name }));
     if (!this.isSessionValid(sid) || attacker.isFainted || defender.isFainted) return true;
 
     const rawResult = PokemonMod.calculateDamage(attacker, defender, move, {
@@ -9059,7 +9280,7 @@ export class BattleEngine {
         this.spawnEliteIntroAura('enemy');
       }
 
-      const rivalName = this.trainerData?.name || 'Rival';
+      const rivalName = this.formatBattleText(this.trainerData?.name || 'Rival');
       await this.say(`${rivalName} sent out ${this.enemy.name}!`);
       if (!this.isSessionValid(sid)) return;
 
@@ -9724,7 +9945,7 @@ export class BattleEngine {
       const info = document.createElement('div');
       const titleRow = document.createElement('div');
       const nameEl = document.createElement('strong');
-      nameEl.textContent = `${mon.isShiny ? '✨ ' : ''}${mon.displayName || mon.name}`;
+      nameEl.textContent = this.formatBattleText(`${mon.isShiny ? '✨ ' : ''}${mon.displayName || mon.name}`);
       titleRow.appendChild(nameEl);
       if ((mon.upgradeTier || 0) > 0) {
         const rankEl = document.createElement('span');

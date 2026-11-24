@@ -155,6 +155,135 @@ function getResolvedTrainerLook(trainerId, appearance = null) {
   };
 }
 
+function _cleanOverworldTokenText(raw) {
+  if (typeof raw !== 'string') return '';
+  return raw
+    .replace(/\{[^}]*\}/g, '')
+    .replace(/[{}]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function _normalizeOverworldNickname(raw) {
+  if (typeof raw !== 'string') return null;
+  const cleaned = _cleanOverworldTokenText(raw).slice(0, 18).trim();
+  return cleaned.length > 0 ? cleaned : null;
+}
+
+function _resolveOverworldTrainerName(profileOrContext = null, fallbackTrainerId = null) {
+  if (typeof Config.resolveTrainerDisplayName === 'function') {
+    return Config.resolveTrainerDisplayName(profileOrContext, fallbackTrainerId);
+  }
+  if (typeof profileOrContext === 'string') {
+    const key = profileOrContext.trim().toLowerCase();
+    if (TRAINERS[key]?.name) return TRAINERS[key].name;
+    return _normalizeOverworldNickname(profileOrContext) || 'Trainer';
+  }
+  const profileObj = (
+    profileOrContext &&
+    typeof profileOrContext === 'object' &&
+    profileOrContext.profile &&
+    typeof profileOrContext.profile === 'object'
+  )
+    ? profileOrContext.profile
+    : profileOrContext;
+
+  const candidates = [
+    profileObj?.appearance?.nickname,
+    profileObj?.appearance?.customName,
+    profileObj?.appearance?.trainerName,
+    profileObj?.nickname,
+    profileObj?.customName,
+    profileObj?.trainerNickname,
+    profileObj?.customTrainerName,
+    profileOrContext?.customNickname,
+    profileOrContext?.trainerName,
+    profileObj?.trainerName,
+  ];
+  for (const cand of candidates) {
+    const cleaned = _normalizeOverworldNickname(cand);
+    if (cleaned) {
+      const canonical = TRAINERS[cleaned.toLowerCase()]?.name;
+      return canonical || cleaned;
+    }
+  }
+
+  const rawId = profileObj?.trainerId ?? profileOrContext?.trainerId ?? fallbackTrainerId;
+  if (typeof rawId === 'string') {
+    const canonical = TRAINERS[rawId.trim().toLowerCase()]?.name;
+    if (canonical) return canonical;
+  }
+  return 'Trainer';
+}
+
+function _formatOverworldText(template, context = null) {
+  if (template === null || template === undefined) return '';
+  const str = String(template);
+  if (!str.includes('{') && !str.includes('}')) return str;
+  if (typeof Config.formatGameText === 'function') {
+    return String(Config.formatGameText(str, context)).replace(/[{}]/g, '');
+  }
+
+  const ctx = (context && typeof context === 'object') ? context : {};
+  const profile = ctx.profile ?? ((ctx.trainerId || ctx.appearance || Array.isArray(ctx.team)) ? ctx : null);
+  const trainerName = _resolveOverworldTrainerName(ctx, ctx.trainerId ?? profile?.trainerId ?? null);
+  const rivalName = _cleanOverworldTokenText(ctx.rivalName ?? ctx.rival?.name ?? ctx.trainerData?.name) || 'Rival';
+  const pokemonName = _cleanOverworldTokenText(
+    ctx.pokemonName ??
+    ctx.partnerName ??
+    ctx.pokemon?.displayName ??
+    ctx.pokemon?.name ??
+    profile?.team?.[0]?.displayName ??
+    profile?.team?.[0]?.name
+  ) || 'Partner';
+  const moveName = _cleanOverworldTokenText(ctx.moveName ?? ctx.move?.name) || 'Move';
+
+  let out = str;
+  for (let pass = 0; pass < 2 && out.includes('{'); pass++) {
+    const next = out.replace(/\{([^{}]+)\}/g, (_, inner) => {
+      const trimmed = inner.trim();
+      const norm = trimmed.toLowerCase().replace(/[\s_-]+/g, '');
+      if (
+        norm === 'trainer' ||
+        norm === 'trainername' ||
+        norm === 'playername' ||
+        norm === 'player' ||
+        norm === 'customname' ||
+        norm === 'nickname' ||
+        norm === 'trainernickname' ||
+        norm.startsWith('trainer') ||
+        norm.startsWith('player')
+      ) {
+        return trainerName;
+      }
+      if (norm === 'name') {
+        return _cleanOverworldTokenText(ctx.name) || trainerName;
+      }
+      if (norm === 'rival' || norm === 'rivalname') {
+        return rivalName;
+      }
+      if (norm === 'pokemon' || norm === 'pokemonname' || norm === 'partner' || norm === 'partnername') {
+        return pokemonName;
+      }
+      if (norm === 'move' || norm === 'movename') {
+        return moveName;
+      }
+      const directVal = ctx[trimmed];
+      if (typeof directVal === 'number' && Number.isFinite(directVal)) {
+        return String(directVal);
+      }
+      if (typeof directVal === 'string') {
+        const cleanedDirect = _cleanOverworldTokenText(directVal);
+        if (cleanedDirect) return cleanedDirect;
+      }
+      return _cleanOverworldTokenText(trimmed) || trainerName;
+    });
+    if (next === out) break;
+    out = next;
+  }
+  return out.replace(/[{}]/g, '');
+}
+
 const ENCOUNTER_TILE_BIOME = {
   [TILE.TALL_GRASS]: 'forest',
   [TILE.CAVE_FLOOR]: 'cave',
@@ -590,7 +719,8 @@ export function drawTrainerPortrait(canvas, trainerId, appearance = null) {
 
 export class OverworldEngine {
   constructor(canvas, {
-    getProfile,
+    getProfile = null,
+    storage = null,
     onStepSaved,
     onWildEncounter,
     onDiscoveryNode = null,
@@ -605,7 +735,10 @@ export class OverworldEngine {
     this.viewW = GAME_META.viewportCols * this.tileSize;
     this.viewH = GAME_META.viewportRows * this.tileSize;
 
-    this.getProfile = getProfile;
+    this.storage = storage || null;
+    this.getProfile = typeof getProfile === 'function'
+      ? getProfile
+      : (() => this.storage?.getActiveProfile?.() ?? null);
     this.onStepSaved = onStepSaved;
     this.onWildEncounter = onWildEncounter;
     this.onDiscoveryNode = onDiscoveryNode;
@@ -1611,22 +1744,102 @@ export class OverworldEngine {
     }
   }
 
+  _getActiveProfile() {
+    return this.storage?.getActiveProfile?.() ?? this.getProfile?.() ?? null;
+  }
+
+  /**
+   * Resolve `{trainer}` and related placeholders for overworld labels, hints, and dialogue payloads.
+   * @param {string|null|undefined} text
+   * @param {object} [extraContext]
+   * @returns {string}
+   */
+  formatOverworldText(text, extraContext = {}) {
+    if (text === null || text === undefined) return '';
+    const str = String(text);
+    if (!str.includes('{') && !str.includes('}')) return str;
+    const profile = this._getActiveProfile();
+    const lead = profile?.team?.[0] ?? null;
+    const ctx = {
+      profile,
+      trainerId: profile?.trainerId ?? null,
+      pokemon: lead,
+      ...(extraContext && typeof extraContext === 'object' ? extraContext : {}),
+    };
+    return _formatOverworldText(str, ctx);
+  }
+
+  _formatInteractiveData(data, extraContext = {}) {
+    if (typeof data === 'string') {
+      return this.formatOverworldText(data, extraContext);
+    }
+    if (!data || typeof data !== 'object' || Array.isArray(data)) {
+      return data ?? null;
+    }
+    let cloned = null;
+    for (const [field, val] of Object.entries(data)) {
+      if (typeof val === 'string' && (val.includes('{') || val.includes('}'))) {
+        if (!cloned) cloned = { ...data };
+        cloned[field] = this.formatOverworldText(val, extraContext);
+      }
+    }
+    return cloned || data;
+  }
+
+  _sanitizeInteractTarget(target) {
+    if (!target || typeof target !== 'object') return target ?? null;
+    const extraContext = {};
+    if (target.type === 'rival' && target.data && typeof target.data === 'object') {
+      extraContext.rivalName = target.data.name;
+      extraContext.rival = target.data;
+    } else if (target.data && typeof target.data === 'object' && target.data.name) {
+      extraContext.name = target.data.name;
+    }
+    const rawLabel = target.label;
+    const safeLabel = typeof rawLabel === 'string'
+      ? this.formatOverworldText(rawLabel, extraContext)
+      : rawLabel;
+    const safeData = this._formatInteractiveData(target.data, extraContext);
+    if (safeLabel === rawLabel && safeData === target.data) {
+      return target;
+    }
+    return {
+      ...target,
+      label: safeLabel,
+      data: safeData,
+    };
+  }
+
   getInteractiveAtTile(tx, ty) {
     if (!Number.isInteger(tx) || !Number.isInteger(ty)) return null;
     if (tx < 0 || ty < 0 || tx >= WORLD_COLS || ty >= WORLD_ROWS) return null;
-    const profile = this.getProfile?.();
+    const profile = this._getActiveProfile();
     const tile = WORLD_MAP[ty]?.[tx];
     const key = `${tx},${ty}`;
 
     if (tile === TILE.SIGN && SIGNPOSTS[key]) {
-      return { type: 'sign', key, x: tx, y: ty, label: '💬 Read Sign', data: SIGNPOSTS[key] };
+      return this._sanitizeInteractTarget({
+        type: 'sign',
+        key,
+        x: tx,
+        y: ty,
+        label: '💬 Read Sign',
+        data: SIGNPOSTS[key],
+      });
     }
     if (tile === TILE.SHRINE && SHRINES[key]) {
-      return { type: 'shrine', key, x: tx, y: ty, label: `⚔️ ${SHRINES[key].name}`, data: SHRINES[key] };
+      return this._sanitizeInteractTarget({
+        type: 'shrine',
+        key,
+        x: tx,
+        y: ty,
+        label: `⚔️ ${SHRINES[key].name}`,
+        data: SHRINES[key],
+      });
     }
     if (tile === TILE.CHEST && CHESTS[key]) {
       const opened = Boolean(profile?.chestsOpened?.includes(CHESTS[key].id));
-      return {
+      return this._sanitizeInteractTarget({
         type: 'chest',
         key,
         x: tx,
@@ -1634,45 +1847,52 @@ export class OverworldEngine {
         label: opened ? '📦 Empty Chest' : '💎 Open Chest',
         data: CHESTS[key],
         opened,
-      };
+      });
     }
     if (tile === TILE.HEAL) {
-      return { type: 'heal', key, x: tx, y: ty, label: '💖 Healing Fountain', data: null };
+      return this._sanitizeInteractTarget({
+        type: 'heal',
+        key,
+        x: tx,
+        y: ty,
+        label: '💖 Healing Fountain',
+        data: null,
+      });
     }
     if (NPCS[key]) {
-      return {
+      return this._sanitizeInteractTarget({
         type: 'npc',
         key,
         x: tx,
         y: ty,
         label: `💬 Talk: ${NPCS[key].name}`,
         data: NPCS[key],
-      };
+      });
     }
     if (RIVAL_TRAINERS[key]) {
       const rival = RIVAL_TRAINERS[key];
-      return {
+      return this._sanitizeInteractTarget({
         type: 'rival',
         key,
         x: tx,
         y: ty,
         label: `⚔️ Battle ${rival.name}`,
         data: rival,
-      };
+      });
     }
     if (LANDMARKS[key]) {
-      return {
+      return this._sanitizeInteractTarget({
         type: 'landmark',
         key,
         x: tx,
         y: ty,
         label: `${LANDMARKS[key].icon} ${LANDMARKS[key].name}`,
         data: LANDMARKS[key],
-      };
+      });
     }
     if (SECRET_ARCADE_SPOT && SECRET_ARCADE_SPOT.x === tx && SECRET_ARCADE_SPOT.y === ty) {
-      const unlocked = Boolean(this.getProfile?.()?.arcade?.unlocked);
-      return {
+      const unlocked = Boolean(profile?.arcade?.unlocked);
+      return this._sanitizeInteractTarget({
         type: 'arcade',
         key,
         x: tx,
@@ -1680,33 +1900,41 @@ export class OverworldEngine {
         unlocked,
         label: unlocked ? `${SECRET_ARCADE_SPOT.icon} ${SECRET_ARCADE_SPOT.name}` : '🔍 Mysterious Wall',
         data: SECRET_ARCADE_SPOT,
-      };
+      });
     }
     return null;
   }
 
   getInteractiveTarget() {
-    const profile = this.getProfile();
+    const profile = this._getActiveProfile();
     if (!profile) return null;
     const { x, y, dir } = profile.pos;
 
     const vec = DIR_VEC[dir] || DIR_VEC.down;
     const faced = this.getInteractiveAtTile(x + vec.dx, y + vec.dy);
     if (faced && faced.type !== 'heal') {
-      return faced;
+      return this._sanitizeInteractTarget(faced);
     }
 
     if (WORLD_MAP[y]?.[x] === TILE.HEAL) {
-      return { type: 'heal', key: `${x},${y}`, x, y, label: '💖 Heal Team', data: null };
+      return this._sanitizeInteractTarget({
+        type: 'heal',
+        key: `${x},${y}`,
+        x,
+        y,
+        label: '💖 Heal Team',
+        data: null,
+      });
     }
 
-    return faced;
+    return this._sanitizeInteractTarget(faced);
   }
 
   refreshInteractHint() {
-    const target = this.getInteractiveTarget();
+    const target = this._sanitizeInteractTarget(this.getInteractiveTarget());
+    const trainerTag = target ? _resolveOverworldTrainerName(this._getActiveProfile()) : '';
     const hintKey = target
-      ? `${target.type}:${target.key}:${target.opened ? '1' : '0'}:${target.unlocked ? '1' : '0'}`
+      ? `${target.type}:${target.key}:${target.opened ? '1' : '0'}:${target.unlocked ? '1' : '0'}:${target.label || ''}:${trainerTag}`
       : 'none';
     if (hintKey !== this.lastHintKey) {
       this.lastHintKey = hintKey;
@@ -1716,7 +1944,7 @@ export class OverworldEngine {
 
   triggerInteract() {
     if (!this.active || this.paused || this.moving) return false;
-    const target = this.getInteractiveTarget();
+    const target = this._sanitizeInteractTarget(this.getInteractiveTarget());
     if (!target) return false;
     this.onInteract?.(target);
     return true;
@@ -1724,7 +1952,9 @@ export class OverworldEngine {
 
   _triggerSelfHeal(x, y) {
     if (typeof this.onInteract === 'function') {
-      this.onInteract({ type: 'heal', key: `${x},${y}`, x, y, label: '💖 Heal Team', data: null });
+      this.onInteract(
+        this._sanitizeInteractTarget({ type: 'heal', key: `${x},${y}`, x, y, label: '💖 Heal Team', data: null }),
+      );
     } else {
       this.onHealSpot?.();
     }

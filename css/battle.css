@@ -2864,30 +2864,52 @@
 
 /* --- Arcade Battle Command Deck & Elemental Move Cards --- */
 .battle-deck {
-  flex-shrink: 0;
+  --battle-log-height: 68px;
+  --battle-act-row-height: 29px;
+  --battle-act-gap: 5px;
+  --battle-left-gap: 6px;
+  --battle-moves-height: 112px;
+  flex: 0 0 auto;
   background: linear-gradient(180deg, #172136 0%, #0b1120 100%);
   border-top: 3px solid rgba(226, 232, 240, 0.28);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12);
   padding: 10px 12px 11px;
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 8px;
 }
 
 .battle-deck-left {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
+  display: grid;
+  grid-template-rows: var(--battle-log-height) calc(var(--battle-act-row-height) * 2 + var(--battle-act-gap));
+  gap: var(--battle-left-gap);
   min-width: 0;
 }
 
 @media (min-width: 640px) {
   .battle-deck {
+    --battle-log-height: 72px;
+    --battle-act-row-height: 31px;
+    --battle-act-gap: 5px;
+    --battle-left-gap: 8px;
+    --battle-col-height: calc(var(--battle-log-height) + var(--battle-left-gap) + var(--battle-act-row-height) * 2 + var(--battle-act-gap));
     display: grid;
     grid-template-columns: minmax(255px, 1fr) minmax(305px, 1.24fr);
+    grid-template-rows: var(--battle-col-height);
     gap: 11px;
     align-items: stretch;
     padding: 11px 14px 12px;
+  }
+  .battle-deck-left {
+    height: var(--battle-col-height);
+    min-height: var(--battle-col-height);
+    max-height: var(--battle-col-height);
+  }
+  #battle-moves.battle-moves {
+    height: var(--battle-col-height);
+    min-height: var(--battle-col-height);
+    max-height: var(--battle-col-height);
+    grid-template-rows: repeat(2, minmax(0, 1fr));
   }
 }
 
@@ -2907,18 +2929,28 @@
 /* Classic Double-Beveled Arcade Dialogue Console */
 .battle-log {
   position: relative;
+  height: var(--battle-log-height);
+  min-height: var(--battle-log-height);
+  max-height: var(--battle-log-height);
+  flex: 0 0 var(--battle-log-height);
+  box-sizing: border-box;
   background: linear-gradient(180deg, #070d1c 0%, #03060f 100%);
   border: 3px solid #e2e8f0;
   border-radius: 11px;
-  padding: 10px 30px 10px 14px;
-  min-height: 50px;
-  flex: 1 1 auto;
+  padding: 7px 26px 7px 12px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  overscroll-behavior: contain;
   display: flex;
-  align-items: center;
-  font-size: 0.9rem;
+  align-items: safe center;
+  font-size: 0.86rem;
   font-weight: 800;
   letter-spacing: 0.015em;
-  line-height: 1.32;
+  line-height: 1.24;
+  word-break: break-word;
+  overflow-wrap: anywhere;
   color: #f8fafc;
   text-shadow: 0 2px 0 #020617;
   box-shadow:
@@ -2928,6 +2960,32 @@
     0 4px 0 #040711;
   cursor: pointer;
   user-select: none;
+}
+
+.battle-log::-webkit-scrollbar {
+  display: none;
+}
+
+.battle-log-content {
+  display: block;
+  width: 100%;
+  margin: auto 0;
+}
+
+.battle-log-ghost {
+  opacity: 0;
+  pointer-events: none;
+  user-select: none;
+}
+
+.battle-log.is-long-text {
+  font-size: 0.78rem;
+  line-height: 1.18;
+}
+
+.battle-log.is-xlong-text {
+  font-size: 0.7rem;
+  line-height: 1.14;
 }
 
 .battle-log.is-waiting::after {
@@ -2950,7 +3008,12 @@
 .battle-moves {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-rows: repeat(2, minmax(0, 1fr));
   gap: 8px;
+  height: var(--battle-moves-height);
+  min-height: var(--battle-moves-height);
+  max-height: var(--battle-moves-height);
+  min-width: 0;
 }
 
 /* High-Energy Elemental Attack Cards */
@@ -2960,6 +3023,9 @@
   --move-border: #94a3b8;
   position: relative;
   overflow: hidden;
+  height: 100%;
+  min-height: 0;
+  box-sizing: border-box;
   display: flex;
   flex-direction: column;
   justify-content: space-between;
@@ -3546,30 +3612,24 @@
 
 .battle-actions {
   display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
-  gap: 6px;
-}
-
-.battle-actions .battle-act-btn:nth-child(-n+3) {
-  grid-column: span 2;
-}
-
-.battle-actions .battle-act-btn:nth-child(n+4) {
-  grid-column: span 3;
-}
-
-.battle-actions:has(.is-star) .battle-act-btn {
-  grid-column: span 2;
-  padding: 7px 4px;
-  font-size: clamp(0.62rem, 1.38vw, 0.73rem);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-rows: repeat(2, var(--battle-act-row-height));
+  gap: var(--battle-act-gap);
+  height: calc(var(--battle-act-row-height) * 2 + var(--battle-act-gap));
+  min-height: calc(var(--battle-act-row-height) * 2 + var(--battle-act-gap));
+  max-height: calc(var(--battle-act-row-height) * 2 + var(--battle-act-gap));
+  min-width: 0;
 }
 
 .battle-act-btn {
   width: 100%;
+  height: 100%;
   min-width: 0;
+  min-height: 0;
+  box-sizing: border-box;
   overflow: hidden;
   text-overflow: ellipsis;
-  padding: 7px 6px;
+  padding: 6px 4px;
   border-radius: 10px;
   border: 2px solid rgba(255, 255, 255, 0.22);
   background: linear-gradient(180deg, #3b4a63 0%, #263245 100%);
@@ -3690,24 +3750,37 @@
 
 @media (max-width: 560px) {
   .battle-deck {
+    --battle-log-height: 62px;
+    --battle-act-row-height: 28px;
+    --battle-act-gap: 5px;
+    --battle-left-gap: 6px;
+    --battle-moves-height: 104px;
     padding: 7px 9px 8px;
     gap: 6px;
   }
   .battle-deck-left {
-    gap: 6px;
+    gap: var(--battle-left-gap);
   }
   .battle-log {
-    min-height: 40px;
-    padding: 7px 26px 7px 10px;
-    font-size: 0.8rem;
+    padding: 6px 24px 6px 10px;
+    font-size: 0.78rem;
+    line-height: 1.2;
+  }
+  .battle-log.is-long-text {
+    font-size: 0.72rem;
+    line-height: 1.15;
+  }
+  .battle-log.is-xlong-text {
+    font-size: 0.66rem;
+    line-height: 1.12;
   }
   .battle-moves {
     gap: 6px;
   }
   .move-btn,
   .move-card {
-    padding: 7px 8px;
-    gap: 4px;
+    padding: 6px 8px;
+    gap: 2px;
   }
   .move-btn-name {
     font-size: 0.78rem;

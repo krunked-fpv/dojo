@@ -32,11 +32,13 @@ import { BattleEngine } from './battle.js';
 import { StarlightMinigame } from './minigame.js';
 import {
   PokedexUI,
+  formatGameTextSafe,
   getBiomeScaledInfo,
   getPlayerProgressionSafe,
   getRecommendedFarmingZoneSafe,
   getTrainerAppearanceOptions,
   hasAnyReadyEvolutionSafe,
+  resolveTrainerDisplayNameSafe,
 } from './pokedex.js';
 
 function resolveValidSpeciesId(raw) {
@@ -247,6 +249,12 @@ class GameApp {
             : p.appearance;
           this.applyTrainerTheme(p.trainerId, look);
           drawTrainerPortrait(this.hudPortraitEl, p.trainerId, look);
+          if (this.hudTrainerNameEl) {
+            this.hudTrainerNameEl.textContent = this._resolveTrainerName(
+              { ...p, appearance: look || p.appearance },
+              p.trainerId,
+            );
+          }
         }
         this.overworld.syncFollower?.();
         if (this.overworld?.active) {
@@ -333,6 +341,26 @@ class GameApp {
     if (typeof document !== 'undefined' && document.activeElement instanceof HTMLElement) {
       document.activeElement.blur();
     }
+  }
+
+  _resolveTrainerName(profile = storage.getActiveProfile(), fallbackTrainerId = null) {
+    if (typeof Config.resolveTrainerDisplayName === 'function') {
+      return Config.resolveTrainerDisplayName(profile, fallbackTrainerId);
+    }
+    return resolveTrainerDisplayNameSafe(profile, fallbackTrainerId);
+  }
+
+  _formatText(template, extraContext = {}) {
+    const extra = extraContext && typeof extraContext === 'object' ? extraContext : {};
+    const profile = extra.profile ?? storage.getActiveProfile?.() ?? null;
+    const context = {
+      ...(profile ? { profile } : {}),
+      ...extra,
+    };
+    if (typeof Config.formatGameText === 'function') {
+      return Config.formatGameText(template, context);
+    }
+    return formatGameTextSafe(template, context);
   }
 
   startMainLoop() {
@@ -723,9 +751,10 @@ class GameApp {
 
     this.bindHoldReset(this.resetTrainerBtn, this.resetTrainerFill, () => {
       const id = storage.getActiveTrainerId();
+      const trainerName = this._resolveTrainerName(storage.getProfile?.(id) || { trainerId: id }, id);
       this.performHoldReset(
         () => storage.resetTrainerProgress(id),
-        `${TRAINERS[id]?.name || 'Trainer'}'s progress was reset cleanly!`,
+        `${trainerName}'s progress was reset cleanly!`,
       );
     });
 
@@ -753,7 +782,7 @@ class GameApp {
       this.hudArcadeBtn.classList.remove('is-depleted');
     }
     if (this.resetStatusEl) {
-      this.resetStatusEl.textContent = statusMessage;
+      this.resetStatusEl.textContent = this._formatText(statusMessage);
     }
     if (this.resetRedirectTimer) clearTimeout(this.resetRedirectTimer);
     this.resetRedirectTimer = setTimeout(() => {
@@ -992,6 +1021,8 @@ class GameApp {
       layer.appendChild(conf);
     }
 
+    const safeTitle = this._formatText(title || 'CELEBRATION!');
+    const safeSubtitle = subtitle ? this._formatText(subtitle) : '';
     const ribbon = document.createElement('div');
     ribbon.className = 'celebration-ribbon';
     const iconSpan = document.createElement('span');
@@ -1000,11 +1031,11 @@ class GameApp {
     const copy = document.createElement('div');
     copy.className = 'celebration-ribbon-copy';
     const titleEl = document.createElement('strong');
-    titleEl.textContent = title || 'CELEBRATION!';
+    titleEl.textContent = safeTitle || 'CELEBRATION!';
     copy.appendChild(titleEl);
-    if (subtitle) {
+    if (safeSubtitle) {
       const subEl = document.createElement('span');
-      subEl.textContent = subtitle;
+      subEl.textContent = safeSubtitle;
       copy.appendChild(subEl);
     }
     ribbon.appendChild(iconSpan);
@@ -1102,7 +1133,8 @@ class GameApp {
   }
 
   showStarterScreen(trainerId) {
-    const trainer = TRAINERS[trainerId];
+    const starterProfile = storage.getProfile?.(trainerId) || { trainerId };
+    const trainerName = this._resolveTrainerName(starterProfile, trainerId);
     this.bootScreenEl.hidden = true;
     this.starterScreenEl.hidden = false;
     this.gameShellEl.hidden = true;
@@ -1110,7 +1142,10 @@ class GameApp {
     this.updateCompassHud();
     this.syncWarpDock();
 
-    this.starterGreetingEl.textContent = `Welcome, ${trainer.name}! Choose your first partner Pokémon!`;
+    this.starterGreetingEl.textContent = this._formatText(
+      `Welcome, ${trainerName}! Choose your first partner Pokémon!`,
+      { profile: starterProfile, trainerId },
+    );
     this.renderStarterStyleBar(trainerId);
     this.starterCardsEl.innerHTML = '';
 
@@ -1333,7 +1368,7 @@ class GameApp {
 
     this.applyTrainerTheme(profile.trainerId, profile.appearance);
     drawTrainerPortrait(this.hudPortraitEl, profile.trainerId, profile.appearance);
-    this.hudTrainerNameEl.textContent = TRAINERS[profile.trainerId]?.name || 'Trainer';
+    this.hudTrainerNameEl.textContent = this._resolveTrainerName(profile, profile.trainerId);
     this.refreshHud();
 
     this.overworld.setActive(true);
@@ -1348,9 +1383,10 @@ class GameApp {
 
     if (isBrandNew) {
       const lead = profile.team[0];
-      const trainerName = TRAINERS[profile.trainerId]?.name || 'Trainer';
+      const trainerName = this._resolveTrainerName(profile, profile.trainerId);
       this.openDialogue(
-        `${trainerName} & ${lead?.displayName || lead?.name || 'Partner'} set out from Starlight Village! Follow the Starlight Compass across Whispering Forest, Crystal Cavern, Sapphire Lagoon, Ember Caldera, Starfall Peak, Celestial Grove, Sunstone Dunes, Glowspore Bayou, Astral Sky Citadel, Thundersteppe Canyon, Abyssal Pearl Trench, Chrono Relic Ruins, Mythic Starlight Rift, Pixie Faeveldt Glade, Sunburst Alola Atoll, Iron Crown Highlands, and Terastal Crystal Crater!`
+        `${trainerName} & ${lead?.displayName || lead?.name || 'Partner'} set out from Starlight Village! Follow the Starlight Compass across Whispering Forest, Crystal Cavern, Sapphire Lagoon, Ember Caldera, Starfall Peak, Celestial Grove, Sunstone Dunes, Glowspore Bayou, Astral Sky Citadel, Thundersteppe Canyon, Abyssal Pearl Trench, Chrono Relic Ruins, Mythic Starlight Rift, Pixie Faeveldt Glade, Sunburst Alola Atoll, Iron Crown Highlands, and Terastal Crystal Crater!`,
+        { profile, pokemon: lead },
       );
     }
   }
@@ -1364,7 +1400,7 @@ class GameApp {
     this.applyTrainerTheme(profile.trainerId, profile.appearance);
     drawTrainerPortrait(this.hudPortraitEl, profile.trainerId, profile.appearance);
     if (this.hudTrainerNameEl) {
-      this.hudTrainerNameEl.textContent = TRAINERS[profile.trainerId]?.name || 'Trainer';
+      this.hudTrainerNameEl.textContent = this._resolveTrainerName(profile, profile.trainerId);
     }
     if (this.hudPlayerLevelEl) {
       const prog = getPlayerProgressionSafe(profile, storage);
@@ -1858,7 +1894,7 @@ class GameApp {
       this.compassArrowEl.textContent = guidance?.icon || '🧭';
     }
     if (this.compassGoalEl) {
-      const goalTitle = guidance?.title || 'Explore Starlight Island';
+      const goalTitle = this._formatText(guidance?.title || 'Explore Starlight Island', { profile });
       this.compassGoalEl.textContent = `${dirLabel} • ${goalTitle}`;
     }
     if (this.compassSubEl) {
@@ -1903,7 +1939,7 @@ class GameApp {
     this.overworld.setPaused(paused);
   }
 
-  openDialogue(message) {
+  openDialogue(message, extraContext = {}) {
     if (this.interactPillEl) {
       this.interactPillEl.hidden = true;
       delete this.interactPillEl.dataset.readiness;
@@ -1917,9 +1953,7 @@ class GameApp {
     if (this.encounterBriefingOpen) {
       this.closeEncounterBriefing({ silent: true });
     }
-    const profile = storage.getActiveProfile();
-    const trainerName = TRAINERS[profile?.trainerId]?.name || 'Trainer';
-    const text = message.replaceAll('{trainer}', trainerName);
+    const text = this._formatText(message, extraContext);
     this._dialogueOpenedAtMs = typeof performance !== 'undefined' ? performance.now() : Date.now();
     this.worldDialogueTextEl.textContent = text;
     this.worldDialogueEl.hidden = false;
@@ -2053,13 +2087,18 @@ class GameApp {
         label: shrine.name,
       });
 
-      const opponentName = guardianSpecies?.name || 'Shrine Guardian';
+      const shrineName = this._formatText(shrine.name || '', { profile });
+      const opponentName = this._formatText(guardianSpecies?.name || 'Shrine Guardian', { profile });
+      const badgeName = badgeObj?.name ? this._formatText(badgeObj.name, { profile }) : null;
       return {
         type: 'shrine',
         target: { ...target, type: 'shrine', data: shrine },
         icon: '⛩️',
-        title: isAstralTrial ? `⛩️ ${shrine.name} — Trial #${trialNumber}` : `⛩️ ${shrine.name}`,
-        shortName: shrine.name || opponentName,
+        title: this._formatText(
+          isAstralTrial ? `⛩️ ${shrineName} — Trial #${trialNumber}` : `⛩️ ${shrineName}`,
+          { profile },
+        ),
+        shortName: shrineName || opponentName,
         opponentName,
         levelText: `Lv.${guardianLevel}`,
         minLv: guardianLevel,
@@ -2071,7 +2110,7 @@ class GameApp {
         isRematch: false,
         rematchNumber: null,
         isElite,
-        badgeName: badgeObj?.name || null,
+        badgeName,
         badgeIcon: badgeObj?.icon || '🏅',
         enemyTypes,
         enemyCount: 1,
@@ -2094,7 +2133,7 @@ class GameApp {
           needsHeal: readiness.needsHeal,
         },
         pivot: resolvePivot(readiness),
-        tip: readiness.tip,
+        tip: this._formatText(readiness.tip, { profile }),
       };
     }
 
@@ -2150,13 +2189,17 @@ class GameApp {
       label: rival.name,
     });
 
+    const rivalName = this._formatText(rival.name || 'Rival', { profile, rival, trainerData: rival });
     return {
       type: 'rival',
       target: { ...target, type: 'rival', data: rival },
       icon: '⚔️',
-      title: isRematch ? `⚔️ ${rival.name} — Rematch` : `⚔️ ${rival.name}`,
-      shortName: rival.name,
-      opponentName: rival.name,
+      title: this._formatText(
+        isRematch ? `⚔️ ${rivalName} — Rematch` : `⚔️ ${rivalName}`,
+        { profile, rival, trainerData: rival },
+      ),
+      shortName: rivalName,
+      opponentName: rivalName,
       levelText,
       minLv,
       maxLv,
@@ -2182,7 +2225,7 @@ class GameApp {
         needsHeal: readiness.needsHeal,
       },
       pivot: resolvePivot(readiness),
-      tip: readiness.tip,
+      tip: this._formatText(readiness.tip, { profile, rival, trainerData: rival }),
     };
   }
 
@@ -2418,14 +2461,16 @@ class GameApp {
     if (target.type === 'shrine' || target.type === 'rival') {
       const briefing = this.buildEncounterBriefingData(target);
       if (briefing?.readiness) {
-        this.interactPillEl.textContent = `${briefing.icon} ${briefing.shortName} • Lv.${briefing.targetLevel} ${briefing.readiness.icon}`;
+        this.interactPillEl.textContent = this._formatText(
+          `${briefing.icon} ${briefing.shortName} • Lv.${briefing.targetLevel} ${briefing.readiness.icon}`,
+        );
         this.interactPillEl.dataset.readiness = briefing.readiness.tier;
         this.interactPillEl.hidden = false;
         return;
       }
     }
     delete this.interactPillEl.dataset.readiness;
-    this.interactPillEl.textContent = target.label;
+    this.interactPillEl.textContent = this._formatText(target.label || '');
     this.interactPillEl.hidden = false;
   }
 
@@ -2480,10 +2525,14 @@ class GameApp {
     const profile = storage.getActiveProfile();
     const quests = Array.isArray(FIELD_QUESTS) ? FIELD_QUESTS : Object.values(FIELD_QUESTS || {});
     const quest = quests.find((q) => (npc.questId && q.id === npc.questId) || q.npcId === npc.id) || null;
+    const npcName = this._formatText(npc.name || 'Guide', { profile });
+    const greeting = this._formatText(npc.greeting || '', { profile });
 
     if (quest && profile) {
+      const questTitle = this._formatText(quest.title || '', { profile });
+      const completeDialogue = quest.completeDialogue ? this._formatText(quest.completeDialogue, { profile }) : '';
       if (profile.questsCompleted?.includes(quest.id)) {
-        this.openDialogue(`${npc.name}: "${quest.completeDialogue || npc.greeting}"`);
+        this.openDialogue(`${npcName}: "${completeDialogue || greeting}"`, { profile });
         this.refreshHud();
         return;
       }
@@ -2498,29 +2547,30 @@ class GameApp {
         this.overworld?.triggerCelebrationBurst?.(tx, ty, 'quest');
         this.overworld.refreshInteractHint();
         this.refreshHud();
-        const rewardText = this.formatRewardSummary(quest.rewards);
+        const rewardText = this._formatText(this.formatRewardSummary(quest.rewards), { profile });
         this.triggerCelebration({
           icon: '📜',
-          title: `QUEST COMPLETE: ${quest.title}!`,
+          title: `QUEST COMPLETE: ${questTitle}!`,
           subtitle: rewardText || 'Reward Earned!',
           tone: 'quest',
         });
         if (res?.newBadges?.length) {
           this.showBadgeToast(res.newBadges);
         }
-        const msg = quest.completeDialogue
-          ? `✨ Quest Complete (${quest.title})! ${npc.name}: "${quest.completeDialogue}"${rewardText ? ` [${rewardText}]` : ''}`
-          : `✨ Quest Complete: ${quest.title}!${rewardText ? ` Earned ${rewardText}!` : ''}`;
-        this.openDialogue(msg);
+        const msg = completeDialogue
+          ? `✨ Quest Complete (${questTitle})! ${npcName}: "${completeDialogue}"${rewardText ? ` [${rewardText}]` : ''}`
+          : `✨ Quest Complete: ${questTitle}!${rewardText ? ` Earned ${rewardText}!` : ''}`;
+        this.openDialogue(msg, { profile });
         return;
       }
-      const hint = typeof quest.progressText === 'function' ? quest.progressText(profile) : quest.description;
-      this.openDialogue(`${npc.name}: "${npc.greeting}" — Quest [${quest.title}]: ${hint}`);
+      const rawHint = typeof quest.progressText === 'function' ? quest.progressText(profile) : quest.description;
+      const hint = this._formatText(rawHint || '', { profile });
+      this.openDialogue(`${npcName}: "${greeting}" — Quest [${questTitle}]: ${hint}`, { profile });
       this.refreshHud();
       return;
     }
 
-    this.openDialogue(`${npc.name}: "${npc.greeting}"`);
+    this.openDialogue(`${npcName}: "${greeting}"`, { profile });
     this.refreshHud();
   }
 
@@ -2664,7 +2714,7 @@ class GameApp {
     const { tx, ty } = this._resolveTargetCoords(target, profile);
 
     if (target.type === 'sign') {
-      this.openDialogue(target.data);
+      this.openDialogue(this._formatText(target.data, { profile }), { profile });
     } else if (target.type === 'heal') {
       this.handleHealSpot(true);
     } else if (target.type === 'chest') {
@@ -2686,12 +2736,12 @@ class GameApp {
         this.triggerCelebration({
           icon: '💎',
           title: 'TREASURE FOUND!',
-          subtitle: this.formatRewardSummary(chest.rewards) || chest.label || 'Starlight Treasure!',
+          subtitle: this._formatText(this.formatRewardSummary(chest.rewards) || chest.label || 'Starlight Treasure!', { profile }),
           tone: 'gold',
         });
-        this.openDialogue(chest.message);
+        this.openDialogue(this._formatText(chest.message, { profile }), { profile });
       } else {
-        this.openDialogue('This treasure chest has already been opened!');
+        this.openDialogue('This treasure chest has already been opened!', { profile });
       }
     } else if (target.type === 'shrine') {
       this.openEncounterBriefing(target);
@@ -2741,9 +2791,9 @@ class GameApp {
     } else if (target.type === 'landmark') {
       const lm = target.data;
       if (typeof lm === 'string') {
-        this.openDialogue(lm);
+        this.openDialogue(this._formatText(lm, { profile }), { profile });
       } else if (lm) {
-        this.openDialogue(`${lm.icon || '🗿'} ${lm.name}: ${lm.description}`);
+        this.openDialogue(this._formatText(`${lm.icon || '🗿'} ${lm.name}: ${lm.description}`, { profile }), { profile });
       }
     }
   }
@@ -3098,10 +3148,11 @@ class GameApp {
         if (winRes?.newBadges?.length) {
           this.showBadgeToast(winRes.newBadges);
         }
-        const rewardText = this.formatRewardSummary(rewards);
-        const winText = (isRematch && rival.rematchWinText)
+        const rewardText = this._formatText(this.formatRewardSummary(rewards), { rival, trainerData: rival });
+        const rawWinText = (isRematch && rival.rematchWinText)
           ? rival.rematchWinText
           : (rival.winText || rival.defeatText || `${rival.name}: "What an awesome battle!"`);
+        const winText = this._formatText(rawWinText, { rival, trainerData: rival });
         pendingDialogue = rewardText
           ? `${winText} [Earned ${rewardText}!]`
           : winText;
@@ -3128,7 +3179,9 @@ class GameApp {
           subtitle: '+3 ✨ Star Shards • +1 🌟 Star Ball',
           tone: 'shrine',
         });
-        pendingDialogue = `⛩️ Astral Shrine Trial #${shrineData.trialNumber || 1} Victory! Earned +3 ✨ Star Shards & +1 🌟 Star Ball!`;
+        pendingDialogue = this._formatText(
+          `⛩️ Astral Shrine Trial #${shrineData.trialNumber || 1} Victory! Earned +3 ✨ Star Shards & +1 🌟 Star Ball!`,
+        );
       }
     }
 
@@ -3142,7 +3195,10 @@ class GameApp {
     this.syncOverworldPause();
 
     if (pendingDialogue) {
-      this.openDialogue(pendingDialogue);
+      const dialogueCtx = result?.isTrainer && result?.trainerData
+        ? { profile, rival: result.trainerData, trainerData: result.trainerData }
+        : { profile };
+      this.openDialogue(this._formatText(pendingDialogue, dialogueCtx), dialogueCtx);
     }
   }
 
@@ -3169,17 +3225,19 @@ class GameApp {
     this.badgeShowing = true;
     const badge = this.badgeQueue.shift();
     const remaining = this.badgeQueue.length;
+    const badgeName = this._formatText(badge.name || 'Badge');
+    const badgeDesc = this._formatText(badge.description || '');
     this.badgeToastIconEl.textContent = badge.icon;
-    this.badgeToastNameEl.textContent = badge.name;
+    this.badgeToastNameEl.textContent = badgeName;
     this.badgeToastDescEl.textContent = remaining > 0
-      ? `${badge.description} (${remaining} more queued)`
-      : badge.description;
+      ? `${badgeDesc} (${remaining} more queued)`
+      : badgeDesc;
     this.badgeToastEl.hidden = false;
     audio.playBadgeFanfare();
     this.triggerCelebration({
       icon: badge.icon || '🏅',
-      title: `BADGE UNLOCKED: ${badge.name}!`,
-      subtitle: badge.description,
+      title: `BADGE UNLOCKED: ${badgeName}!`,
+      subtitle: badgeDesc,
       tone: 'badge',
       durationMs: 2400,
     });
