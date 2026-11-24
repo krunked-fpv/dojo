@@ -2222,8 +2222,8 @@ export const RIVAL_TRAINERS = {
       accent: '#4ade80',
     },
     party: [
-      { speciesId: 17, level: 7 },
-      { speciesId: 44, level: 8 },
+      { speciesId: 16, level: 5 },
+      { speciesId: 43, level: 6 },
     ],
     rematchPool: [18, 45, 12, 26, 123, 154, 214, 389],
     rewards: { greatBalls: 2, potions: 2, gems: { leaf_gem: 1 } },

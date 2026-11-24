@@ -270,8 +270,11 @@ function parseFiniteMovePp(val) {
   return Number.isFinite(num) ? num : NaN;
 }
 
-function sanitizeMovePp(species, rawMovePp, rawPp, rawMoves) {
-  const pool = Array.isArray(species?.movePool) ? species.movePool : [];
+function sanitizeMovePp(species, rawMovePp, rawPp, rawMoves, overrideMoveIds = null) {
+  const speciesPool = Array.isArray(species?.movePool) ? species.movePool : [];
+  const pool = Array.isArray(overrideMoveIds) && overrideMoveIds.length > 0
+    ? [...new Set([...speciesPool, ...overrideMoveIds])]
+    : speciesPool;
   const movesByIdPp = new Map();
 
   if (Array.isArray(rawMoves)) {
@@ -335,6 +338,7 @@ export class Pokemon {
     movePp = null,
     pp = null,
     moves = null,
+    moveIds = null,
     isShiny = false,
     nickname = null,
     bond = 20,
@@ -361,6 +365,10 @@ export class Pokemon {
     this.encounterTrait = normalizeEncounterTrait(encounterTrait);
     const rawAbilityId = typeof abilityId === 'string' && ABILITIES?.[abilityId] ? abilityId : null;
     this._abilityId = rawAbilityId && rawAbilityId !== species.ability ? rawAbilityId : null;
+    const validMoveIds = Array.isArray(moveIds)
+      ? [...new Set(moveIds.filter((id) => typeof id === 'string' && Boolean(MOVES[id])))]
+      : [];
+    this.moves = validMoveIds.length > 0 ? validMoveIds : null;
 
     this.maxHp = 20;
     this.atk = 10;
@@ -370,7 +378,7 @@ export class Pokemon {
     this.recalculateStats();
 
     this.hp = normalizeHp(hp, this.maxHp);
-    this.movePp = sanitizeMovePp(this.species, movePp, pp, moves);
+    this.movePp = sanitizeMovePp(this.species, movePp, pp, moves, this.moves);
 
     this.resetBattleState();
   }
@@ -700,6 +708,7 @@ export class Pokemon {
 
     this.speciesId = targetId;
     this._abilityId = null;
+    this.moves = null;
     this.recalculateStats();
 
     if (Number.isFinite(Number(this.hp)) && Number(this.hp) > 0) {
@@ -777,6 +786,7 @@ export function createPokemon(speciesId, level = 5, biome = 'wild', options = {}
     isElite: Boolean(options?.isElite),
     encounterTrait: options?.encounterTrait ?? null,
     abilityId: options?.abilityId ?? null,
+    moveIds: Array.isArray(options?.moveIds) ? options.moveIds : null,
   });
 }
 
@@ -1814,25 +1824,29 @@ export function getScaledShrineGuard(shrine, profile = null) {
   const guardianId = Number(shrine?.guardianId) || 25;
   const maxLv = BALANCE.progression.maxLevel;
   const baseLevel = Math.max(1, Math.min(maxLv, Number(shrine?.level) || 7));
-  if (!profile) {
-    return { guardianId, level: baseLevel, upgradeTier: 0 };
-  }
-
-  const power = getTrainerPowerLevel(profile);
-  const badgesCount = Array.isArray(profile?.badges) ? profile.badges.length : 0;
-  const targetLevel = Math.round(power + BALANCE.scaling.shrineGuardMaxOffsetAbovePower);
-  const level = Math.max(baseLevel, Math.min(maxLv, targetLevel));
-
+  let level = baseLevel;
   let upgradeTier = 0;
-  if (level > baseLevel || badgesCount >= 4) {
-    const tierCap = Math.min(MAX_UPGRADE_TIER, BALANCE.scaling.shrineGuardMaxTier);
-    upgradeTier = Math.min(
-      tierCap,
-      Math.max(1, Math.floor(Math.max(0, level - baseLevel) / 8) + Math.floor(badgesCount / 6)),
-    );
+
+  if (profile) {
+    const power = getTrainerPowerLevel(profile);
+    const badgesCount = Array.isArray(profile?.badges) ? profile.badges.length : 0;
+    const targetLevel = Math.round(power + BALANCE.scaling.shrineGuardMaxOffsetAbovePower);
+    level = Math.max(baseLevel, Math.min(maxLv, targetLevel));
+
+    if (level > baseLevel || badgesCount >= 4) {
+      const tierCap = Math.min(MAX_UPGRADE_TIER, BALANCE.scaling.shrineGuardMaxTier);
+      upgradeTier = Math.min(
+        tierCap,
+        Math.max(1, Math.floor(Math.max(0, level - baseLevel) / 8) + Math.floor(badgesCount / 6)),
+      );
+    }
   }
 
-  return { guardianId, level, upgradeTier };
+  const result = { guardianId, level, upgradeTier };
+  if (shrine?.id === 'forest_shrine' && upgradeTier === 0 && level <= 6) {
+    result.moveIds = ['thunder_shock', 'quick_attack', 'spark_dash'];
+  }
+  return result;
 }
 
 const SHRINE_TRIAL_ROAMERS_BY_BIOME = {
