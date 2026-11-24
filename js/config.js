@@ -189,6 +189,196 @@ export function resolveTrainerLook(trainerId, appearance = null) {
   };
 }
 
+function hasOwnKey(obj, key) {
+  return Boolean(obj) && Object.prototype.hasOwnProperty.call(obj, key);
+}
+
+function cleanTextToken(raw) {
+  if (typeof raw === 'number') {
+    return Number.isFinite(raw) ? String(raw) : '';
+  }
+  if (typeof raw !== 'string') return '';
+  return raw
+    .replace(/\{[^}]*\}/g, '')
+    .replace(/[{}]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function resolveCanonicalTrainerName(rawId) {
+  if (typeof rawId !== 'string') return null;
+  const key = rawId.trim().toLowerCase();
+  if (!key || !hasOwnKey(TRAINERS, key)) return null;
+  return TRAINERS[key]?.name || null;
+}
+
+/**
+ * Normalize an optional Style Studio trainer nickname (max 18 chars, brace-free).
+ */
+export function normalizeTrainerNickname(raw) {
+  if (typeof raw !== 'string') return null;
+  const cleaned = raw
+    .replace(/\{[^}]*\}/g, '')
+    .replace(/[{}]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 18)
+    .trim();
+  return cleaned.length > 0 ? cleaned : null;
+}
+
+/**
+ * Resolve the trainer's display name with strict priority:
+ * custom Style Studio nickname -> canonical Violet/Ozias -> 'Trainer'.
+ */
+export function resolveTrainerDisplayName(profileOrContext = null, fallbackTrainerId = null) {
+  if (typeof profileOrContext === 'string') {
+    const canonicalFromStr = resolveCanonicalTrainerName(profileOrContext);
+    if (canonicalFromStr) return canonicalFromStr;
+    const cleanedStr = normalizeTrainerNickname(profileOrContext);
+    if (cleanedStr) {
+      return resolveCanonicalTrainerName(cleanedStr) || cleanedStr;
+    }
+    return resolveCanonicalTrainerName(fallbackTrainerId) || 'Trainer';
+  }
+
+  const isObj = Boolean(profileOrContext) && typeof profileOrContext === 'object' && !Array.isArray(profileOrContext);
+  const profileObj = (
+    isObj
+    && profileOrContext.profile
+    && typeof profileOrContext.profile === 'object'
+    && !Array.isArray(profileOrContext.profile)
+  )
+    ? profileOrContext.profile
+    : (isObj ? profileOrContext : null);
+
+  const candidates = [
+    profileObj?.appearance?.nickname,
+    profileObj?.appearance?.customName,
+    profileObj?.appearance?.trainerName,
+    profileObj?.nickname,
+    profileObj?.customName,
+    profileObj?.trainerNickname,
+    profileObj?.customTrainerName,
+    isObj ? profileOrContext.customNickname : undefined,
+    isObj ? profileOrContext.trainerName : undefined,
+    profileObj?.trainerName,
+  ];
+
+  for (const cand of candidates) {
+    const cleaned = normalizeTrainerNickname(cand);
+    if (!cleaned) continue;
+    return resolveCanonicalTrainerName(cleaned) || cleaned;
+  }
+
+  const trainerIds = [
+    profileObj?.trainerId,
+    isObj ? profileOrContext.trainerId : undefined,
+    fallbackTrainerId,
+  ];
+  for (const rawId of trainerIds) {
+    const canonical = resolveCanonicalTrainerName(rawId);
+    if (canonical) return canonical;
+  }
+
+  return 'Trainer';
+}
+
+/**
+ * Interpolate game text tokens ({trainerName}, {player}, {rival}, {pokemon}, {move}, etc.)
+ * and guarantee no raw {...} tokens or stray braces remain in output.
+ */
+export function formatGameText(template, context = null) {
+  if (template === null || template === undefined) return '';
+  const str = String(template);
+  if (!str.includes('{') && !str.includes('}')) return str;
+
+  const ctx = (context && typeof context === 'object' && !Array.isArray(context)) ? context : {};
+  const profile = ctx.profile
+    ?? ((ctx.trainerId || ctx.appearance || Array.isArray(ctx.team)) ? ctx : null);
+
+  const trainerName = resolveTrainerDisplayName(ctx, ctx.trainerId ?? profile?.trainerId ?? null);
+
+  const firstClean = (values, fallback) => {
+    for (const val of values) {
+      const cleaned = cleanTextToken(val);
+      if (cleaned) return cleaned;
+    }
+    return fallback;
+  };
+
+  const rivalName = firstClean([
+    ctx.rivalName,
+    ctx.rival?.name,
+    ctx.trainerData?.name,
+  ], 'Rival');
+
+  const pokemonName = firstClean([
+    ctx.pokemonName,
+    ctx.partnerName,
+    ctx.pokemon?.displayName,
+    ctx.pokemon?.name,
+    profile?.team?.[0]?.displayName,
+    profile?.team?.[0]?.name,
+  ], 'Partner');
+
+  const moveName = firstClean([
+    ctx.moveName,
+    ctx.move?.name,
+  ], 'Move');
+
+  const replaceToken = (_match, inner) => {
+    const rawKey = inner.trim();
+    const norm = rawKey.toLowerCase().replace(/[\s_-]+/g, '');
+    if (
+      norm === 'trainer'
+      || norm === 'trainername'
+      || norm === 'playername'
+      || norm === 'player'
+      || norm === 'customname'
+      || norm === 'nickname'
+      || norm === 'trainernickname'
+      || norm.startsWith('trainer')
+      || norm.startsWith('player')
+    ) {
+      return trainerName;
+    }
+    if (norm === 'name') {
+      return cleanTextToken(ctx.name) || trainerName;
+    }
+    if (norm === 'rival' || norm === 'rivalname') {
+      return rivalName;
+    }
+    if (norm === 'pokemon' || norm === 'pokemonname' || norm === 'partner' || norm === 'partnername') {
+      return pokemonName;
+    }
+    if (norm === 'move' || norm === 'movename') {
+      return moveName;
+    }
+    if (rawKey && hasOwnKey(ctx, rawKey)) {
+      const val = ctx[rawKey];
+      if (typeof val === 'number' && Number.isFinite(val)) {
+        return String(val);
+      }
+      if (typeof val === 'string' && !val.includes('{') && !val.includes('}')) {
+        const cleanedVal = cleanTextToken(val);
+        if (cleanedVal) return cleanedVal;
+      }
+    }
+    return cleanTextToken(inner) || trainerName;
+  };
+
+  let out = str;
+  for (let pass = 0; pass < 2; pass += 1) {
+    if (!out.includes('{')) break;
+    const next = out.replace(/\{([^{}]+)\}/g, replaceToken);
+    if (next === out) break;
+    out = next;
+  }
+
+  return out.replace(/[{}]/g, '');
+}
+
 export const TYPES = {
   grass: { id: 'grass', label: 'Grass', color: '#22c55e', bg: '#14532d', icon: '🌿' },
   fire: { id: 'fire', label: 'Fire', color: '#f97316', bg: '#7c2d12', icon: '🔥' },

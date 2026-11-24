@@ -17,9 +17,14 @@ import {
   WORLD_MAP,
   WORLD_ROWS,
   findNearestSafePosition,
+  formatGameText,
   isTileWalkableAt,
+  normalizeTrainerNickname,
+  resolveTrainerDisplayName,
 } from './config.js';
 import { Pokemon, createStarterPokemon, getBondTier, getPlayerProgression } from './pokemon.js';
+
+export { formatGameText, normalizeTrainerNickname, resolveTrainerDisplayName };
 
 export const STORAGE_KEY = 'starlight_pokemon_save_v1';
 export const MAX_CHEER_CHARGES = 3;
@@ -488,12 +493,24 @@ function hydrateAppearance(rawAppearance) {
   const accessory = rawAccessory && TRAINER_ACCESSORIES?.[rawAccessory] ? rawAccessory : 'cap';
   const rawAura = rawAppearance?.aura;
   const aura = rawAura && TRAINER_AURAS?.[rawAura] ? rawAura : 'none';
+  const nickname = normalizeTrainerNickname(
+    rawAppearance?.nickname ?? rawAppearance?.customName ?? rawAppearance?.trainerName,
+  );
   return {
     styleId,
     accessory,
     cape: Boolean(rawAppearance?.cape),
     aura,
+    ...(nickname ? { nickname } : {}),
   };
+}
+
+function clearLegacyProfileNicknames(profile) {
+  if (!isPlainObject(profile)) return;
+  delete profile.nickname;
+  delete profile.customName;
+  delete profile.trainerNickname;
+  delete profile.customTrainerName;
 }
 
 function hydrateStarShards(rawShards, fallback = 0) {
@@ -769,11 +786,20 @@ export function validateAndRepairProfile(raw, trainerIdFallback = null, report =
     ? [...rawPokedex.caught]
     : (isPlainObject(rawPokedex.caught) ? { ...rawPokedex.caught } : {});
 
+  const repairedAppearance = hydrateAppearance(raw.appearance);
+  if (!repairedAppearance.nickname) {
+    const legacyNickname = normalizeTrainerNickname(raw.nickname)
+      ?? normalizeTrainerNickname(raw.customName);
+    if (legacyNickname) {
+      repairedAppearance.nickname = legacyNickname;
+    }
+  }
+
   const repaired = {
     trainerId,
     starterId,
     pos: sanitizePosition(raw.pos),
-    appearance: hydrateAppearance(raw.appearance),
+    appearance: repairedAppearance,
     team,
     box,
     pokedex: {
@@ -797,6 +823,8 @@ export function validateAndRepairProfile(raw, trainerIdFallback = null, report =
   };
 
   Object.assign(raw, repaired);
+  delete raw.nickname;
+  delete raw.customName;
   repairProfileParty(raw);
   deduplicateTeamAndBoxUids(raw, report);
   syncProfilePokedex(raw);
@@ -1822,13 +1850,69 @@ export class StorageManager {
     const profile = this.getActiveProfile();
     if (!profile) return null;
     const current = hydrateAppearance(profile.appearance);
-    const patch = partial && typeof partial === 'object' ? partial : {};
-    profile.appearance = hydrateAppearance({
+    const patch = isPlainObject(partial) ? { ...partial } : {};
+    const hasNicknameKey = Object.prototype.hasOwnProperty.call(patch, 'nickname')
+      || Object.prototype.hasOwnProperty.call(patch, 'customName');
+
+    let nextNickname = current.nickname ?? null;
+    if (hasNicknameKey) {
+      const rawNick = Object.prototype.hasOwnProperty.call(patch, 'nickname') && patch.nickname !== undefined
+        ? patch.nickname
+        : patch.customName;
+      nextNickname = normalizeTrainerNickname(rawNick);
+      delete patch.nickname;
+      delete patch.customName;
+      clearLegacyProfileNicknames(profile);
+    }
+
+    const merged = {
       ...current,
       ...patch,
-    });
+    };
+    if (nextNickname) {
+      merged.nickname = nextNickname;
+    } else {
+      delete merged.nickname;
+    }
+
+    profile.appearance = hydrateAppearance(merged);
     this.save();
     return profile.appearance;
+  }
+
+  getTrainerDisplayName(profile = this.getActiveProfile()) {
+    const fallbackId = profile ? (this.state?.activeTrainerId ?? null) : null;
+    return resolveTrainerDisplayName(profile, fallbackId);
+  }
+
+  setTrainerNickname(nickname, trainerId = this.state?.activeTrainerId) {
+    const rawId = typeof trainerId === 'string' ? trainerId.trim().toLowerCase() : '';
+    const hasTrainer = Boolean(rawId) && Object.prototype.hasOwnProperty.call(TRAINERS, rawId);
+    const profile = hasTrainer ? this.getProfile(rawId) : null;
+    if (!profile) {
+      return resolveTrainerDisplayName(null, hasTrainer ? rawId : null);
+    }
+
+    const current = hydrateAppearance(profile.appearance);
+    const cleaned = normalizeTrainerNickname(nickname);
+    const baseAppearance = {
+      styleId: current.styleId,
+      accessory: current.accessory,
+      cape: current.cape,
+      aura: current.aura,
+    };
+    profile.appearance = hydrateAppearance(cleaned ? { ...baseAppearance, nickname: cleaned } : baseAppearance);
+    clearLegacyProfileNicknames(profile);
+    this.save();
+    return this.getTrainerDisplayName(profile);
+  }
+
+  formatText(template, extraContext = {}) {
+    const safeExtra = isPlainObject(extraContext) ? extraContext : {};
+    return formatGameText(template, {
+      profile: this.getActiveProfile(),
+      ...safeExtra,
+    });
   }
 
   setPokemonNickname(uid, nickname) {
